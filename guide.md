@@ -61,7 +61,8 @@ Set `VOICE_VIM_EDITOR` in your environment to use something other than
 
 Run `./install.sh` once. Hammerspoon needs Accessibility (System Settings >
 Privacy & Security) and, on first use, Automation permission to control
-Ghostty. Without Accessibility, submit closes the window but pastes nothing.
+Ghostty. Hammerspoon only checks Accessibility at launch, so quit and relaunch
+it after granting. Without it, submit shows an alert and pastes nothing.
 
 ## Troubleshoot
 
