@@ -6,12 +6,12 @@
 --
 -- Usage in ~/.hammerspoon/init.lua:
 --   local voicevim = require("voice-vim")
---   voicevim.start({ hotkey = { { "cmd", "alt" }, "v" } })
+--   voicevim.start({ hotkey = { { "alt" }, "v" } })
 
 local M = {}
 
 M.config = {
-  hotkey = { { "cmd", "alt" }, "v" },
+  hotkey = { { "alt" }, "v" },
   -- Repo root; set by install.sh via the symlinked module path, or override.
   root = nil,
   -- Copy the current selection into the buffer and replace it on submit.

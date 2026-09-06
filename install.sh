@@ -24,7 +24,7 @@ if ! grep -q 'require("voice-vim")' "$init"; then
 -- voice-vim: dictate into an ephemeral Neovim buffer, then paste back.
 require("hs.ipc") -- enables the \`hs\` CLI for reloading and debugging
 require("voice-vim").start({
-  hotkey = { { "cmd", "alt" }, "v" },
+  hotkey = { { "alt" }, "v" },
   autoStartFlow = false,
 })
 LUA
@@ -38,7 +38,7 @@ open -g -a Hammerspoon
 cat <<MSG
 
 voice-vim installed.
-  Hotkey:   cmd+alt+v (edit ~/.hammerspoon/init.lua to change)
+  Hotkey:   option+v (edit ~/.hammerspoon/init.lua to change)
   Module:   $hsdir/voice-vim.lua -> $root/hammerspoon/voice-vim.lua
 
 First run: Hammerspoon needs Accessibility permission

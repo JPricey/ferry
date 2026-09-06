@@ -6,7 +6,7 @@ typing in. See `motivations.md` for the why.
 
 ## How it works
 
-1. Press the hotkey (default `cmd+alt+v`) in any app. Any selected text is
+1. Press the hotkey (default `option+v`) in any app. Any selected text is
    copied into the buffer and will be replaced on submit.
 2. A Ghostty window opens running Neovim in insert mode.
 3. Dictate with your normal Flow shortcut (or set `autoStartFlow = true` to
@@ -52,7 +52,7 @@ Edit the block in `~/.hammerspoon/init.lua`:
 
 ```lua
 require("voice-vim").start({
-  hotkey = { { "cmd", "alt" }, "v" },
+  hotkey = { { "alt" }, "v" },
   captureSelection = true,   -- copy selection into the buffer first
   autoStartFlow = false,     -- fire wispr-flow://start-hands-free on open
   terminal = "ghostty",      -- or "iTerm2"
