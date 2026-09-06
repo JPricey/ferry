@@ -25,7 +25,8 @@ without leaving Neovim. Use it to add more text after editing.
 
 ## Submit
 
-`ZZ` or `:Submit` writes the buffer, closes the window, and pastes the text
+`ZZ`, `Ctrl-X` in normal mode, or `:Submit` writes the buffer, closes the
+window, and pastes the text
 into the target app at the cursor, replacing any selection. Your clipboard is
 restored afterwards.
 
@@ -35,7 +36,6 @@ restored afterwards.
 the buffer empty or unchanged from its starting text also cancels.
 
 ## Edit the buffer
-
 It is a normal Neovim buffer with your config, plus markdown filetype, soft
 wrap, spell check on, and no swap or undo files. Nothing is saved anywhere
 after the session ends.

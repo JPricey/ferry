@@ -11,7 +11,8 @@ typing in. See `motivations.md` for the why.
 2. A Ghostty window opens running Neovim in insert mode.
 3. Dictate with your normal Flow shortcut (or set `autoStartFlow = true` to
    start a hands-free session automatically). Flow pastes into the buffer.
-4. Edit. `ZZ` (or `:Submit`) pastes the text back into the original app.
+4. Edit. `ZZ` or `Ctrl-X` (or `:Submit`) pastes the text back into the
+   original app.
    `ZQ` (or `:Cancel`) throws it away. Quitting with the buffer unchanged
    also cancels.
 

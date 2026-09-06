@@ -17,10 +17,11 @@ setlocal formatoptions-=t
 command! -buffer Submit write | quit
 command! -buffer Cancel cquit
 nnoremap <buffer> <silent> ZZ :Submit<CR>
+nnoremap <buffer> <silent> <C-x> :Submit<CR>
 nnoremap <buffer> <silent> ZQ :Cancel<CR>
 
 " Start a Flow hands-free dictation from inside the buffer.
 command! -buffer Dictate call system('open -g wispr-flow://start-hands-free')
 nnoremap <buffer> <silent> <leader>d :Dictate<CR>
 
-echo "voice-vim: dictate, edit, then ZZ to submit or ZQ to cancel"
+echo "voice-vim: dictate, edit, then ZZ or Ctrl-X to submit, ZQ to cancel"
