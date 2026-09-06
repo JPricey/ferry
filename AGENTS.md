@@ -9,7 +9,8 @@ practical context an agent needs to work on the code.
 ## Status
 
 V0 implemented, not yet exercised end to end with a real dictation. Layout
-and usage are in `README.md`. Run `bash tests/test-session.sh` after touching
+is in `README.md`. User-facing usage is in `guide.md`. Future brainstorming
+is in `planning.md`. Run `bash tests/test-session.sh` after touching
 `bin/voice-vim-session`. Hammerspoon is installed and the module is linked
 into `~/.hammerspoon/`; Accessibility permission must be granted manually.
 
@@ -107,3 +108,7 @@ the personal dictionary, or by mirroring edits into Flow's `History` rows.
   contains tokens; do not copy it into this project.
 - Update `motivations.md` when goals change and this file when the
   architecture or integration facts change.
+- `guide.md` is the user-facing feature reference. Whenever a feature is
+  added, changed, or removed, update its entry there in the same change.
+  Keep entries to two or three sentences and never list features that do
+  not exist yet.
