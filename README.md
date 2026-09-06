@@ -16,7 +16,10 @@ typing in. See `motivations.md` for the why.
    `ZQ` (or `:Cancel`) throws it away. Quitting with the buffer unchanged
    also cancels.
 
-Nothing is saved. The temp file is deleted after submit or cancel.
+Every session is recorded in a local SQLite database, and a history sidebar
+opens on the left of each session so past dictations can be inserted,
+re-submitted, copied, or deleted. The temp file itself is deleted after
+submit or cancel.
 
 ## Install
 
@@ -71,8 +74,13 @@ to change it. Buffer-local settings live in `vim/voice-vim.vim`.
 - `bin/voice-vim-session` — runs inside the terminal: opens the editor,
   decides submit vs cancel, calls back, closes its window.
 - `bin/voice-vim-paste` — osascript fallback paste when Hammerspoon is down.
-- `vim/voice-vim.vim` — buffer settings and the `ZZ` / `ZQ` mappings.
+- `vim/voice-vim.vim` — buffer settings, submit/cancel mappings, sidebar
+  wiring.
+- `lua/voice-vim/history.lua` — the history sidebar (Neovim only).
+- `bin/voice-vim-db` — owns the SQLite history database (start, finish,
+  list, get, delete).
 - `tests/test-session.sh` — decision-logic tests for the session script.
+- `tests/test-history.sh` — database helper, recording, and sidebar tests.
 
 ## Notes
 

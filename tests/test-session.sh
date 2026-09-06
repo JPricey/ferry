@@ -2,6 +2,7 @@
 # Exercise bin/voice-vim-session's submit/cancel decision with fake editors.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+export VOICE_VIM_DB=$(mktemp -t vv-test-db).sqlite VOICE_VIM_SIDEBAR=0
 fail=0
 run() { # name expected editor-body seed
   local name=$1 want=$2 body=$3 seed=$4

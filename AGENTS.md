@@ -8,10 +8,11 @@ practical context an agent needs to work on the code.
 
 ## Status
 
-V0 implemented, not yet exercised end to end with a real dictation. Layout
-is in `README.md`. User-facing usage is in `guide.md`. Future brainstorming
-is in `planning.md`. Run `bash tests/test-session.sh` after touching
-`bin/voice-vim-session`. Hammerspoon is installed and the module is linked
+V0 works end to end. History (V2 in `planning.md`) has landed: sessions are
+recorded to SQLite and a Neovim sidebar lists them. Layout is in `README.md`. User-facing usage is in `guide.md`. Future brainstorming
+is in `planning.md`. Run `bash tests/test-session.sh` and
+`bash tests/test-history.sh` after touching the session script, the database
+helper, or the sidebar. Hammerspoon is installed and the module is linked
 into `~/.hammerspoon/`; Accessibility permission must be granted manually.
 
 ## Owner and environment
@@ -98,6 +99,14 @@ the personal dictionary, or by mirroring edits into Flow's `History` rows.
    the file, puts it on the clipboard, activates the target, sends Cmd+V,
    restores the clipboard, deletes the file. Under iTerm2 only, the script
    also closes its own session by `ITERM_SESSION_ID`.
+6. History: the session script calls `bin/voice-vim-db start` before the
+   editor and `finish` after, recording target, seed, final text, and
+   outcome in `~/Library/Application Support/voice-vim/history.sqlite`.
+   Empty cancels are dropped. `lua/voice-vim/history.lua` renders the
+   sidebar by shelling out to `voice-vim-db list` (JSON). The vim file adds
+   the repo to `runtimepath` so `require("voice-vim.history")` resolves, and
+   a `QuitPre` autocmd closes the sidebar so quitting the dictation buffer
+   still ends the session.
 
 ## Conventions
 

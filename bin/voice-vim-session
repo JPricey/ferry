@@ -28,6 +28,11 @@ editor=${VOICE_VIM_EDITOR:-nvim}
 seed=$(mktemp -t voice-vim-seed)
 cp "$file" "$seed"
 
+# History: every session is recorded in a SQLite database (see
+# bin/voice-vim-db). VOICE_VIM_HISTORY=0 disables recording.
+export VOICE_VIM_SESSION_ID=${VOICE_VIM_SESSION_ID:-$(uuidgen | tr 'A-Z' 'a-z')}
+"$here/voice-vim-db" start "$VOICE_VIM_SESSION_ID" "$target" "$seed" || true
+
 cleanup() { rm -f "$seed"; }
 trap cleanup EXIT
 
@@ -54,6 +59,10 @@ decide() {
 
 outcome=$(decide)
 echo "voice-vim: $outcome"
+case $outcome in
+  submit) "$here/voice-vim-db" finish "$VOICE_VIM_SESSION_ID" submitted "$file" || true ;;
+  *)      "$here/voice-vim-db" finish "$VOICE_VIM_SESSION_ID" cancelled "$file" || true ;;
+esac
 
 if [ "${VOICE_VIM_DRY_RUN:-0}" = "1" ]; then
   exit 0
