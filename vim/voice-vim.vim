@@ -18,6 +18,7 @@ command! -buffer Submit write | quit
 command! -buffer Cancel cquit
 nnoremap <buffer> <silent> ZZ :Submit<CR>
 nnoremap <buffer> <silent> <C-x> :Submit<CR>
+inoremap <buffer> <silent> <C-x> <Esc>:Submit<CR>
 nnoremap <buffer> <silent> ZQ :Cancel<CR>
 
 " Start a Flow hands-free dictation from inside the buffer.
