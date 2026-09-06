@@ -8,8 +8,10 @@ practical context an agent needs to work on the code.
 
 ## Status
 
-Greenfield. No code yet. V0 scope is in `motivations.md` under
-"Short-term goals".
+V0 implemented, not yet exercised end to end with a real dictation. Layout
+and usage are in `README.md`. Run `bash tests/test-session.sh` after touching
+`bin/voice-vim-session`. Hammerspoon is installed and the module is linked
+into `~/.hammerspoon/`; Accessibility permission must be granted manually.
 
 ## Owner and environment
 
@@ -17,10 +19,10 @@ Greenfield. No code yet. V0 scope is in `motivations.md` under
   `/opt/homebrew/bin/nvim`, and Vim at `/usr/bin/vim`.
 - Wispr Flow is installed at `/Applications/Wispr Flow.app`
   (Electron, bundle id `com.electron.wispr-flow`).
-- No hotkey daemon is installed yet (no Hammerspoon, skhd, Karabiner,
-  Raycast, or Alfred). Picking one is an open V0 decision; Hammerspoon is the
-  leading candidate because it can bind hotkeys, read the frontmost app and
-  selection, launch a terminal, and drive paste from one Lua script.
+- Hammerspoon is the hotkey daemon (installed via Homebrew by
+  `install.sh`). It binds the hotkey, reads the frontmost app and selection,
+  launches iTerm2, and pastes the result back. No other hotkey tools are
+  installed.
 
 ## How Wispr Flow can be integrated (research, Sept 2026)
 
@@ -73,18 +75,22 @@ Vim buffer, Flow cannot observe the edit, so it learns nothing from
 corrections made here. A future feature could feed corrections back through
 the personal dictionary, or by mirroring edits into Flow's `History` rows.
 
-## Proposed V0 shape
+## V0 shape (as built)
 
-1. Hotkey handler records the frontmost app and window and grabs the current
-   selection (Cmd+C into a saved clipboard, or via Accessibility).
-2. It creates a temp file, seeds it with the selection if any, and opens a
-   terminal window running `nvim +startinsert <tmpfile>`.
-3. Once the terminal is focused it fires `wispr-flow://start-hands-free`
-   (or the user presses their Flow key).
+1. `hammerspoon/voice-vim.lua` hotkey handler records the frontmost app's
+   bundle id and grabs the selection with Cmd+C (clipboard restored after).
+2. It writes the selection to a temp file and opens an iTerm2 window running
+   `bin/voice-vim-session <file> <bundle-id>`.
+3. The session script opens `nvim` with `vim/voice-vim.vim` sourced, in
+   insert mode. With `VOICE_VIM_AUTOSTART_FLOW=1` it also fires
+   `wispr-flow://start-hands-free`.
 4. Flow pastes the dictation into the buffer. The user edits.
-5. `:wq` submits: the handler reads the file, refocuses the original app,
-   pastes the text with Cmd+V, restores the previous clipboard, deletes the
-   temp file. `:q!` or an empty file cancels and leaves the target untouched.
+5. On editor exit the script decides: non-zero exit, empty, whitespace-only,
+   or unchanged from seed means cancel; anything else means submit. Submit
+   calls `hammerspoon://voicevim-submit?file=&target=`; Hammerspoon reads
+   the file, puts it on the clipboard, activates the target, sends Cmd+V,
+   restores the clipboard, deletes the file. The script then closes its own
+   iTerm2 session by `ITERM_SESSION_ID`.
 
 ## Conventions
 

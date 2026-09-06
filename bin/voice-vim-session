@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# voice-vim-session: runs inside the terminal window that voice-vim opens.
+#
+# Usage: voice-vim-session <tmpfile> <target-bundle-id>
+#
+# Opens the editor on <tmpfile> in insert mode, waits for it to exit, then
+# decides whether to submit or cancel:
+#   - editor exit code != 0 (e.g. :cq)            -> cancel
+#   - file unchanged from its seed, or empty       -> cancel
+#   - otherwise                                    -> submit
+# VOICE_VIM_DRY_RUN=1 prints the decision and exits without submitting.
+# Submit hands the file back to Hammerspoon via a hammerspoon:// URL, which
+# pastes it into the target app. If Hammerspoon is not running, falls back to
+# osascript (requires Accessibility for the terminal).
+set -u
+
+file=${1:?tmpfile required}
+target=${2:-}
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+root=$(dirname "$here")
+
+editor=${VOICE_VIM_EDITOR:-nvim}
+seed=$(mktemp -t voice-vim-seed)
+cp "$file" "$seed"
+
+cleanup() { rm -f "$seed"; }
+trap cleanup EXIT
+
+start_flow() {
+  # Give the editor a beat to be focused and in insert mode, then start a
+  # hands-free Flow session. Off by default until the user opts in.
+  if [ "${VOICE_VIM_AUTOSTART_FLOW:-0}" = "1" ]; then
+    (sleep 0.4; open -g "wispr-flow://start-hands-free") &
+  fi
+}
+
+start_flow
+"$editor" -c "source $root/vim/voice-vim.vim" -c startinsert -- "$file"
+status=$?
+
+decide() {
+  if [ "$status" -ne 0 ]; then echo cancel; return; fi
+  if [ ! -s "$file" ]; then echo cancel; return; fi
+  if cmp -s "$file" "$seed"; then echo cancel; return; fi
+  # Whitespace-only is a cancel too.
+  if ! grep -q '[^[:space:]]' "$file"; then echo cancel; return; fi
+  echo submit
+}
+
+outcome=$(decide)
+echo "voice-vim: $outcome"
+
+if [ "${VOICE_VIM_DRY_RUN:-0}" = "1" ]; then
+  exit 0
+fi
+
+if [ "$outcome" = submit ]; then
+  # URL-encode the path and bundle id for the callback.
+  enc() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$1"; }
+  if pgrep -xq Hammerspoon; then
+    open -g "hammerspoon://voicevim-submit?file=$(enc "$file")&target=$(enc "$target")"
+  else
+    "$here/voice-vim-paste" "$file" "$target"
+    rm -f "$file"
+  fi
+else
+  rm -f "$file"
+fi
+
+# Close this iTerm2 window if we own one.
+if [ -n "${ITERM_SESSION_ID:-}" ]; then
+  sid=${ITERM_SESSION_ID#*:}
+  osascript - "$sid" <<'APPLESCRIPT' >/dev/null 2>&1 &
+on run argv
+  set sid to item 1 of argv
+  tell application "iTerm2"
+    repeat with w in windows
+      repeat with t in tabs of w
+        repeat with s in sessions of t
+          if (unique id of s) is sid then
+            close s
+            return
+          end if
+        end repeat
+      end repeat
+    end repeat
+  end tell
+end run
+APPLESCRIPT
+fi

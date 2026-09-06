@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# voice-vim-paste: fallback paste path when Hammerspoon is not running.
+# Usage: voice-vim-paste <file> <target-bundle-id>
+# Puts the file on the clipboard, activates the target app, sends Cmd+V,
+# then restores the previous clipboard. Needs Accessibility for the caller.
+set -u
+file=${1:?file required}
+target=${2:-}
+
+saved=$(pbpaste 2>/dev/null || true)
+pbcopy < "$file"
+if [ -n "$target" ]; then
+  osascript -e "tell application id \"$target\" to activate" >/dev/null 2>&1
+  sleep 0.3
+fi
+osascript -e 'tell application "System Events" to keystroke "v" using command down'
+sleep 0.3
+printf '%s' "$saved" | pbcopy
