@@ -137,12 +137,21 @@ function M.submit(params)
   os.remove(file)
   -- Drop a single trailing newline that :w always adds.
   text = text:gsub("\n$", "")
+  log.i("submit target=" .. target .. " bytes=" .. #text)
   if text == "" then return end
+
+  if not hs.accessibilityState() then
+    log.e("submit: Hammerspoon lacks Accessibility; cannot paste")
+    hs.alert.show("voice-vim: grant Hammerspoon Accessibility to paste")
+    hs.accessibilityState(true)
+    return
+  end
 
   local saved = hs.pasteboard.getContents()
   hs.pasteboard.setContents(text)
 
   local app = target ~= "" and hs.application.get(target) or nil
+  log.i("submit app=" .. (app and app:name() or "nil") .. " activating and pasting")
   if app then app:activate() end
 
   hs.timer.doAfter(M.config.activateDelay, function()
