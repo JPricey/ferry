@@ -15,13 +15,14 @@ into `~/.hammerspoon/`; Accessibility permission must be granted manually.
 
 ## Owner and environment
 
-- Owner: Joe Price. Daily driver is macOS with iTerm2, Neovim at
+- Owner: Joe Price. Daily driver is macOS with Ghostty 1.3 (iTerm2 also
+  installed), Neovim at
   `/opt/homebrew/bin/nvim`, and Vim at `/usr/bin/vim`.
 - Wispr Flow is installed at `/Applications/Wispr Flow.app`
   (Electron, bundle id `com.electron.wispr-flow`).
 - Hammerspoon is the hotkey daemon (installed via Homebrew by
   `install.sh`). It binds the hotkey, reads the frontmost app and selection,
-  launches iTerm2, and pastes the result back. No other hotkey tools are
+  launches Ghostty, and pastes the result back. No other hotkey tools are
   installed.
 
 ## How Wispr Flow can be integrated (research, Sept 2026)
@@ -79,18 +80,23 @@ the personal dictionary, or by mirroring edits into Flow's `History` rows.
 
 1. `hammerspoon/voice-vim.lua` hotkey handler records the frontmost app's
    bundle id and grabs the selection with Cmd+C (clipboard restored after).
-2. It writes the selection to a temp file and opens an iTerm2 window running
-   `bin/voice-vim-session <file> <bundle-id>`.
-3. The session script opens `nvim` with `vim/voice-vim.vim` sourced, in
-   insert mode. With `VOICE_VIM_AUTOSTART_FLOW=1` it also fires
+2. It writes the selection to a temp file and opens a Ghostty window running
+   `bin/voice-vim-session <file> <bundle-id>`, via Ghostty's AppleScript
+   `new window with configuration {command:...}`. Ghostty closes the window
+   when the command exits. iTerm2 remains available with
+   `terminal = "iTerm2"`. Do not use `open -na Ghostty.app --args -e`: it
+   starts a second Ghostty instance per session that never quits.
+3. The session script prepends Homebrew and `~/.local/bin` to PATH (the
+   Ghostty command runs with a bare launchd environment), then opens `nvim`
+   with `vim/voice-vim.vim` sourced, in insert mode. With `VOICE_VIM_AUTOSTART_FLOW=1` it also fires
    `wispr-flow://start-hands-free`.
 4. Flow pastes the dictation into the buffer. The user edits.
 5. On editor exit the script decides: non-zero exit, empty, whitespace-only,
    or unchanged from seed means cancel; anything else means submit. Submit
    calls `hammerspoon://voicevim-submit?file=&target=`; Hammerspoon reads
    the file, puts it on the clipboard, activates the target, sends Cmd+V,
-   restores the clipboard, deletes the file. The script then closes its own
-   iTerm2 session by `ITERM_SESSION_ID`.
+   restores the clipboard, deletes the file. Under iTerm2 only, the script
+   also closes its own session by `ITERM_SESSION_ID`.
 
 ## Conventions
 

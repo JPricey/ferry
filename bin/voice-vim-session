@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# voice-vim-session: runs inside the terminal window that voice-vim opens.
+# voice-vim-session: runs inside the terminal window (Ghostty by default)
+# that voice-vim opens.
 #
 # Usage: voice-vim-session <tmpfile> <target-bundle-id>
 #
@@ -13,6 +14,10 @@
 # pastes it into the target app. If Hammerspoon is not running, falls back to
 # osascript (requires Accessibility for the terminal).
 set -u
+
+# Launched from Hammerspoon (via Ghostty -e) we inherit a bare launchd PATH,
+# so make sure Homebrew and user bins are reachable for nvim, python3, etc.
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$HOME/.local/bin:/usr/local/bin:$PATH"
 
 file=${1:?tmpfile required}
 target=${2:-}
@@ -67,8 +72,8 @@ else
   rm -f "$file"
 fi
 
-# Close this iTerm2 window if we own one.
-if [ -n "${ITERM_SESSION_ID:-}" ]; then
+# Ghostty closes its window when the command exits. iTerm2 needs a nudge.
+if [ "${TERM_PROGRAM:-}" = "iTerm.app" ] && [ -n "${ITERM_SESSION_ID:-}" ]; then
   sid=${ITERM_SESSION_ID#*:}
   osascript - "$sid" <<'APPLESCRIPT' >/dev/null 2>&1 &
 on run argv

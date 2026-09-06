@@ -1,6 +1,6 @@
 -- voice-vim: Hammerspoon module.
 --
--- Hotkey -> capture frontmost app and selection -> open an iTerm2 window
+-- Hotkey -> capture frontmost app and selection -> open a Ghostty window
 -- running Neovim on a temp file -> (shell wrapper runs the editor) ->
 -- hammerspoon://voicevim-submit callback -> paste result into the target app.
 --
@@ -18,8 +18,10 @@ M.config = {
   captureSelection = true,
   -- Start a Flow hands-free dictation as soon as the editor opens.
   autoStartFlow = false,
-  -- Terminal to open the editor in. Only iTerm2 is implemented.
-  terminal = "iTerm2",
+  -- Terminal to open the editor in: "ghostty" (default) or "iTerm2".
+  terminal = "ghostty",
+  -- Window title for the Ghostty session window.
+  windowTitle = "voice-vim",
   -- Seconds to wait for the target app to come back to front before pasting.
   activateDelay = 0.25,
 }
@@ -58,19 +60,48 @@ local function grabSelection(app)
   return sel
 end
 
-local function openTerminal(cmd)
-  if M.config.terminal ~= "iTerm2" then
-    hs.alert.show("voice-vim: only iTerm2 is supported right now")
+-- Build a single shell command line from argv.
+local function shjoin(argv)
+  local parts = {}
+  for _, a in ipairs(argv) do parts[#parts + 1] = shquote(a) end
+  return table.concat(parts, " ")
+end
+
+-- Launch a terminal window running argv (a list of strings).
+local function openTerminal(argv)
+  local term = M.config.terminal
+  local cmdline = shjoin(argv)
+  local script
+  if term == "ghostty" then
+    -- Ghostty 1.3+ exposes an AppleScript dictionary. `new window with
+    -- configuration` runs our command in a fresh window of the already
+    -- running instance and closes the window when the command exits.
+    -- (The `open -na Ghostty.app --args -e` route spawns a second app
+    -- instance per session and leaves it running; avoid it.)
+    -- Hammerspoon needs Automation permission for Ghostty the first time.
+    script = string.format([[
+      tell application "Ghostty"
+        set cfg to {command:%s, wait after command:false}
+        set w to new window with configuration cfg
+        activate window w
+      end tell
+    ]], string.format("%q", cmdline))
+  elseif term == "iTerm2" then
+    script = string.format([[
+      tell application "iTerm2"
+        activate
+        create window with default profile command %s
+      end tell
+    ]], string.format("%q", cmdline))
+  else
+    hs.alert.show("voice-vim: unknown terminal " .. tostring(term))
     return false
   end
-  local script = string.format([[
-    tell application "iTerm2"
-      activate
-      create window with default profile command %s
-    end tell
-  ]], string.format("%q", cmd))
   local ok, _, err = hs.osascript.applescript(script)
-  if not ok then log.e("iTerm2 launch failed: " .. hs.inspect(err)) end
+  if not ok then
+    log.e(term .. " launch failed: " .. hs.inspect(err))
+    hs.alert.show("voice-vim: could not open " .. term)
+  end
   return ok
 end
 
@@ -87,10 +118,13 @@ function M.begin()
   f:close()
 
   local session = repoRoot() .. "/bin/voice-vim-session"
-  local env = M.config.autoStartFlow and "VOICE_VIM_AUTOSTART_FLOW=1 " or ""
-  local cmd = "/usr/bin/env " .. env .. shquote(session) .. " " .. shquote(file) .. " " .. shquote(target)
+  local argv = { "/usr/bin/env" }
+  if M.config.autoStartFlow then argv[#argv + 1] = "VOICE_VIM_AUTOSTART_FLOW=1" end
+  argv[#argv + 1] = session
+  argv[#argv + 1] = file
+  argv[#argv + 1] = target
   log.i("target=" .. target .. " file=" .. file)
-  openTerminal(cmd)
+  openTerminal(argv)
 end
 
 -- Callback from bin/voice-vim-session: hammerspoon://voicevim-submit?file=&target=
