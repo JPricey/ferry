@@ -43,6 +43,10 @@ do
   check("hotkey object kept", b.obj, M.hotkeyObj)
   check("no bind error logged", false, rec:hasLog("e", "failed to bind"))
   check("bound line logged", true, rec:hasLog("i", "bound " .. table.concat(M.config.hotkey[1], "+")))
+  check("default mods are ctrl+alt", "ctrl+alt", table.concat(b.mods, "+"))
+  check("default key is v", "v", b.key)
+  check("default: no Option-only warning", false, rec:hasLog("w", "Option-only"))
+  check("default: bound ctrl+alt+v logged", true, rec:hasLog("i", "bound ctrl+alt+v"))
 end
 
 -- Explicit config: mods passed through, no Option-only warning.

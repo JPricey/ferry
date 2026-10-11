@@ -5,7 +5,7 @@ features land; anything not listed here does not exist yet.
 
 ## Start a session
 
-Press **Option+V** in any app. A Ghostty window opens with Neovim in insert
+Press **Ctrl+Option+V** in any app. A Ghostty window opens with Neovim in insert
 mode, ready for dictation. The window you were in (not just its app) becomes
 the paste target.
 
@@ -15,6 +15,13 @@ Opening `hammerspoon://voicevim-start` starts a session the same way, for
 example `open -g hammerspoon://voicevim-start` from a shell, Karabiner or a
 launcher. If the hotkey fails to bind, Hammerspoon shows an alert and logs
 `failed to bind` in its console; an Option-only hotkey logs a warning.
+
+## Move off Option+V
+
+Older installs set `hotkey = { { "alt" }, "v" }` in `~/.hammerspoon/init.lua`.
+`bin/voice-vim-migrate-init` removes that one line (after copying the file to
+`init.lua.bak`) so the Ctrl+Option+V default applies; a custom hotkey line is
+left alone. Reload Hammerspoon afterwards.
 
 ## Optional Hyper key
 
@@ -77,7 +84,7 @@ Hammerspoon menu bar icon:
 
 ```lua
 require("voice-vim").start({
-  hotkey = { { "alt" }, "v" },  -- the trigger
+  hotkey = { { "ctrl", "alt" }, "v" },  -- the trigger (default)
   captureSelection = true,      -- seed the buffer with the selection
   autoStartFlow = false,        -- start Flow hands-free on open
   terminal = "ghostty",         -- or "iTerm2"

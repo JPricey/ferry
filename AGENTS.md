@@ -34,10 +34,11 @@ Layout is in `README.md`. User-facing usage is in `guide.md`. Run
 `bash tests/test-session.sh` and `bash tests/test-history.sh` after touching
 the session script, the database helper, or the sidebar, and
 `bash tests/test-delivery.sh` and `bash tests/test-hammerspoon.sh` after
-touching `lua/voice-vim/delivery.lua` or the Hammerspoon module. Hammerspoon is
-installed and the module is linked into `~/.hammerspoon/`; Accessibility
-permission must be granted manually, and Hammerspoon must be relaunched
-after granting it.
+touching `lua/voice-vim/delivery.lua` or the Hammerspoon module, and
+`bash tests/test-migrate.sh` after touching `bin/voice-vim-migrate-init`.
+Hammerspoon is installed and the module is linked into `~/.hammerspoon/`;
+Accessibility permission must be granted manually, and Hammerspoon must be
+relaunched after granting it.
 
 ## Working on a milestone
 

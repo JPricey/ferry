@@ -8,12 +8,14 @@
 --
 -- Usage in ~/.hammerspoon/init.lua:
 --   local voicevim = require("voice-vim")
---   voicevim.start({ hotkey = { { "alt" }, "v" } })
+--   voicevim.start()  -- Ctrl+Option+V; pass { hotkey = { mods, key } } to change
 
 local M = {}
 
 M.config = {
-  hotkey = { { "alt" }, "v" },
+  -- Ctrl+Option+V. Option-only combos are unreliable on macOS 15+, and
+  -- Cmd+Shift+V clashes with paste-and-match-style.
+  hotkey = { { "ctrl", "alt" }, "v" },
   -- Repo root; set by install.sh via the symlinked module path, or override.
   root = nil,
   -- Copy the current selection into the buffer and replace it on submit.

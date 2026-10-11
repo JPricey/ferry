@@ -6,7 +6,7 @@ typing in. See `motivations.md` for the why.
 
 ## How it works
 
-1. Press the hotkey (default `option+v`) in any app. Any selected text is
+1. Press the hotkey (default `ctrl+option+v`) in any app. Any selected text is
    copied into the buffer and will be replaced on submit.
 2. A Ghostty window opens running Neovim in insert mode.
 3. Dictate with your normal Flow shortcut (or set `autoStartFlow = true` to
@@ -58,7 +58,7 @@ Edit the block in `~/.hammerspoon/init.lua`:
 
 ```lua
 require("voice-vim").start({
-  hotkey = { { "alt" }, "v" },
+  hotkey = { { "ctrl", "alt" }, "v" },  -- the default; omit to keep it
   captureSelection = true,   -- copy selection into the buffer first
   autoStartFlow = false,     -- fire wispr-flow://start-hands-free on open
   terminal = "ghostty",      -- or "iTerm2"
@@ -79,6 +79,8 @@ to change it. Buffer-local settings live in `vim/voice-vim.vim`.
 - `bin/voice-vim-session` — runs inside the terminal: opens the editor,
   decides submit vs cancel, calls back, closes its window.
 - `bin/voice-vim-paste` — osascript fallback paste when Hammerspoon is down.
+- `bin/voice-vim-migrate-init` — removes the old Option+V hotkey line from
+  `~/.hammerspoon/init.lua` (backs up to `init.lua.bak`; safe to rerun).
 - `vim/voice-vim.vim` — buffer settings, submit/cancel mappings, sidebar
   wiring.
 - `lua/voice-vim/history.lua` — the history sidebar (Neovim only).
@@ -87,6 +89,7 @@ to change it. Buffer-local settings live in `vim/voice-vim.vim`.
 - `tests/test-session.sh` — decision-logic tests for the session script.
 - `tests/test-history.sh` — database helper, recording, and sidebar tests.
 - `tests/test-delivery.sh` — delivery core tests with a fake clock.
+- `tests/test-migrate.sh` — migration script tests on temp init.lua copies.
 - `tests/test-hammerspoon.sh` — loads the Hammerspoon module against a
   stubbed `hs` (`tests/hs_stub.lua`) under `nvim -l`.
 - `karabiner/` — optional Karabiner-Elements rules (Right Command as Hyper,

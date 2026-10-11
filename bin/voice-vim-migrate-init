@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# voice-vim-migrate-init: drop the old Option+V hotkey from init.lua.
+# Usage: voice-vim-migrate-init [init.lua]   (default ~/.hammerspoon/init.lua)
+# Inside the require("voice-vim").start({ ... }) block, removes the line
+#   hotkey = { { "alt" }, "v" },
+# so the module default (Ctrl+Option+V) applies. Every other line, including
+# a custom hotkey line, is left alone. Before changing anything it copies the
+# file to init.lua.bak (or init.lua.bak.<time> if that exists). Running it
+# again changes nothing. Does not reload Hammerspoon.
+set -euo pipefail
+init=${1:-$HOME/.hammerspoon/init.lua}
+
+if ! [ -f "$init" ]; then
+  echo "voice-vim-migrate-init: $init not found" >&2
+  exit 1
+fi
+
+tmp=$(mktemp -d -t vv-migrate)
+trap 'rm -rf "$tmp"' EXIT
+
+# Lines inside the voice-vim start block that are exactly the Option+V
+# hotkey (any spacing, trailing comma optional) are dropped and recorded.
+awk -v removed="$tmp/removed" '
+  /require\("voice-vim"\)\.start\(\{[ \t]*$/ { inblock = 1; print; next }
+  inblock && /^[ \t]*\}\)/ { inblock = 0 }
+  inblock && /^[ \t]*hotkey[ \t]*=[ \t]*\{[ \t]*\{[ \t]*"alt"[ \t]*\}[ \t]*,[ \t]*"v"[ \t]*\}[ \t]*,?[ \t]*$/ {
+    printf "  line %d: %s\n", NR, $0 > removed
+    next
+  }
+  { print }
+' "$init" > "$tmp/new"
+
+if cmp -s "$init" "$tmp/new"; then
+  echo "voice-vim-migrate-init: no Option+V hotkey line in $init; nothing changed"
+  exit 0
+fi
+
+bak="$init.bak"
+[ -e "$bak" ] && bak="$init.bak.$(date +%Y%m%d%H%M%S)"
+cp -p "$init" "$bak"
+# Write through the existing file so a symlinked init.lua stays a symlink.
+cat "$tmp/new" > "$init"
+
+echo "voice-vim-migrate-init: updated $init"
+echo "removed:"
+cat "$tmp/removed"
+echo "backup: $bak"
+echo "Reload Hammerspoon to use the default hotkey, Ctrl+Option+V."
