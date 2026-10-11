@@ -28,10 +28,23 @@ local function db_cmd(args)
   return out
 end
 
+-- The entry to leave out of the list: the note being written (b:voicevim.id
+-- in the dictation window), else the V0 session ($VOICE_VIM_SESSION_ID).
+local function exclude_id()
+  local st = M.state
+  local win = st.main_win
+  if not (win and vim.api.nvim_win_is_valid(win)) then win = vim.api.nvim_get_current_win() end
+  local meta = vim.b[vim.api.nvim_win_get_buf(win)].voicevim
+  if type(meta) == "table" and meta.id and meta.id ~= "" then return meta.id end
+  local sid = os.getenv("VOICE_VIM_SESSION_ID")
+  if sid and sid ~= "" then return sid end
+  return nil
+end
+
 function M.load()
   local args = { "list", "--limit", "200" }
-  local sid = os.getenv("VOICE_VIM_SESSION_ID")
-  if sid and sid ~= "" then vim.list_extend(args, { "--exclude", sid }) end
+  local sid = exclude_id()
+  if sid then vim.list_extend(args, { "--exclude", sid }) end
   local out = db_cmd(args)
   if not out or out == "" then return {} end
   local ok, rows = pcall(vim.json.decode, out)

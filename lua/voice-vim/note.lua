@@ -7,6 +7,9 @@
 -- One note is "current" until it is finished. show() resumes it, unless a
 -- seed (captured selection) asks for a fresh note. Note files are scratch
 -- in $VOICE_VIM_NOTES_DIR; the history database stays the record.
+--
+-- In a note, :Submit (ZZ, <C-x>, :wq, :x), :Cancel (ZQ) and :Hide (:q)
+-- call M.host instead of exiting. Hide keeps the note as the draft.
 local M = {}
 
 -- The current (unfinished) note: { id = uuid, path = file, buf = bufnr }.
@@ -50,6 +53,85 @@ local function note_buf(note)
   return note.buf
 end
 
+local function repo_root()
+  local src = debug.getinfo(1, "S").source:sub(2)
+  return vim.fn.fnamemodify(src, ":p:h:h:h")
+end
+
+-- History: `voice-vim-db start` runs in the background when a fresh note
+-- opens, so show stays fast; finish waits for it, then runs to completion
+-- before the host is called (Hammerspoon deletes the submit file).
+local db_starts = {}
+
+local function db(args, on_exit)
+  local cmd = { repo_root() .. "/bin/voice-vim-db" }
+  vim.list_extend(cmd, args)
+  local ok, obj = pcall(vim.system, cmd, { text = true }, on_exit)
+  if not ok then
+    vim.notify("voice-vim: history unavailable: " .. tostring(obj), vim.log.levels.WARN)
+    return nil
+  end
+  return obj
+end
+
+local function history_start(id, target, seed)
+  local seedfile = vim.fn.tempname()
+  vim.fn.writefile(seed ~= "" and vim.split(seed, "\n", { plain = true }) or {}, seedfile)
+  db_starts[id] = db({ "start", id, target or "", seedfile }, function() os.remove(seedfile) end)
+end
+
+local function history_finish(id, outcome, file)
+  local pending = db_starts[id]
+  db_starts[id] = nil
+  if pending then pcall(pending.wait, pending, 5000) end
+  local obj = db({ "finish", id, outcome, file })
+  if obj then pcall(obj.wait, obj, 5000) end
+end
+
+-- Percent-encode a URL query value.
+local function enc(s)
+  return (tostring(s or ""):gsub("[^%w%-%._~]", function(c)
+    return string.format("%%%02X", c:byte())
+  end))
+end
+
+-- Open a URL in the background. on_fail runs (scheduled) when `open` is
+-- missing or exits non-zero.
+local function open_url(url, on_fail)
+  local ok = pcall(vim.system, { "open", "-g", url }, {}, function(r)
+    if r.code ~= 0 then vim.schedule(on_fail) end
+  end)
+  if not ok then on_fail() end
+end
+
+-- The default host talks to Hammerspoon. submit{file,target,window} reuses
+-- V0's voicevim-submit URL (Hammerspoon reads, delivers and deletes the
+-- file); hide{} asks it to hide the host and refocus the target. If the URL
+-- cannot be opened, the text goes on the clipboard instead.
+M.default_host = {}
+
+function M.default_host.submit(p)
+  local url = "hammerspoon://voicevim-submit?file=" .. enc(p.file) .. "&target=" .. enc(p.target)
+  if p.window and p.window ~= "" then url = url .. "&window=" .. enc(p.window) end
+  open_url(url, function()
+    local f = io.open(p.file, "r")
+    local text = f and f:read("a") or ""
+    if f then f:close() end
+    os.remove(p.file)
+    vim.fn.setreg("+", (text:gsub("\n$", "")))
+    vim.notify("voice-vim: copied — paste manually", vim.log.levels.WARN)
+  end)
+end
+
+function M.default_host.hide()
+  open_url("hammerspoon://voicevim-hide", function()
+    vim.notify("voice-vim: could not reach Hammerspoon to hide", vim.log.levels.WARN)
+  end)
+end
+
+-- Swappable (tests use a recording stub).
+M.host = M.default_host
+
 -- Buffer and window settings, as in vim/voice-vim.vim minus the V0
 -- process-exit commands. Run with the note displayed in the current window.
 function M.apply_options(buf)
@@ -73,6 +155,23 @@ function M.apply_options(buf)
     require("voice-vim.history").toggle()
   end, { force = true })
   vim.keymap.set("n", "<leader>h", "<Cmd>History<CR>", { buffer = buf, silent = true })
+  -- Submit, cancel and hide. A note never quits the server: :wq and :x
+  -- submit, :q hides and keeps the draft.
+  local function cmd(name, fn)
+    vim.api.nvim_buf_create_user_command(buf, name, function() M[fn](buf) end, { force = true, bang = true })
+  end
+  cmd("Submit", "submit")
+  cmd("Cancel", "cancel")
+  cmd("Hide", "hide")
+  local o = { buffer = buf, silent = true }
+  vim.keymap.set("n", "ZZ", "<Cmd>Submit<CR>", o)
+  vim.keymap.set({ "n", "i" }, "<C-x>", "<Cmd>Submit<CR>", o)
+  vim.keymap.set("n", "ZQ", "<Cmd>Cancel<CR>", o)
+  for lhs, rhs in pairs({ wq = "Submit", x = "Submit", q = "Hide" }) do
+    vim.cmd(string.format(
+      "cnoreabbrev <buffer> <expr> %s getcmdtype() ==# ':' && getcmdline() ==# '%s' ? '%s' : '%s'",
+      lhs, lhs, rhs, lhs))
+  end
 end
 
 -- Show buf in the current window (or jump to a window already showing it).
@@ -108,6 +207,7 @@ local function fresh(opts, seed)
   vim.api.nvim_win_set_cursor(0, { 1, 0 })
   M.state.note, M.state.cursor = note, nil
   vim.b[note.buf].voicevim = { id = id, target = opts.target or "", window = opts.window or "", seed = seed }
+  history_start(id, opts.target, seed)
   vim.cmd("startinsert")
   return note
 end
@@ -173,6 +273,77 @@ end
 -- Forget the current note so the next show() opens a fresh one.
 function M.forget()
   M.state.note, M.state.cursor = nil, nil
+end
+
+-- End a note: record the outcome, forget it, and drop its buffer and file.
+-- Windows that showed it get an empty buffer, so the layout stays.
+local function finish(buf, outcome, file)
+  local meta = vim.b[buf].voicevim or {}
+  if meta.id then history_finish(meta.id, outcome, file) end
+  local note = M.state.note
+  local path = vim.api.nvim_buf_get_name(buf)
+  if note and note.buf == buf then
+    path = note.path
+    M.forget()
+  end
+  vim.g.voicevim_draft = nil
+  vim.cmd("stopinsert")
+  local empty = vim.api.nvim_create_buf(true, false)
+  vim.bo[empty].bufhidden = "wipe"
+  for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+    vim.api.nvim_win_set_buf(win, empty)
+  end
+  pcall(vim.api.nvim_buf_delete, buf, { force = true })
+  if path ~= "" then os.remove(path) end
+end
+
+local function text_of(buf)
+  return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+end
+
+-- Write buf's text to a temp file and return its path.
+local function to_tempfile(buf)
+  local file = vim.fn.tempname() .. ".md"
+  vim.fn.writefile(vim.api.nvim_buf_get_lines(buf, 0, -1, false), file)
+  return file
+end
+
+-- Cancel: record the text as cancelled (blank notes are dropped from
+-- history) and hide.
+function M.cancel(buf)
+  buf = (buf and buf ~= 0) and buf or vim.api.nvim_get_current_buf()
+  local file = to_tempfile(buf)
+  finish(buf, "cancelled", file)
+  os.remove(file)
+  M.host.hide({})
+end
+
+-- Submit, deciding like bin/voice-vim-session: blank, or unchanged from the
+-- seed, is a cancel. Otherwise the text goes to the host with the target.
+function M.submit(buf)
+  buf = (buf and buf ~= 0) and buf or vim.api.nvim_get_current_buf()
+  local meta = vim.b[buf].voicevim or {}
+  local text = text_of(buf)
+  local trim = function(s) return (s:gsub("\n+$", "")) end
+  if not text:find("%S") or trim(text) == trim(meta.seed or "") then
+    return M.cancel(buf)
+  end
+  local file = to_tempfile(buf)
+  finish(buf, "submitted", file)
+  M.host.submit({ file = file, target = meta.target or "", window = meta.window or "" })
+end
+
+-- Hide: keep the note as the draft (history row stays open) and hide.
+function M.hide(buf)
+  buf = (buf and buf ~= 0) and buf or vim.api.nvim_get_current_buf()
+  local note = M.state.note
+  if note and note.buf == buf then
+    M.draft()
+  elseif vim.bo[buf].modified then
+    vim.api.nvim_buf_call(buf, function() vim.cmd("silent write!") end)
+  end
+  vim.cmd("stopinsert")
+  M.host.hide({})
 end
 
 -- Neovide sends Cmd+V as <D-v>; terminals never do. Paste the + register,
