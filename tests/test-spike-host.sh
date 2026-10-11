@@ -6,6 +6,7 @@ set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 host="$root/spike/host/vv-host"
 work=$(mktemp -d -t vv-spike)
+[ -n "$work" ] && [ -d "$work" ] || { echo "mktemp failed" >&2; exit 1; }
 export VOICE_VIM_SOCK=$work/host.sock VOICE_VIM_SPIKE_NOTES=$work/notes VV_HOST_NVIM_FLAGS=--clean
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: want '$2' got '$3'"; fail=1; fi; }

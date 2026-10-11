@@ -7,6 +7,7 @@
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d -t vv-spike-hs)
+[ -n "$work" ] && [ -d "$work" ] || { echo "mktemp failed" >&2; exit 1; }
 cleanup() {
   pkill -f -- "--listen $work/" 2>/dev/null
   rm -rf "$work"

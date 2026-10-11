@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# voice-vim-host: manages the one long-lived voice-vim nvim server and the
+# note in it. Every call goes through `nvim --server <sock> --remote-expr`;
+# the server side is lua/voice-vim/note.lua.
+#
+# Usage: voice-vim-host ensure|show|draft|attach-cmd|status|stop
+#   ensure                          start the server unless one answers, and
+#                                   load the note module into it
+#   show <target> <window> [seed]   resume the unfinished note, or open a
+#                                   fresh one (always fresh with a seed file),
+#                                   in insert mode; prints the note's path
+#   draft                           write the note and set g:voicevim_draft;
+#                                   prints its path
+#   attach-cmd                      print the command a UI runs to attach
+#   status                          print `up uis=N` or `down`
+#   stop                            quit the server and remove the socket
+#
+# Environment:
+#   VOICE_VIM_SOCK              socket (default ${TMPDIR}/voice-vim.sock)
+#   VOICE_VIM_NOTES_DIR         note folder (default ${TMPDIR}/voice-vim-notes)
+#   VOICE_VIM_HOST_NVIM_FLAGS   extra flags for the server nvim (tests: --clean)
+set -u
+
+# Called from Hammerspoon we inherit a bare launchd PATH, so make sure
+# Homebrew and user bins are reachable for nvim.
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$HOME/.local/bin:/usr/local/bin:$PATH"
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+root=$(dirname "$here")
+tmp=${TMPDIR:-/tmp}; tmp=${tmp%/}
+sock=${VOICE_VIM_SOCK:-$tmp/voice-vim.sock}
+notes=${VOICE_VIM_NOTES_DIR:-$tmp/voice-vim-notes}
+nvim_bin=$(command -v nvim) || { echo "voice-vim-host: nvim not found" >&2; exit 1; }
+
+# Quote a string as a Vim script literal.
+vimstr() { local s=${1//\'/\'\'}; printf "'%s'" "$s"; }
+
+rexpr() { "$nvim_bin" --server "$sock" --remote-expr "$1"; }
+
+alive() { [ -S "$sock" ] && [ "$(rexpr 1 2>/dev/null)" = 1 ]; }
+
+need_server() {
+  alive || { echo "voice-vim-host: no server on $sock (run ensure)" >&2; exit 1; }
+}
+
+# Call require("voice-vim.note").<fn>(dict) on the server and print the
+# result. Fails if the server is down or the call raised an error.
+call() { # fn dict
+  local out
+  out=$(rexpr "luaeval('require\"voice-vim.note\".$1(_A)', $2)" 2>&1) \
+    || { echo "voice-vim-host: $1 failed: $out" >&2; return 1; }
+  printf '%s\n' "$out"
+}
+
+ensure() {
+  if alive; then
+    echo "voice-vim-host: running on $sock"
+  else
+    rm -f "$sock"
+    # shellcheck disable=SC2086 # VOICE_VIM_HOST_NVIM_FLAGS is split on purpose.
+    nohup "$nvim_bin" --headless --listen "$sock" ${VOICE_VIM_HOST_NVIM_FLAGS:-} \
+      --cmd "set rtp^=${root// /\\ }" </dev/null >/dev/null 2>&1 &
+    local i
+    for i in $(seq 100); do alive && break; sleep 0.05; done
+    alive || { echo "voice-vim-host: server did not start on $sock" >&2; return 1; }
+    echo "voice-vim-host: started on $sock"
+  fi
+  # Put the repo on the runtimepath (a reused server may lack it) and load
+  # the note module now, so the first show is not slowed by it.
+  rexpr "luaeval('(function(r) if not vim.tbl_contains(vim.opt.rtp:get(), r) then vim.opt.rtp:prepend(r) end; return require(\"voice-vim.note\") and 1 end)(_A)', $(vimstr "$root"))" >/dev/null
+}
+
+show() { # target window [seedfile]
+  need_server
+  local seed=${3:-}
+  if [ -n "$seed" ]; then seed=$(cd "$(dirname "$seed")" && pwd)/$(basename "$seed"); fi
+  call show "{'target': $(vimstr "${1:-}"), 'window': $(vimstr "${2:-}"), 'seed': $(vimstr "$seed"), 'dir': $(vimstr "$notes")}"
+}
+
+status() {
+  if alive; then echo "up uis=$(rexpr 'len(nvim_list_uis())')"; else echo down; fi
+}
+
+stop() {
+  if alive; then
+    # Quit once this request has returned; does not need the note module.
+    rexpr "luaeval('vim.schedule(function() vim.cmd(\"silent! wall | qall!\") end)')" >/dev/null 2>&1
+    local i
+    for i in $(seq 100); do [ -e "$sock" ] || break; sleep 0.05; done
+  fi
+  rm -f "$sock"
+}
+
+case ${1:-} in
+  ensure)     ensure ;;
+  show)       shift; show "$@" ;;
+  draft)      need_server; call draft '{}' ;;
+  attach-cmd) printf '%q --server %q --remote-ui\n' "$nvim_bin" "$sock" ;;
+  status)     status ;;
+  stop)       stop ;;
+  *) sed -n '2,/^set -u/p' "$0" | sed '$d; s/^# \{0,1\}//' >&2; exit 2 ;;
+esac
