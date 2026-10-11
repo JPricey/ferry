@@ -23,6 +23,15 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   3. Optional: `cp ~/Code/voice-vim/karabiner/voice-vim-hyper.json ~/.config/karabiner/assets/complex_modifications/`, then Karabiner-Elements → Complex Modifications → Add rule → enable both voice-vim rules. Hold right Command and press V and confirm a session opens. Tap right Command alone and confirm it still acts as Command.
   4. Ten submits in a row, spread across Slack, the Claude app and a Claude Code pane in Ghostty/tmux (use two Ghostty windows, so the wrong-window case is tested). Each should either land in the window you started from, or show "copied — paste manually" with the text on the clipboard. For any miss, copy the `voice-vim` lines from the console here (they log target, window, focus, each frontmost check, settle and the keystroke).
   - When 1–4 pass, set the milestone to `done`. The next milestone, "One instance toggled by a hotkey", has a hard need on the host spike, not on this one.
+- **Single-instance host spike: pick the host** (all tasks done, agent check passes). This blocks "One instance toggled by a hotkey" and everything after it. Steps are the milestone's Joe checks 1–6; in short:
+  1. `brew install --cask neovide`.
+  2. Hammerspoon console: `vvspike = dofile(os.getenv("HOME") .. "/Code/voice-vim/spike/host/host.lua").start({ host = "ghostty-window" })`. Spike hotkey is Ctrl+Option+Cmd+V; the live voice-vim hotkey is untouched.
+  3. Try it from Slack, the Claude app and two Ghostty windows, five presses each (show/hide). Copy the `show: … ms` / `hide: … ms` lines; each press also logs `toggle: … -> show|hide` with the reason, and `show: note took N ms`.
+  4. `vvspike.use("neovide")`, repeat. 5. `vvspike.use("quick-terminal")`, repeat (fallback steps for keystroke mode are in the milestone).
+  6. Fill the table and `Pick:` in `planning.md` → "Host spike", then `~/Code/voice-vim/spike/host/vv-host stop` and Reload Config.
+  - Options: Ghostty window (same app as your work windows; hides by parking off-screen), Neovide (separate app, so hide/unhide is clean; needs `<D-v>` mapping, already in the spike), Ghostty quick terminal (native slide-in, but several unknowns: AppleScript toggle, autohide during Flow, whether it is an `hs.window`).
+  - Recommendation: Neovide, if Flow pastes into it and show is under ~150 ms. It is the only option whose hide/show is a plain app hide that cannot raise or disturb your other Ghostty windows, which was the root of the wrong-window paste problem. Fall back to Ghostty window if Neovide misbehaves with Flow.
+- **Notes and history browser: storage (early question, not blocking yet).** The milestone asks you to decide storage before it is planned. Options: (a) SQLite only, extending the current history DB; (b) markdown files as the source of truth, with SQLite (FTS5) as a rebuildable index. Recommendation: (b). Notes are opened and autosaved as ordinary files in nvim, survive DB bugs, and work with grep and git; the index gives fast search and the browser view. Answer here and the planner will use it.
 
 ## Diagnose paste and the hotkey
 
@@ -64,7 +73,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 
 ## Single-instance host spike
 
-- **Status:** verifying
+- **Status:** needs-joe
 - **Needs:** Diagnose paste and the hotkey
 - **Deliverable:** a decision on which window hosts the one long-lived nvim.
 - **Scope:**
@@ -98,6 +107,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-11: task 4 (Hammerspoon spike module) done and verified on the 2nd attempt. All five findings fixed and tested; console now logs `toggle: … -> show|hide` with the reason, `show: note took N ms`, and show/hide ms measured from the hotkey press. Known gap: hide parks the Ghostty window at the main screen's bottom-right, which a second monitor may partly reveal.
   - 2026-10-11: task 5 (write-up in `planning.md` → "Host spike") done and verified. Results table and `Pick:` left blank for Joe.
   - 2026-10-11: all tasks done; status → verifying.
+  - 2026-10-11: agent check passes (note/draft through all three prototype scripts and vv-host against a headless test server; all 8 test scripts pass); status → needs-joe.
 
 ## One instance toggled by a hotkey
 
