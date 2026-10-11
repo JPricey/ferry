@@ -45,6 +45,9 @@
 --                      hs.timer.absoluteTime, in ns); usleep and timers advance it
 --   rec.screen         {x, y, w, h} of the one screen (hs.screen.mainScreen,
 --                      allScreens, win:screen; default 0,0 1440x900)
+--   rec.execStatus     true: hs.execute returns the command's real exit
+--                      status (and records rc); default: success unless
+--                      popen close fails, which LuaJIT never reports
 --   app opts.windows   list returned by app:allWindows() (default {window})
 --   window opts.size   {w, h} for win:frame() (default 800x600)
 
@@ -228,6 +231,17 @@ function S.install()
   hs.inspect = function(v) return inspect(v) end
 
   hs.execute = function(cmd)
+    if rec.execStatus then
+      -- LuaJIT's popen close reports success whatever the exit code, so
+      -- append the code to the output and strip it off again.
+      local p = io.popen("{ " .. cmd .. " ; } 2>/dev/null; printf '\\n__hs_stub_rc=%d' $?")
+      local raw = p and p:read("*a") or ""
+      if p then p:close() end
+      local out, rc = raw:match("^(.-)\n__hs_stub_rc=(%d+)$")
+      out, rc = out or raw, tonumber(rc) or 1
+      rec.executes[#rec.executes + 1] = { cmd = cmd, out = out, rc = rc }
+      return out, rc == 0 and true or nil, "exit", rc
+    end
     local p = io.popen(cmd .. " 2>/dev/null")
     local out = p and p:read("*a") or ""
     local ok = p and p:close()

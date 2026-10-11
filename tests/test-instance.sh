@@ -1,0 +1,297 @@
+#!/usr/bin/env bash
+# hammerspoon/instance.lua against the stub in tests/hs_stub.lua under
+# `nvim -l`, with a recording stub host. hs.execute really runs
+# bin/voice-vim-host against a headless nvim on a temp socket (--clean, temp
+# DB and notes dir); hs.task is recorded, never run. Fake osascript/open/
+# neovide on PATH record and fail, so nothing reaches other apps. Never
+# touches the real Hammerspoon or Joe's nvim server.
+set -u
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# macOS socket paths max out at 104 bytes, so keep the folder short.
+work=$(mktemp -d /tmp/vvi.XXXX)
+[ -n "$work" ] && [ -d "$work" ] || { echo "mktemp failed" >&2; exit 1; }
+cleanup() {
+  pkill -f -- "--listen $work/" 2>/dev/null
+  rm -rf "$work"
+}
+trap cleanup EXIT
+
+mkdir -p "$work/fakes"
+for f in osascript open neovide; do
+  printf '#!/bin/sh\n{ echo "CALL %s"; echo "$*"; } >> "%s/calls"\nexit 1\n' "$f" "$work" > "$work/fakes/$f"
+  chmod +x "$work/fakes/$f"
+done
+: > "$work/calls"
+export PATH="$work/fakes:$PATH" VOICE_VIM_DB="$work/history.sqlite"
+# The controller must pass these itself.
+unset VOICE_VIM_SOCK VOICE_VIM_NOTES_DIR VOICE_VIM_HOST_NVIM_FLAGS
+
+cat > "$work/spec.lua" <<'LUA'
+local root = assert(os.getenv("VV_ROOT"))
+local work = assert(os.getenv("VV_WORK"))
+local stub = dofile(root .. "/tests/hs_stub.lua")
+local modpath = root .. "/hammerspoon/instance.lua"
+local hostbin = root .. "/bin/voice-vim-host"
+local fail = 0
+
+local function check(name, want, got)
+  if want == got then
+    print("ok   " .. name)
+  else
+    print("FAIL " .. name .. ": want '" .. tostring(want) .. "' got '" .. tostring(got) .. "'")
+    fail = 1
+  end
+end
+
+local function sh(cmd)
+  local p = io.popen(cmd .. " 2>&1")
+  local out = p:read("*a")
+  p:close()
+  return (out:gsub("%s+$", ""))
+end
+
+local function has(s, needle) return (s or ""):find(needle, 1, true) ~= nil end
+
+local function execs(rec, needle)
+  local out = {}
+  for _, e in ipairs(rec.executes) do if has(e.cmd, needle) then out[#out + 1] = e end end
+  return out
+end
+
+local function lastFocusId(rec)
+  local w = rec.focuses[#rec.focuses]
+  return w and w:id()
+end
+
+local n = 0
+local function hostEnv(sock)
+  return "VOICE_VIM_SOCK='" .. sock .. "' VOICE_VIM_NOTES_DIR='" .. work .. "/notes' "
+    .. "VOICE_VIM_HOST_NVIM_FLAGS=--clean '" .. hostbin .. "' "
+end
+local function ensure(sock) return sh(hostEnv(sock) .. "ensure") end
+local function stop(sock) sh(hostEnv(sock) .. "stop") end
+local function ask(sock, expr)
+  return sh("nvim --server '" .. sock .. "' --remote-expr '" .. expr .. "'")
+end
+local function servers(sock)
+  return tonumber(sh("pgrep -f -- '--listen " .. sock .. "' | wc -l")) or -1
+end
+
+-- A target app with window 4242 in front, a stub host that records calls
+-- in `order`, and a controller on its own socket. opts.warm = false leaves
+-- the pre-warm task running and the server down.
+local function setup(opts)
+  opts = opts or {}
+  n = n + 1
+  local rec = stub.install()
+  rec.execStatus = true  -- hs.execute reports voice-vim-host's exit code
+  local sock = work .. "/s" .. n .. ".sock"
+  local target = rec:app({ bundleID = "com.example.target" })
+  local tw = rec:window({ id = 4242, app = target })
+  target._window = tw
+  rec.frontmost, rec.focusedWindow = target, tw
+  local hostApp = rec:app({ bundleID = "com.example.host" })
+  local hostWin = rec:window({ id = 7, app = hostApp })
+  local order, delivered = {}, {}
+  local host = {
+    show = function(cb)
+      order[#order + 1] = "host.show"
+      rec.frontmost, rec.focusedWindow = hostApp, hostWin
+      cb(true)
+    end,
+    hide = function(cb)
+      order[#order + 1] = "host.hide"
+      rec.focusedWindow = nil
+      cb(true)
+    end,
+    isFocused = function()
+      return rec.focusedWindow == hostWin, "stub host window " .. tostring(rec.focusedWindow == hostWin)
+    end,
+    launch = function(cb) order[#order + 1] = "host.launch"; cb(true) end,
+  }
+  local I = stub.load(modpath)
+  local cfg = {
+    host = host, root = root, sock = sock, notesDir = work .. "/notes", nvimFlags = "--clean",
+    deliver = function(p) order[#order + 1] = "deliver"; delivered[#delivered + 1] = p end,
+  }
+  for k, v in pairs(opts) do if k ~= "warm" then cfg[k] = v end end
+  local c = I.new(cfg)
+  c.prewarm()
+  if opts.warm ~= false then
+    ensure(sock)  -- what the pre-warm task does
+    rec:finishTask(#rec.tasks, 0, "", "")
+  end
+  return { rec = rec, c = c, sock = sock, order = order, delivered = delivered,
+    target = target, hostWin = hostWin }
+end
+
+local function count(list, x)
+  local k = 0
+  for _, v in ipairs(list) do if v == x then k = k + 1 end end
+  return k
+end
+
+-- Show from window 4242, then hide.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  check("prewarm runs ensure as an hs.task", true,
+    rec.tasks[1] ~= nil and has(rec.tasks[1].args[2], "'ensure'") and rec.tasks[1].started)
+  check("ensure task carries the socket", true, rec.tasks[1] ~= nil and has(rec.tasks[1].args[2], sock))
+  c.toggle()
+  local shows = execs(rec, "'show' 'com.example.target' '4242'")
+  check("toggle from window 4242 runs show com.example.target 4242", 1, #shows)
+  check("show carries the socket and --clean", true,
+    shows[1] ~= nil and has(shows[1].cmd, sock) and has(shows[1].cmd, "--clean"))
+  check("note in insert mode with target 4242", "i com.example.target 4242",
+    ask(sock, 'mode()." ".b:voicevim.target." ".b:voicevim.window'))
+  check("one host.show", 1, count(t.order, "host.show"))
+  rec:runTimers()
+  check("logs show: host focused after", true, rec:hasLog("i", "show: host focused after"))
+  check("logs show: show took", true, rec:hasLog("i", "show: show took"))
+  check("logger is voice-vim", true, rec:findLogs("i", "show: host focused after")[1].name == "voice-vim")
+  check("toggle logs -> show", true, rec:hasLog("i", "-> show;"))
+  check("default: no Cmd+C (captureSelection off)", 0, #rec.keyStrokes)
+
+  ask(sock, 'nvim_buf_set_lines(0, 0, -1, v:false, ["draft words"])')
+  local path = ask(sock, "expand(\"%:p\")")
+  c.toggle()
+  check("toggle while focused runs draft", 1, #execs(rec, "'draft'"))
+  check("draft wrote the note", "draft words", sh("cat '" .. path .. "'"))
+  check("toggle while focused calls host.hide", 1, count(t.order, "host.hide"))
+  check("toggle while focused focuses 4242", 4242, lastFocusId(rec))
+  rec:runTimers()
+  check("logs hide: target focused after", true, rec:hasLog("i", "hide: target focused after"))
+  check("toggle logs -> hide", true, rec:hasLog("i", "-> hide;"))
+  check("hide uses the captured window (no hs.window.get)", 0, rec.windowGets)
+  check("shown is false after hide", false, c.shown)
+
+  c.toggle()
+  check("next show resumes the draft", path, ask(sock, "expand(\"%:p\")"))
+  stop(sock)
+end
+
+-- Target window closed while shown: hide activates its app.
+do
+  local t = setup()
+  local rec, c = t.rec, t.c
+  c.toggle()
+  rec:runTimers()
+  rec:closeWindow(4242)
+  local before = #rec.activations
+  c.toggle()
+  check("closed target window -> app activated", "com.example.target",
+    rec.activations[before + 1] and rec.activations[before + 1]:bundleID())
+  stop(t.sock)
+end
+
+-- onSubmit: host.hide before deliver, same params; no draft call.
+do
+  local t = setup()
+  local rec, c = t.rec, t.c
+  c.toggle()
+  rec:runTimers()
+  local p = { file = "/tmp/x.md", target = "com.example.target", window = "4242" }
+  c.onSubmit(p)
+  check("onSubmit calls host.hide before deliver", "host.show,host.hide,deliver", table.concat(t.order, ","))
+  check("onSubmit passes the same params to deliver", p, t.delivered[1])
+  check("onSubmit runs no draft", 0, #execs(rec, "'draft'"))
+  check("shown is false after onSubmit", false, c.shown)
+  stop(t.sock)
+end
+
+-- onHide (the note's :Hide / :Cancel) and bindURLs.
+do
+  local t = setup()
+  local rec, c = t.rec, t.c
+  c.bindURLs()
+  check("bindURLs binds voicevim-submit", "function", type(rec.urlBinds["voicevim-submit"]))
+  check("bindURLs binds voicevim-hide", "function", type(rec.urlBinds["voicevim-hide"]))
+  c.toggle()
+  rec:runTimers()
+  rec:openURL("voicevim-hide", {})
+  check("voicevim-hide calls host.hide", 1, count(t.order, "host.hide"))
+  check("voicevim-hide refocuses 4242", 4242, lastFocusId(rec))
+  check("voicevim-hide runs no draft", 0, #execs(rec, "'draft'"))
+  rec:runTimers()
+  check("voicevim-hide logs hide timing", true, rec:hasLog("i", "hide: target focused after"))
+  rec:openURL("voicevim-submit", { file = "f", target = "com.example.target", window = "4242" })
+  check("voicevim-submit hides then delivers", "host.hide,deliver",
+    table.concat(t.order, ",", #t.order - 1, #t.order))
+  check("voicevim-submit passes the URL params", "f", t.delivered[1] and t.delivered[1].file)
+  stop(t.sock)
+end
+
+-- A press during the pre-warm waits for it: no show, no second server.
+do
+  local t = setup({ warm = false })
+  local rec, c, sock = t.rec, t.c, t.sock
+  c.toggle()
+  check("press during prewarm: no show yet", 0, #execs(rec, "'show'"))
+  check("press during prewarm: no synchronous ensure", 0, #execs(rec, "'ensure'"))
+  check("press during prewarm: wait logged", true, rec:hasLog("i", "waiting for the pre-warm"))
+  check("press during prewarm: no host.show yet", 0, count(t.order, "host.show"))
+  c.prewarm()
+  check("second prewarm while warming starts no task", 1, #rec.tasks)
+  ensure(sock)  -- what the pre-warm task does
+  rec:finishTask(1, 0, "", "")
+  check("press during prewarm starts no second server", 1, servers(sock))
+  check("after prewarm: show runs once", 1, #execs(rec, "'show' 'com.example.target' '4242'"))
+  check("after prewarm: one host.show", 1, count(t.order, "host.show"))
+  check("after prewarm: note in insert mode", "i", ask(sock, "mode()"))
+  rec:runTimers()
+  check("after prewarm: show timing logged", true, rec:hasLog("i", "show: host focused after"))
+  stop(sock)
+end
+
+-- Server down: show fails, alert, host not shown.
+do
+  local t = setup()
+  stop(t.sock)
+  t.c.toggle()
+  check("server down: alert", true, #t.rec.alerts == 1 and has(t.rec.alerts[1], "could not open the note"))
+  check("server down: no host.show", 0, count(t.order, "host.show"))
+  check("server down: shown stays false", false, t.c.shown)
+end
+
+-- captureSelection on: Cmd+C into the target, selection seeds a fresh note.
+do
+  local t = setup({ captureSelection = true })
+  local rec, c, sock = t.rec, t.c, t.sock
+  rec.pasteboard = { contents = "old clipboard", changeCount = 5 }
+  rec.onKeyStroke = function(mods, key)
+    if key == "c" then rec.pasteboard = { contents = "picked text", changeCount = 6 } end
+  end
+  c.toggle()
+  local k = rec.keyStrokes[1]
+  check("captureSelection: Cmd+C sent to the target app", "cmd c com.example.target",
+    k and (table.concat(k.mods, "+") .. " " .. k.key .. " " .. tostring(k.app and k.app:bundleID())))
+  local e = execs(rec, "'show' 'com.example.target' '4242'")[1]
+  local seed = e and e.cmd:match("'4242' '([^']+)'")
+  check("captureSelection: show gets a seed file", true, seed ~= nil)
+  check("captureSelection: note holds the selection", "picked text", ask(sock, 'getline(1)'))
+  check("captureSelection: seed file removed", nil, seed and io.open(seed, "r"))
+  check("captureSelection: clipboard restored", "old clipboard", rec.pasteboard.contents)
+  stop(sock)
+end
+
+os.exit(fail)
+LUA
+
+VV_ROOT="$root" VV_WORK="$work" perl -e 'alarm 60; exec @ARGV' nvim -l "$work/spec.lua" 2>&1
+status=$?
+echo  # nvim -l leaves the last line unterminated
+
+check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: want '$2' got '$3'"; status=1; fi; }
+check "fake osascript/open/neovide never called" 0 "$(grep -c '^CALL ' "$work/calls")"
+check "voice-vim.lua does not load instance.lua" 0 "$(grep -c 'instance\.lua\|instance"' "$root/hammerspoon/voice-vim.lua")"
+lj=$(command -v luajit || echo /opt/homebrew/bin/luajit)
+if [ -x "$lj" ]; then
+  check "instance.lua parses under LuaJIT" ok "$("$lj" -e "assert(loadfile('$root/hammerspoon/instance.lua')) print('ok')" 2>&1)"
+fi
+if l=$(command -v lua5.4 || command -v lua); then
+  check "instance.lua parses under $(basename "$l")" ok "$("$l" -e "assert(loadfile('$root/hammerspoon/instance.lua')) print('ok')" 2>&1)"
+fi
+
+if [ $status -eq 0 ]; then echo "all ok"; else echo "FAILED"; fi
+exit $status
