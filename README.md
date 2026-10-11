@@ -92,6 +92,15 @@ to change it. Buffer-local settings live in `vim/voice-vim.vim`.
 - `tests/test-migrate.sh` — migration script tests on temp init.lua copies.
 - `tests/test-hammerspoon.sh` — loads the Hammerspoon module against a
   stubbed `hs` (`tests/hs_stub.lua`) under `nvim -l`.
+- `tests/test-spike-host.sh` — spike server helper and Ghostty-window and
+  Neovide launch scripts, against a headless test server.
+- `tests/test-spike-qt.sh` — quick-terminal spike script in dry-run mode.
+- `tests/test-spike-hammerspoon.sh` — spike Hammerspoon module against the
+  stubbed `hs`.
+- `spike/host/` — single-instance host spike: one long-lived nvim server
+  (`vv-host`, `note.lua`), a launch script per host option, and a
+  Hammerspoon toggle (`host.lua`). Not loaded by voice-vim; see
+  `planning.md` → "Host spike".
 - `karabiner/` — optional Karabiner-Elements rules (Right Command as Hyper,
   Hyper+V starts a session); not installed by `install.sh`.
 
