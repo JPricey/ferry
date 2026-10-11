@@ -1,8 +1,10 @@
 -- voice-vim: Hammerspoon module.
 --
--- Hotkey -> capture frontmost app and selection -> open a Ghostty window
--- running Neovim on a temp file -> (shell wrapper runs the editor) ->
--- hammerspoon://voicevim-submit callback -> paste result into the target app.
+-- Hotkey -> capture frontmost app, focused window and selection -> open a
+-- Ghostty window running Neovim on a temp file -> (shell wrapper runs the
+-- editor) -> hammerspoon://voicevim-submit callback -> put the text on the
+-- clipboard, focus the target window, wait until it is frontmost, Cmd+V.
+-- The delivery logic lives in lua/voice-vim/delivery.lua (pure, tested).
 --
 -- Usage in ~/.hammerspoon/init.lua:
 --   local voicevim = require("voice-vim")
@@ -22,8 +24,9 @@ M.config = {
   terminal = "ghostty",
   -- Window title for the Ghostty session window.
   windowTitle = "voice-vim",
-  -- Seconds to wait for the target app to come back to front before pasting.
-  activateDelay = 0.25,
+  -- Seconds to wait for the target window to be confirmed frontmost before
+  -- giving up on the paste (the text then stays on the clipboard).
+  confirmTimeout = 1.0,
 }
 
 local log = hs.logger.new("voice-vim", "info")
@@ -105,9 +108,17 @@ local function openTerminal(argv)
   return ok
 end
 
+-- Id of the focused window, or nil.
+local function focusedWindowId()
+  local win = hs.window.focusedWindow()
+  local id = win and win:id() or nil
+  return id
+end
+
 function M.begin()
   local app = hs.application.frontmostApplication()
   local target = app and app:bundleID() or ""
+  local winId = focusedWindowId()
   local sel = ""
   if M.config.captureSelection and app then sel = grabSelection(app) end
 
@@ -123,13 +134,76 @@ function M.begin()
   argv[#argv + 1] = session
   argv[#argv + 1] = file
   argv[#argv + 1] = target
-  log.i("target=" .. target .. " file=" .. file)
+  argv[#argv + 1] = winId and tostring(winId) or ""
+  log.i("begin: target=" .. target .. " window=" .. tostring(winId) .. " file=" .. file)
   openTerminal(argv)
 end
 
--- Callback from bin/voice-vim-session: hammerspoon://voicevim-submit?file=&target=
+-- Load the pure delivery core from the repo. Returns the module or nil.
+local function loadDelivery()
+  local ok, mod = pcall(dofile, repoRoot() .. "/lua/voice-vim/delivery.lua")
+  if ok and type(mod) == "table" then return mod end
+  log.e("submit: cannot load delivery.lua: " .. tostring(mod))
+  return nil
+end
+
+-- Timers from hs.timer.doAfter are kept referenced until they fire so they
+-- cannot be garbage collected first.
+local pending = {}
+
+-- The env table delivery.lua runs against, built from the real hs APIs.
+local function deliveryEnv()
+  local env = {}
+  env.now = function() return hs.timer.secondsSinceEpoch() end
+  env.after = function(sec, fn)
+    local t
+    t = hs.timer.doAfter(sec, function()
+      if t then pending[t] = nil end
+      fn()
+    end)
+    if t then pending[t] = true end
+  end
+  env.frontmost = function()
+    local app = hs.application.frontmostApplication()
+    local win = hs.window.focusedWindow()
+    return { bundle = app and app:bundleID() or nil, windowId = win and win:id() or nil }
+  end
+  env.windowExists = function(id) return id ~= nil and hs.window.get(id) ~= nil end
+  env.focus = function(target)
+    local win = target.windowId and hs.window.get(target.windowId) or nil
+    if win then
+      log.i("submit: focusing window " .. tostring(target.windowId))
+      win:focus()
+      return
+    end
+    local app = target.bundle and hs.application.get(target.bundle) or nil
+    if app then
+      log.i("submit: activating app " .. tostring(target.bundle) .. " (window "
+        .. tostring(target.windowId) .. " not found)")
+      app:activate()
+    else
+      log.w("submit: target app " .. tostring(target.bundle) .. " is not running")
+    end
+  end
+  env.getClipboard = function() return hs.pasteboard.getContents() end
+  env.setClipboard = function(text) hs.pasteboard.setContents(text) end
+  env.postPaste = function()
+    -- Global Cmd+V, not posted to one app: per-app posting is unreliable in
+    -- Electron apps. delivery.lua only calls this once the target is frontmost.
+    hs.eventtap.keyStroke({ "cmd" }, "v")
+    log.i("submit: keystroke cmd+v posted")
+  end
+  env.alert = function(msg) hs.alert.show(msg) end
+  env.log = function(msg) log.i(msg) end
+  return env
+end
+
+-- Callback from bin/voice-vim-session:
+-- hammerspoon://voicevim-submit?file=&target=&window=
 function M.submit(params)
+  params = params or {}
   local file, target = params.file, params.target or ""
+  local windowId = tonumber(params.window or "")
   local f = file and io.open(file, "r")
   if not f then log.e("submit: cannot read " .. tostring(file)); return end
   local text = f:read("a")
@@ -137,29 +211,38 @@ function M.submit(params)
   os.remove(file)
   -- Drop a single trailing newline that :w always adds.
   text = text:gsub("\n$", "")
-  log.i("submit target=" .. target .. " bytes=" .. #text)
+  log.i("submit: target=" .. target .. " window=" .. tostring(windowId) .. " bytes=" .. #text)
   if text == "" then return end
 
   if not hs.accessibilityState() then
-    log.e("submit: Hammerspoon lacks Accessibility; cannot paste")
-    hs.alert.show("voice-vim: grant Hammerspoon Accessibility to paste")
+    hs.pasteboard.setContents(text)
+    log.e("submit: Hammerspoon lacks Accessibility; cannot paste (text left on clipboard)")
+    hs.alert.show("voice-vim: grant Hammerspoon Accessibility to paste (text copied)")
     hs.accessibilityState(true)
     return
   end
 
-  local saved = hs.pasteboard.getContents()
-  hs.pasteboard.setContents(text)
+  local delivery = loadDelivery()
+  if not delivery then
+    hs.pasteboard.setContents(text)
+    hs.alert.show("copied — paste manually")
+    return
+  end
 
-  local app = target ~= "" and hs.application.get(target) or nil
-  log.i("submit app=" .. (app and app:name() or "nil") .. " activating and pasting")
-  if app then app:activate() end
-
-  hs.timer.doAfter(M.config.activateDelay, function()
-    hs.eventtap.keyStroke({ "cmd" }, "v", 0, app)
-    hs.timer.doAfter(0.3, function()
-      if saved then hs.pasteboard.setContents(saved) end
-    end)
-  end)
+  delivery.deliver(deliveryEnv(), {
+    text = text,
+    bundle = target ~= "" and target or nil,
+    windowId = windowId,
+  }, {
+    timeout = M.config.confirmTimeout,
+    onDone = function(result)
+      if result == "delivered" then
+        log.i("submit: delivered")
+      else
+        log.w("submit: " .. tostring(result))
+      end
+    end,
+  })
 end
 
 -- True when every modifier is Option. macOS 15+ may refuse such hotkeys.
@@ -174,6 +257,11 @@ end
 
 function M.start(cfg)
   for k, v in pairs(cfg or {}) do M.config[k] = v end
+  if M.config.activateDelay ~= nil then
+    -- Old key: submit now waits until the target is frontmost.
+    log.w("activateDelay is no longer used; set confirmTimeout instead")
+    M.config.activateDelay = nil
+  end
   hs.urlevent.bind("voicevim-submit", function(_, params) M.submit(params) end)
   -- hammerspoon://voicevim-start starts a session without the hotkey
   -- (Karabiner, a launcher, or `open -g` from a shell).

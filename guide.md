@@ -6,7 +6,8 @@ features land; anything not listed here does not exist yet.
 ## Start a session
 
 Press **Option+V** in any app. A Ghostty window opens with Neovim in insert
-mode, ready for dictation. The app you were in becomes the paste target.
+mode, ready for dictation. The window you were in (not just its app) becomes
+the paste target.
 
 ## Start without the hotkey
 
@@ -33,9 +34,11 @@ without leaving Neovim. Use it to add more text after editing.
 ## Submit
 
 `ZZ`, `Ctrl-X` in normal or insert mode, or `:Submit` writes the buffer,
-closes the window, and pastes the text
-into the target app at the cursor, replacing any selection. Your clipboard is
-restored afterwards.
+closes the window, brings the target window back to the front and pastes the
+text at the cursor, replacing any selection. The text stays on the clipboard
+afterwards. If the target cannot be confirmed in front within
+`confirmTimeout` seconds, nothing is pasted and an alert says
+"copied — paste manually".
 
 ## Cancel
 
@@ -70,6 +73,7 @@ require("voice-vim").start({
   captureSelection = true,      -- seed the buffer with the selection
   autoStartFlow = false,        -- start Flow hands-free on open
   terminal = "ghostty",         -- or "iTerm2"
+  confirmTimeout = 1.0,         -- seconds to wait for the target before giving up
 })
 ```
 
@@ -84,11 +88,15 @@ settings and mappings live in `vim/voice-vim.vim`.
 Run `./install.sh` once. Hammerspoon needs Accessibility (System Settings >
 Privacy & Security) and, on first use, Automation permission to control
 Ghostty. Hammerspoon only checks Accessibility at launch, so quit and relaunch
-it after granting. Without it, submit shows an alert and pastes nothing.
+it after granting. Without it, submit shows an alert, pastes nothing and
+leaves the text on the clipboard.
 
 ## Troubleshoot
 
-`hs -c 'hs.reload()'` reloads Hammerspoon from a shell. Run
+`hs -c 'hs.reload()'` reloads Hammerspoon from a shell. Each submit logs
+its steps (target, focus, frontmost checks, keystroke, clipboard) under the
+`voice-vim` logger in the Hammerspoon console. Run
 `bash tests/test-session.sh` and `bash tests/test-history.sh` after editing
 the session script, the database helper, or the sidebar, and
-`bash tests/test-hammerspoon.sh` after editing the Hammerspoon module.
+`bash tests/test-delivery.sh` and `bash tests/test-hammerspoon.sh` after
+editing the delivery core or the Hammerspoon module.

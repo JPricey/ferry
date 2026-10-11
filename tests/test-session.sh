@@ -18,4 +18,24 @@ run "unchanged seed cancels"    cancel 'true'                                 "h
 run "empty file cancels"        cancel ': > "${@: -1}"'                       ""
 run "whitespace only cancels"   cancel 'printf "  \n\n" > "${@: -1}"'         ""
 run "nonzero exit (cq) cancels" cancel 'printf "x\n" > "${@: -1}"; exit 1'    ""
+
+# Window id (3rd arg) reaches the callback URL. Dry run prints the URL
+# instead of opening it.
+url_case() { # name window-arg expect-substring|"!"absent-substring
+  local name=$1 win=$2 want=$3
+  local ed; ed=$(mktemp -t vv-ed); printf '#!/bin/bash\nprintf "hi\\n" > "${@: -1}"\n' > "$ed"; chmod +x "$ed"
+  local f; f=$(mktemp -t vv-file)
+  local url; url=$(VOICE_VIM_DRY_RUN=1 VOICE_VIM_EDITOR="$ed" ITERM_SESSION_ID= "$root/bin/voice-vim-session" "$f" com.example.app $win 2>&1 | sed -n 's/^voice-vim-url: //p')
+  local ok=1
+  case $want in
+    !*) [[ -n "$url" && "$url" != *"${want#!}"* ]] || ok=0 ;;
+    *)  [[ "$url" == *"$want"* ]] || ok=0 ;;
+  esac
+  if [ $ok = 1 ]; then echo "ok   $name"; else echo "FAIL $name: url '$url'"; fail=1; fi
+  rm -f "$ed" "$f"
+}
+url_case "window arg reaches URL"     4242 "window=4242"
+url_case "URL has target"             4242 "target=com.example.app"
+url_case "no window arg, no window="  ""   "!window="
+
 exit $fail

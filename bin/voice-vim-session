@@ -2,17 +2,19 @@
 # voice-vim-session: runs inside the terminal window (Ghostty by default)
 # that voice-vim opens.
 #
-# Usage: voice-vim-session <tmpfile> <target-bundle-id>
+# Usage: voice-vim-session <tmpfile> <target-bundle-id> [target-window-id]
 #
 # Opens the editor on <tmpfile> in insert mode, waits for it to exit, then
 # decides whether to submit or cancel:
 #   - editor exit code != 0 (e.g. :cq)            -> cancel
 #   - file unchanged from its seed, or empty       -> cancel
 #   - otherwise                                    -> submit
-# VOICE_VIM_DRY_RUN=1 prints the decision and exits without submitting.
+# VOICE_VIM_DRY_RUN=1 prints the decision (and, on submit, the callback URL
+# as `voice-vim-url: ...`) and exits without submitting.
 # Submit hands the file back to Hammerspoon via a hammerspoon:// URL, which
-# pastes it into the target app. If Hammerspoon is not running, falls back to
-# osascript (requires Accessibility for the terminal).
+# focuses the target window (or app) and pastes it there. If Hammerspoon is
+# not running, falls back to osascript (requires Accessibility for the
+# terminal).
 set -u
 
 # Launched from Hammerspoon (via Ghostty -e) we inherit a bare launchd PATH,
@@ -21,6 +23,7 @@ export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$HOME/.local/bin:/usr/local/bi
 
 file=${1:?tmpfile required}
 target=${2:-}
+window=${3:-}
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(dirname "$here")
 
@@ -64,15 +67,22 @@ case $outcome in
   *)      "$here/voice-vim-db" finish "$VOICE_VIM_SESSION_ID" cancelled "$file" || true ;;
 esac
 
+# URL-encode the path, bundle id and window id for the callback.
+enc() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$1"; }
+submit_url() {
+  local url="hammerspoon://voicevim-submit?file=$(enc "$file")&target=$(enc "$target")"
+  if [ -n "$window" ]; then url="$url&window=$(enc "$window")"; fi
+  printf '%s\n' "$url"
+}
+
 if [ "${VOICE_VIM_DRY_RUN:-0}" = "1" ]; then
+  if [ "$outcome" = submit ]; then echo "voice-vim-url: $(submit_url)"; fi
   exit 0
 fi
 
 if [ "$outcome" = submit ]; then
-  # URL-encode the path and bundle id for the callback.
-  enc() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$1"; }
   if pgrep -xq Hammerspoon; then
-    open -g "hammerspoon://voicevim-submit?file=$(enc "$file")&target=$(enc "$target")"
+    open -g "$(submit_url)"
   else
     "$here/voice-vim-paste" "$file" "$target"
     rm -f "$file"

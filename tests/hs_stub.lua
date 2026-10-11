@@ -77,7 +77,8 @@ function S.app(rec, opts)
   return a
 end
 
--- Window stub. opts: id, title, app (app stub).
+-- Window stub. opts: id, title, app (app stub), focusOnFocus (default true;
+-- false makes win:focus() record the call but leave focus where it was).
 function S.window(rec, opts)
   local w = { _id = opts.id, _title = opts.title or "", _app = opts.app }
   function w:id() return self._id end
@@ -85,8 +86,10 @@ function S.window(rec, opts)
   function w:application() return self._app end
   function w:focus()
     rec.focuses[#rec.focuses + 1] = self
-    rec.focusedWindow = self
-    if self._app then rec.frontmost = self._app end
+    if opts.focusOnFocus ~= false then
+      rec.focusedWindow = self
+      if self._app then rec.frontmost = self._app end
+    end
     return self
   end
   if opts.id then rec.windows[opts.id] = w end

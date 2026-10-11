@@ -12,7 +12,9 @@ typing in. See `motivations.md` for the why.
 3. Dictate with your normal Flow shortcut (or set `autoStartFlow = true` to
    start a hands-free session automatically). Flow pastes into the buffer.
 4. Edit. `ZZ` or `Ctrl-X` (or `:Submit`) pastes the text back into the
-   original app.
+   original window once it is confirmed in front, and leaves it on the
+   clipboard. If it cannot be confirmed, an alert says
+   "copied — paste manually".
    `ZQ` (or `:Cancel`) throws it away. Quitting with the buffer unchanged
    also cancels.
 
@@ -60,6 +62,7 @@ require("voice-vim").start({
   captureSelection = true,   -- copy selection into the buffer first
   autoStartFlow = false,     -- fire wispr-flow://start-hands-free on open
   terminal = "ghostty",      -- or "iTerm2"
+  confirmTimeout = 1.0,      -- seconds to wait for the target window
 })
 ```
 
@@ -68,9 +71,11 @@ to change it. Buffer-local settings live in `vim/voice-vim.vim`.
 
 ## Layout
 
-- `hammerspoon/voice-vim.lua` — hotkey, selection capture, terminal launch
-  (Ghostty via AppleScript, iTerm2 optional), paste-back via a
-  `hammerspoon://voicevim-submit` URL callback.
+- `hammerspoon/voice-vim.lua` — hotkey, target app/window and selection
+  capture, terminal launch (Ghostty via AppleScript, iTerm2 optional),
+  paste-back via a `hammerspoon://voicevim-submit` URL callback.
+- `lua/voice-vim/delivery.lua` — pure delivery core used by submit: set the
+  clipboard, focus the target, poll until it is frontmost, paste once.
 - `bin/voice-vim-session` — runs inside the terminal: opens the editor,
   decides submit vs cancel, calls back, closes its window.
 - `bin/voice-vim-paste` — osascript fallback paste when Hammerspoon is down.
@@ -81,6 +86,9 @@ to change it. Buffer-local settings live in `vim/voice-vim.vim`.
   list, get, delete).
 - `tests/test-session.sh` — decision-logic tests for the session script.
 - `tests/test-history.sh` — database helper, recording, and sidebar tests.
+- `tests/test-delivery.sh` — delivery core tests with a fake clock.
+- `tests/test-hammerspoon.sh` — loads the Hammerspoon module against a
+  stubbed `hs` (`tests/hs_stub.lua`) under `nvim -l`.
 
 ## Notes
 

@@ -32,7 +32,9 @@ defines the loop that moves the milestones forward with subagents.
 
 Layout is in `README.md`. User-facing usage is in `guide.md`. Run
 `bash tests/test-session.sh` and `bash tests/test-history.sh` after touching
-the session script, the database helper, or the sidebar. Hammerspoon is
+the session script, the database helper, or the sidebar, and
+`bash tests/test-delivery.sh` and `bash tests/test-hammerspoon.sh` after
+touching `lua/voice-vim/delivery.lua` or the Hammerspoon module. Hammerspoon is
 installed and the module is linked into `~/.hammerspoon/`; Accessibility
 permission must be granted manually, and Hammerspoon must be relaunched
 after granting it.
@@ -138,9 +140,10 @@ the personal dictionary, or by mirroring edits into Flow's `History` rows.
 ## V0 shape (as built)
 
 1. `hammerspoon/voice-vim.lua` hotkey handler records the frontmost app's
-   bundle id and grabs the selection with Cmd+C (clipboard restored after).
+   bundle id and the focused window's id (nil-guarded), and grabs the
+   selection with Cmd+C (clipboard restored after).
 2. It writes the selection to a temp file and opens a Ghostty window running
-   `bin/voice-vim-session <file> <bundle-id>`, via Ghostty's AppleScript
+   `bin/voice-vim-session <file> <bundle-id> [window-id]`, via Ghostty's AppleScript
    `new window with configuration {command:...}`. Ghostty closes the window
    when the command exits. iTerm2 remains available with
    `terminal = "iTerm2"`. Do not use `open -na Ghostty.app --args -e`: it
@@ -152,10 +155,18 @@ the personal dictionary, or by mirroring edits into Flow's `History` rows.
 4. Flow pastes the dictation into the buffer. The user edits.
 5. On editor exit the script decides: non-zero exit, empty, whitespace-only,
    or unchanged from seed means cancel; anything else means submit. Submit
-   calls `hammerspoon://voicevim-submit?file=&target=`; Hammerspoon reads
-   the file, puts it on the clipboard, activates the target, sends Cmd+V,
-   restores the clipboard, deletes the file. Under iTerm2 only, the script
-   also closes its own session by `ITERM_SESSION_ID`.
+   calls `hammerspoon://voicevim-submit?file=&target=&window=`
+   (`VOICE_VIM_DRY_RUN=1` prints it as `voice-vim-url: …` instead).
+   Hammerspoon reads and deletes the file, then runs
+   `lua/voice-vim/delivery.lua` (loaded with `dofile`, effects passed in as
+   an `env` built from `hs.*`): put the text on the clipboard, focus the
+   target window (or activate the app if the window is gone), poll every
+   0.05 s up to `confirmTimeout` (1.0 s) until it is frontmost, then post
+   one global Cmd+V (`hs.eventtap.keyStroke` with no app). If it never
+   comes to front, nothing is pasted and it alerts "copied — paste
+   manually". The clipboard is not restored. Each step is logged to the
+   `voice-vim` logger. Under iTerm2 only, the script also closes its own
+   session by `ITERM_SESSION_ID`.
 6. History: the session script calls `bin/voice-vim-db start` before the
    editor and `finish` after, recording target, seed, final text, and
    outcome in `~/Library/Application Support/voice-vim/history.sqlite`.

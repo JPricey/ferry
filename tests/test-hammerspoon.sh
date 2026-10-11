@@ -98,6 +98,7 @@ end
 do
   local rec, M = fresh()
   rec.frontmost = rec:app({ bundleID = "com.example.target", name = "Target" })
+  rec.focusedWindow = rec:window({ id = 77, app = rec.frontmost })
   M.start({ captureSelection = false })
   rec:openURL("voicevim-start", {})
   check("start URL launches terminal once", 1, #rec.osascripts)
@@ -105,12 +106,122 @@ do
   check("realpath ran through hs.execute", true, (rec.executes[1] and rec.executes[1].cmd or ""):find("realpath", 1, true) ~= nil)
   check("script runs the repo session script", true, script:find(root .. "/bin/voice-vim-session", 1, true) ~= nil)
   check("script passes the target bundle", true, script:find("com.example.target", 1, true) ~= nil)
+  check("script passes the focused window id", true, script:find("'com.example.target' '77'", 1, true) ~= nil)
   check("Ghostty is the default terminal", true, script:find('application "Ghostty"', 1, true) ~= nil)
   check("no keystrokes with captureSelection off", 0, #rec.keyStrokes)
   -- Clean up the temp file begin() wrote (and the os.tmpname placeholder).
   local file = script:match("'([^']*%-voice%-vim%.md)'")
   if file then os.remove(file); os.remove((file:gsub("%-voice%-vim%.md$", ""))) end
   check("temp file path found in script", true, file ~= nil)
+end
+
+-- No focused window: begin() still works and passes an empty window arg.
+do
+  local rec, M = fresh()
+  rec.frontmost = rec:app({ bundleID = "com.example.target" })
+  M.start({ captureSelection = false })
+  local ok = pcall(M.begin)
+  check("begin without focused window does not raise", true, ok)
+  local script = rec.osascripts[1] or ""
+  check("empty window arg when none focused", true, script:find("'com.example.target' ''", 1, true) ~= nil)
+  local file = script:match("'([^']*%-voice%-vim%.md)'")
+  if file then os.remove(file); os.remove((file:gsub("%-voice%-vim%.md$", ""))) end
+end
+
+-- Write a submit file the way the session script leaves it.
+local function submitFile(text)
+  local path = os.tmpname()
+  local f = assert(io.open(path, "w"))
+  f:write(text)
+  f:close()
+  return path
+end
+
+local function countAlerts(rec, needle)
+  local n = 0
+  for _, a in ipairs(rec.alerts) do
+    if a:find(needle, 1, true) then n = n + 1 end
+  end
+  return n
+end
+
+-- Setup shared by the submit cases: the voice-vim terminal is frontmost,
+-- the target app has window 4242.
+local function submitSetup(focusOnFocus)
+  local rec, M = fresh()
+  local term = rec:app({ bundleID = "com.mitchellh.ghostty" })
+  rec.frontmost = term
+  rec.focusedWindow = rec:window({ id = 9, app = term })
+  local target = rec:app({ bundleID = "com.example.target", frontmostOnActivate = focusOnFocus })
+  rec:window({ id = 4242, app = target, focusOnFocus = focusOnFocus })
+  M.start({ hotkey = { { "ctrl", "alt" }, "v" } })
+  return rec, M
+end
+
+-- Submit where the target window comes to front: one global Cmd+V.
+do
+  local rec = submitSetup(true)
+  local file = submitFile("hello there\n")
+  rec:openURL("voicevim-submit", { file = file, target = "com.example.target", window = "4242" })
+  rec:runTimers()
+  check("delivered: one keystroke", 1, #rec.keyStrokes)
+  local k = rec.keyStrokes[1] or { mods = {} }
+  check("delivered: keystroke is cmd+v", "cmd+v", table.concat(k.mods, "+") .. "+" .. tostring(k.key))
+  check("delivered: keystroke has no app argument", nil, k.app)
+  check("delivered: target window focused", 4242, rec.focuses[1] and rec.focuses[1]:id())
+  check("delivered: clipboard keeps the text", "hello there", rec.pasteboard.contents)
+  check("delivered: no alert", 0, #rec.alerts)
+  check("delivered: submit file removed", nil, io.open(file, "r"))
+  check("delivered: logs target", true, rec:hasLog("i", "submit: target=com.example.target window=4242"))
+  check("delivered: logs focus", true, rec:hasLog("i", "focusing window 4242"))
+  check("delivered: logs frontmost check", true, rec:hasLog("i", "deliver: poll 1"))
+  check("delivered: logs keystroke", true, rec:hasLog("i", "keystroke cmd+v posted"))
+  check("delivered: logs clipboard", true, rec:hasLog("i", "deliver: clipboard set"))
+  check("delivered: logs result", true, rec:hasLog("i", "submit: delivered"))
+end
+
+-- Submit where the target never comes to front: no paste, alert, text kept.
+do
+  local rec = submitSetup(false)
+  local file = submitFile("never mind\n")
+  rec:openURL("voicevim-submit", { file = file, target = "com.example.target", window = "4242" })
+  rec:runTimers()
+  check("unconfirmed: no keystroke", 0, #rec.keyStrokes)
+  check("unconfirmed: alert shown", 1, countAlerts(rec, "copied — paste manually"))
+  check("unconfirmed: clipboard holds the text", "never mind", rec.pasteboard.contents)
+  check("unconfirmed: logged", true, rec:hasLog("w", "submit: unconfirmed"))
+  check("unconfirmed: polled more than once", true, rec:hasLog("i", "deliver: poll 2"))
+end
+
+-- No window id (old URL): falls back to activating the app by bundle id.
+do
+  local rec = submitSetup(true)
+  local file = submitFile("by bundle")
+  rec:openURL("voicevim-submit", { file = file, target = "com.example.target" })
+  rec:runTimers()
+  check("bundle only: app activated", 1, #rec.activations)
+  check("bundle only: one keystroke", 1, #rec.keyStrokes)
+end
+
+-- No Accessibility: no keystroke, text left on the clipboard, alert.
+do
+  local rec = submitSetup(true)
+  rec.accessibility = false
+  local file = submitFile("no ax")
+  rec:openURL("voicevim-submit", { file = file, target = "com.example.target", window = "4242" })
+  rec:runTimers()
+  check("no AX: no keystroke", 0, #rec.keyStrokes)
+  check("no AX: alert", 1, countAlerts(rec, "Accessibility"))
+  check("no AX: clipboard holds the text", "no ax", rec.pasteboard.contents)
+end
+
+-- Old activateDelay config key is accepted with a warning.
+do
+  local rec, M = fresh()
+  local ok = pcall(M.start, { activateDelay = 0.25 })
+  check("activateDelay accepted", true, ok)
+  check("activateDelay warns", true, rec:hasLog("w", "confirmTimeout"))
+  check("confirmTimeout default", 1.0, M.config.confirmTimeout)
 end
 
 os.exit(fail)
