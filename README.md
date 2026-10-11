@@ -81,6 +81,8 @@ to change it. Buffer-local settings live in `vim/voice-vim.vim`.
   list, get, delete).
 - `tests/test-session.sh` — decision-logic tests for the session script.
 - `tests/test-history.sh` — database helper, recording, and sidebar tests.
+- `karabiner/` — optional Karabiner-Elements rules (Right Command as Hyper,
+  Hyper+V starts a session); not installed by `install.sh`.
 
 ## Notes
 
