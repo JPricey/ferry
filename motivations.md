@@ -24,6 +24,29 @@ Put a Vim buffer between the dictation and the destination.
 
 Vim becomes the review and correction step that dictation has always lacked.
 
+## Goals after V0 (2026-10-11)
+
+V0 was built, then dropped in daily use. Paste was unreliable, the hotkey
+was flaky, every press made a new window, and the history was not something
+you could browse like an app. Details are in `planning.md` under "Status and
+lessons". These goals replace the V0 goals where they conflict:
+
+- **One instance, shown and hidden by a hotkey.** Never a second window. It
+  appears instantly, because nvim is already running.
+- **Delivery you can trust.** The text reaches the right window, or at least
+  stays on the clipboard so a manual paste works. Never lose the text.
+- **Write first, choose where it goes after.** Targets: the app and window
+  you came from, the clipboard, a tmux pane (Claude Code sessions), and later
+  fleet sessions and tasks.
+- **A notes app for prompts.** Every note persists, including drafts. Browse
+  the history, search it, reopen a note, keep editing it, send it again.
+- **One composer for all text.** The same composer serves as `$EDITOR`
+  (Claude Code's Ctrl-G, `git commit`) and as the composer for fleet, Joe's
+  agent orchestration tool in `~/Code/fleet`.
+
+This changes one earlier non-goal. voice-vim is still not a general-purpose
+note-taking app, but it is now a notes app for dictated text and prompts.
+
 ## Short-term goals (V0)
 
 - A system-wide hotkey that opens a temporary Vim session ready for dictation.

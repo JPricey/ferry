@@ -1,19 +1,76 @@
 # voice-vim
 
-Dictate with Wispr Flow into an ephemeral Vim buffer, edit, then submit the
-result back to the text field that was focused when you started.
+Dictate with Wispr Flow into a Vim buffer, edit, then send the result where
+it needs to go. Today that is the text field that was focused when you
+started. The next direction is one always-running instance, targets chosen
+after writing, and a browsable notes history.
 
 Read `motivations.md` first for the why and the goal list. This file is the
 practical context an agent needs to work on the code.
 
 ## Status
 
-V0 works end to end. History (V2 in `planning.md`) has landed: sessions are
-recorded to SQLite and a Neovim sidebar lists them. Layout is in `README.md`. User-facing usage is in `guide.md`. Future brainstorming
-is in `planning.md`. Run `bash tests/test-session.sh` and
-`bash tests/test-history.sh` after touching the session script, the database
-helper, or the sidebar. Hammerspoon is installed and the module is linked
-into `~/.hammerspoon/`; Accessibility permission must be granted manually.
+V0 is built, but Joe stopped using it. Built: the hotkey, a new Ghostty +
+nvim window per press, submit by pasting into the start app, and a SQLite
+history with a sidebar. Problems in daily use:
+
+- paste was unreliable
+- the Option+V hotkey was flaky and at times did not fire
+- every press made a new window, so idle windows piled up
+- the history could not be browsed like an app
+
+Details and suspected causes are in `planning.md` under "Status and lessons".
+
+**Current plan:** `milestones.md` holds the milestones, their status,
+agent checks, Joe checks and tasks. The design behind them is in
+`planning.md` → "Next direction". The rest of `planning.md` is the earlier
+brainstorm and loses where it disagrees. Goals are in `motivations.md` →
+"Goals after V0".
+
+If Joe started you with `/orchestrate`, read `ORCHESTRATOR.md` next. It
+defines the loop that moves the milestones forward with subagents.
+
+Layout is in `README.md`. User-facing usage is in `guide.md`. Run
+`bash tests/test-session.sh` and `bash tests/test-history.sh` after touching
+the session script, the database helper, or the sidebar. Hammerspoon is
+installed and the module is linked into `~/.hammerspoon/`; Accessibility
+permission must be granted manually, and Hammerspoon must be relaunched
+after granting it.
+
+## Working on a milestone
+
+- Find the milestone and task your work belongs to in `milestones.md`.
+  Check the milestone's "Needs" line first.
+- Treat the task's verification and the milestone's agent checks as the
+  acceptance test. Show evidence that they hold.
+- Hotkey, paste, focus, window and Wispr Flow behavior depend on macOS
+  permissions and on Joe's screen. Tests cannot prove them. They are Joe
+  checks. Add logging (`hs.logger`, visible in the Hammerspoon console) and
+  write the exact steps for Joe to try.
+- Put testable logic in nvim Lua or shell, and test it with
+  `nvim --headless` or the shell tests. Keep the Hammerspoon layer thin.
+- When a milestone changes the plan, update `milestones.md` → "Changes to
+  this plan", the matching part of `planning.md` → "Next direction", and
+  `motivations.md` if a goal changed.
+
+## Do not touch the live system
+
+Joe's installed voice-vim is this repo: `~/.hammerspoon/voice-vim.lua` is a
+symlink into it. Edits here go live the next time Hammerspoon reloads.
+
+- Do not reload or relaunch Hammerspoon (`hs -c`, `hs.reload()`), run
+  `install.sh`, or edit `~/.hammerspoon/` or `~/.config/karabiner/`. Joe
+  does these as Joe checks.
+- Do not trigger the real hotkey, open voice-vim windows, or send
+  keystrokes or pastes to other apps.
+- Tests use a temp `VOICE_VIM_DB`, never the real history database at
+  `~/Library/Application Support/voice-vim/history.sqlite`.
+- Tests use their own nvim servers (`nvim --headless --listen <temp sock>`)
+  and their own tmux server (`tmux -L voicevim-test`), never Joe's.
+- Never write to Wispr Flow's database or config.
+- Fleet (`~/Code/fleet`) will use voice-vim as its composer, through the
+  contract in `planning.md` → "Fleet integration". Do not edit the fleet
+  repo from here. voice-vim must keep working with fleet absent.
 
 ## Owner and environment
 
