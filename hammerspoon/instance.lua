@@ -19,8 +19,10 @@
 --   isFocused()         -> bool, why: the host window has keyboard focus.
 --                       why is a short string for the log.
 --   launch(cb)          start the host UI attached to the server
---                       (`voice-vim-host attach-cmd`); cb(ok, why). Called by
---                       the controller when no UI is attached (task A4).
+--                       (`voice-vim-host attach-cmd`); cb(ok, why) once it
+--                       has been asked to. Called by show when `status`
+--                       reports no UI attached; the controller then calls
+--                       show once while polling, after cb.
 --
 -- toggle() (the hotkey):
 --   host focused -> `voice-vim-host draft`, host.hide, refocus the captured
@@ -28,7 +30,8 @@
 --   otherwise    -> capture the frontmost app + window (and, with
 --                   captureSelection, the selection as a seed file),
 --                   `voice-vim-host show <bundle> <window> [seedfile]`,
---                   host.show
+--                   `voice-vim-host status`, host.show (host.launch first
+--                   when status says uis=0)
 -- Each direction polls every pollInterval and logs to logger `voice-vim`,
 -- timed from the key press (so the show/draft call is included):
 --   show: show took N ms              hide: draft took N ms
@@ -41,11 +44,16 @@
 -- onHide() (hammerspoon://voicevim-hide, from :Hide / :Cancel in the note,
 --   which already wrote the draft): host.hide, refocus the target.
 --
--- Blocking: show and draft run on the main thread (hs.execute). Each is a
--- couple of --remote-expr round trips while the server is up, and fails at
--- once while it is down. ensure (a cold nvim start can take seconds) only
--- runs as an hs.task from prewarm(); a press during the pre-warm waits for
--- it instead of starting a second server.
+-- Blocking: show, status and draft run on the main thread (hs.execute).
+-- Each is a couple of --remote-expr round trips while the server is up, and
+-- fails at once while it is down. ensure (a cold nvim start can take
+-- seconds) only runs as an hs.task, from prewarm(); a press during the
+-- pre-warm waits for it instead of starting a second server.
+--
+-- Recovery: when show fails because the server is down, the controller
+-- runs the same async ensure and retries show once (logs `show: server
+-- down`). When `status` reports `uis=0`, it calls host.launch before
+-- polling (logs `show: no UI attached`), at most once per launchGrace.
 --
 -- captureSelection (default off): Cmd+C and a wait of up to 0.4 s for the
 -- clipboard before every show, which breaks the ~150 ms show target.
@@ -91,6 +99,8 @@ end
 --   pollInterval      seconds between focus checks (default 0.01)
 --   pollTimeout       seconds before a focus poll gives up (default 5)
 --   selectionTimeout  seconds to wait for Cmd+C to land (default 0.4)
+--   launchGrace       seconds after a host.launch during which uis=0 is
+--                     taken as the UI still starting (default 5)
 function I.new(cfg)
   cfg = cfg or {}
   local c = {
@@ -103,6 +113,7 @@ function I.new(cfg)
       pollInterval = cfg.pollInterval or 0.01,
       pollTimeout = cfg.pollTimeout or 5,
       selectionTimeout = cfg.selectionTimeout or 0.4,
+      launchGrace = cfg.launchGrace or 5,
     },
     host = cfg.host,
     deliver = cfg.deliver,
@@ -112,6 +123,7 @@ function I.new(cfg)
     _tasks = {},       -- running hs.task objects (kept so they are not collected)
     _warming = false,  -- a pre-warm `voice-vim-host ensure` is running
     _afterWarm = nil,  -- show continuation waiting for the pre-warm
+    _launchedAt = nil, -- nowMs() of the last host.launch (nil: none pending)
   }
   local log = hs.logger.new("voice-vim", "info")
   c.log = log
@@ -229,7 +241,8 @@ function I.new(cfg)
 
   -- Poll every pollInterval until check() is true or pollTimeout passes.
   -- t0 is the key press (nowMs), so the logged ms covers the whole press.
-  local function poll(label, what, t0, check)
+  -- onMiss (optional) runs after each check that fails.
+  local function poll(label, what, t0, check, onMiss)
     stopPoll()
     local function step()
       c._timer = nil
@@ -238,6 +251,7 @@ function I.new(cfg)
         log.i(string.format("%s: %s focused after %d ms", label, what, ms(elapsed)))
         return
       end
+      if onMiss then try(onMiss) end
       if elapsed >= c.config.pollTimeout * 1000 then
         log.w(string.format("%s: %s not focused after %d ms (%s)", label, what, ms(elapsed), describeFocus()))
         return
@@ -329,20 +343,83 @@ function I.new(cfg)
   -- -------------------------------------------------------------------------
   -- Show / hide
 
-  local function showRest(t0)
+  local function hostShow()
+    try(h.show, function(okShow, why)
+      if okShow == false then log.w("show: host.show failed: " .. tostring(why)) end
+    end)
+  end
+
+  -- Number of UIs attached to the server, from `voice-vim-host status`
+  -- (nil when it does not answer `up uis=N`).
+  local function attachedUIs()
+    local _, out = runSync("show", { "status" })
+    return tonumber(out:match("up uis=(%d+)"))
+  end
+
+  -- No UI attached: launch the host, then call host.show once while
+  -- polling, after launch has reported back. Within launchGrace of the
+  -- last launch the UI is taken as still starting, so a quick second press
+  -- never opens a second window.
+  local function launchAndPoll(t0)
+    local since = c._launchedAt and (nowMs() - c._launchedAt) or nil
+    if since and since < c.config.launchGrace * 1000 then
+      log.i(string.format("show: no UI attached yet, launched %d ms ago; showing", ms(since)))
+      hostShow()
+      poll("show", "host", t0, hostFocused)
+      return
+    end
+    log.i("show: no UI attached (uis=0), host.launch")
+    c._launchedAt = nowMs()
+    local launched, showed = false, false
+    if type(h.launch) == "function" then
+      local ok, err = pcall(h.launch, function(okLaunch, why)
+        launched = true
+        if okLaunch == false then
+          log.w("show: host.launch failed: " .. tostring(why))
+          c._launchedAt = nil
+        end
+      end)
+      if not ok then
+        log.w("show: host.launch error: " .. tostring(err))
+        c._launchedAt, launched = nil, true
+      end
+    else
+      launched = true
+    end
+    poll("show", "host", t0, hostFocused, function()
+      if launched and not showed then
+        showed = true
+        hostShow()
+      end
+    end)
+  end
+
+  -- again: { seed = path } on the one retry after the server was down.
+  local function showRest(t0, again)
     local args = { "show", c.target.bundle or "", c.target.winId and tostring(c.target.winId) or "" }
-    local seed = seedFile()
+    local seed
+    if again then seed = again.seed else seed = seedFile() end
     if seed then args[#args + 1] = seed end
-    local ok = runSync("show", args)
+    local ok, out = runSync("show", args)
+    if not ok and not again and out:find("no server on", 1, true) then
+      log.w("show: server down; voice-vim-host ensure, then retry show once")
+      c._afterWarm = function() showRest(t0, { seed = seed }) end
+      c.prewarm()
+      return
+    end
     if seed then os.remove(seed) end
     if not ok then
       alert("voice-vim: could not open the note (see console)")
       return
     end
     c.shown = true
-    try(h.show, function(okShow, why)
-      if okShow == false then log.w("show: host.show failed: " .. tostring(why)) end
-    end)
+    local uis = attachedUIs()
+    if uis == 0 then
+      launchAndPoll(t0)
+      return
+    end
+    if uis then c._launchedAt = nil else log.w("show: status did not report uis") end
+    hostShow()
     poll("show", "host", t0, hostFocused)
   end
 

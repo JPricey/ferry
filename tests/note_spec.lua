@@ -86,8 +86,17 @@ check("Submit records a submitted row with the text", "submitted hello world",
   outcome(id1) .. " " .. ((row(id1) or {}).preview or ""))
 check("Submit drops the note file", 0, vim.fn.filereadable(p1))
 check("Submit leaves the server running", vim.NIL, vim.v.exiting)
+check("submit file is <notes>/outbox/<id>.md", vim.env.VOICE_VIM_NOTES_DIR .. "/outbox/" .. id1 .. ".md", c[2].file)
+local blank_id = (vim.b.voicevim or {}).id
+check("after Submit the window shows a new empty note with :Hide and the :q abbreviation",
+  "markdown 2 true ",
+  table.concat({ vim.bo.filetype, vim.fn.exists(":Hide"),
+    tostring(blank_id ~= nil and blank_id ~= id1 and vim.fn.maparg("q", "c", true) ~= ""),
+    table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|") }, " "))
+check("the blank note has no history row before show", "none", outcome(blank_id))
 local p2, id2 = show()
 check("after Submit the next show is fresh", true, p2 ~= p1 and id2 ~= id1)
+check("next show resumes the blank note", blank_id, id2)
 check("fresh note is empty", "", table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|"))
 -- history start runs in the background; give it a moment.
 vim.wait(3000, function() return outcome(id2) == "open" end, 20)
@@ -111,7 +120,15 @@ check("blank Submit drops the row", "none", outcome(id3))
 
 -- --- unchanged-seed Submit -----------------------------------------------
 reset()
+local blank4 = vim.b.voicevim.id
 local _, id4 = show("selected text\nline two")
+local function has_buf(id)
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(b) and (vim.b[b].voicevim or {}).id == id then return true end
+  end
+  return false
+end
+check("a seeded show drops the unused blank note", "none false", outcome(blank4) .. " " .. tostring(has_buf(blank4)))
 check("seeded note shows the seed", "selected text|line two", table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|"))
 vim.cmd("Submit")
 check("unchanged-seed Submit calls host.hide only", "hide", kinds())

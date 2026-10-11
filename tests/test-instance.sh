@@ -12,6 +12,7 @@ work=$(mktemp -d /tmp/vvi.XXXX)
 [ -n "$work" ] && [ -d "$work" ] || { echo "mktemp failed" >&2; exit 1; }
 cleanup() {
   pkill -f -- "--listen $work/" 2>/dev/null
+  pkill -f -- "$work/ui.py" 2>/dev/null
   rm -rf "$work"
 }
 trap cleanup EXIT
@@ -25,6 +26,18 @@ done
 export PATH="$work/fakes:$PATH" VOICE_VIM_DB="$work/history.sqlite"
 # The controller must pass these itself.
 unset VOICE_VIM_SOCK VOICE_VIM_NOTES_DIR VOICE_VIM_HOST_NVIM_FLAGS
+
+# A stand-in UI: attaches to a server over its socket with a raw msgpack
+# nvim_ui_attach request, then drains redraws until killed.
+cat > "$work/ui.py" <<'PY'
+import socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.connect(sys.argv[1])
+name = b"nvim_ui_attach"
+s.sendall(bytes([0x94, 0, 1, 0xa0 | len(name)]) + name + bytes([0x93, 80, 24, 0x80]))
+while s.recv(65536):
+    pass
+PY
 
 cat > "$work/spec.lua" <<'LUA'
 local root = assert(os.getenv("VV_ROOT"))
@@ -75,6 +88,24 @@ local function ask(sock, expr)
 end
 local function servers(sock)
   return tonumber(sh("pgrep -f -- '--listen " .. sock .. "' | wc -l")) or -1
+end
+local function status(sock) return sh(hostEnv(sock) .. "status") end
+local function q(s) return "'" .. (tostring(s):gsub("'", "'\\''")) .. "'" end
+-- Run a recorded hs.task's real command, then finish it with its exit code.
+local function runTask(rec, i)
+  local t = rec.tasks[i]
+  local out = sh(t.path .. " " .. q(t.args[1]) .. " " .. q(t.args[2]) .. "; echo \"rc=$?\"")
+  local rc = tonumber(out:match("rc=(%d+)$")) or 1
+  rec:finishTask(i, rc, out, "")
+end
+-- Attach a stand-in UI to sock; returns its pid once status shows it.
+local function attachUI(sock)
+  local pid = sh("python3 '" .. work .. "/ui.py' '" .. sock .. "' </dev/null >/dev/null 2>&1 & echo $!")
+  for _ = 1, 100 do
+    if status(sock) == "up uis=1" then break end
+    sh("sleep 0.05")
+  end
+  return pid
 end
 
 -- A target app with window 4242 in front, a stub host that records calls
@@ -193,7 +224,8 @@ do
   rec:runTimers()
   local p = { file = "/tmp/x.md", target = "com.example.target", window = "4242" }
   c.onSubmit(p)
-  check("onSubmit calls host.hide before deliver", "host.show,host.hide,deliver", table.concat(t.order, ","))
+  check("onSubmit calls host.hide before deliver", "host.launch,host.show,host.hide,deliver",
+    table.concat(t.order, ","))
   check("onSubmit passes the same params to deliver", p, t.delivered[1])
   check("onSubmit runs no draft", 0, #execs(rec, "'draft'"))
   check("shown is false after onSubmit", false, c.shown)
@@ -244,14 +276,76 @@ do
   stop(sock)
 end
 
--- Server down: show fails, alert, host not shown.
+-- Server down: show fails, ensure runs as an hs.task, show is retried once.
 do
   local t = setup()
-  stop(t.sock)
-  t.c.toggle()
-  check("server down: alert", true, #t.rec.alerts == 1 and has(t.rec.alerts[1], "could not open the note"))
-  check("server down: no host.show", 0, count(t.order, "host.show"))
-  check("server down: shown stays false", false, t.c.shown)
+  local rec, c, sock = t.rec, t.c, t.sock
+  stop(sock)
+  c.toggle()
+  check("server down: logged", true, rec:hasLog("w", "show: server down"))
+  local task = rec.tasks[#rec.tasks]
+  check("server down: ensure started as a second hs.task", true,
+    #rec.tasks == 2 and has(task.args[2], "'ensure'") and has(task.args[2], sock) and task.started)
+  check("server down: no alert, no host.show yet", "0 0", #rec.alerts .. " " .. count(t.order, "host.show"))
+  runTask(rec, #rec.tasks)  -- the task's real command
+  check("after voice-vim-host stop, a toggle restarts the server", "1 up uis=0", servers(sock) .. " " .. status(sock))
+  check("server down: show retried once", 2, #execs(rec, "'show' 'com.example.target' '4242'"))
+  check("restarted server: note in insert mode with target 4242", "i com.example.target 4242",
+    ask(sock, 'mode()." ".b:voicevim.target." ".b:voicevim.window'))
+  rec:runTimers()
+  check("restarted server: one host.show, host focused", "1 true",
+    count(t.order, "host.show") .. " " .. tostring(rec:hasLog("i", "show: host focused after")))
+  check("restarted server: shown, no alert", "true 0", tostring(c.shown) .. " " .. #rec.alerts)
+  stop(sock)
+end
+
+-- Server down and ensure fails: one retry, then alert; no second ensure.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  stop(sock)
+  c.toggle()
+  rec:finishTask(#rec.tasks, 1, "", "failed")  -- ensure failed, no server
+  check("ensure failed: show tried twice", 2, #execs(rec, "'show' 'com.example.target' '4242'"))
+  check("ensure failed: alert", true, #rec.alerts == 1 and has(rec.alerts[1], "could not open the note"))
+  check("ensure failed: no further ensure", 2, #rec.tasks)
+  check("ensure failed: no host.show, shown stays false", "0 false",
+    count(t.order, "host.show") .. " " .. tostring(c.shown))
+end
+
+-- No UI attached (uis=0): host.launch once before polling, then host.show.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  check("headless server reports uis=0", "up uis=0", status(sock))
+  c.toggle()
+  check("uis=0: status runs after show", 1, #execs(rec, "'status'"))
+  check("uis=0: host.launch called exactly once", 1, count(t.order, "host.launch"))
+  check("uis=0: launch logged", true, rec:hasLog("i", "show: no UI attached (uis=0), host.launch"))
+  rec:runTimers()
+  check("uis=0: host.show once after launch, then focused", "host.launch,host.show true",
+    table.concat(t.order, ",") .. " " .. tostring(rec:hasLog("i", "show: host focused after")))
+  c.toggle()  -- hide
+  c.toggle()  -- show again, UI still not attached, within launchGrace
+  rec:runTimers()
+  check("uis=0 within launchGrace: no second host.launch", 1, count(t.order, "host.launch"))
+  check("uis=0 within launchGrace: host.show again", 2, count(t.order, "host.show"))
+  stop(sock)
+end
+
+-- A UI attached: no host.launch.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  local pid = attachUI(sock)
+  check("stand-in UI attached", "up uis=1", status(sock))
+  c.toggle()
+  rec:runTimers()
+  check("UI attached: host.launch not called", 0, count(t.order, "host.launch"))
+  check("UI attached: one host.show, focused", "host.show true",
+    table.concat(t.order, ",") .. " " .. tostring(rec:hasLog("i", "show: host focused after")))
+  sh("kill " .. pid)
+  stop(sock)
 end
 
 -- captureSelection on: Cmd+C into the target, selection seeds a fresh note.

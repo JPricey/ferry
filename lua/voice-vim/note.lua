@@ -10,13 +10,19 @@
 --
 -- In a note, :Submit (ZZ, <C-x>, :wq, :x), :Cancel (ZQ) and :Hide (:q)
 -- call M.host instead of exiting. Hide keeps the note as the draft.
+-- Submit files go in <notes dir>/outbox/ (they must outlive the server, so
+-- not vim.fn.tempname()). After Submit or Cancel the window shows a new,
+-- empty note, so :q there still hides instead of quitting the server.
 local M = {}
 
--- The current (unfinished) note: { id = uuid, path = file, buf = bufnr }.
-M.state = { note = nil, cursor = nil }
+-- The current (unfinished) note: { id = uuid, path = file, buf = bufnr,
+-- unstarted = true while it has no history row (see blank()) }.
+-- dir: the notes folder of the last show().
+M.state = { note = nil, cursor = nil, dir = nil }
 
 local function notes_dir(opts)
   if opts and opts.dir and opts.dir ~= "" then return opts.dir end
+  if M.state.dir then return M.state.dir end
   local env = os.getenv("VOICE_VIM_NOTES_DIR")
   if env and env ~= "" then return env end
   local tmp = (os.getenv("TMPDIR") or "/tmp"):gsub("/$", "")
@@ -191,9 +197,8 @@ local function save(note)
   end
 end
 
-local function fresh(opts, seed)
-  save(M.state.note)
-  local dir = notes_dir(opts)
+-- A new note buffer with the note options, shown in the current window.
+local function new_note(dir)
   vim.fn.mkdir(dir, "p")
   local id = M.uuid()
   local note = { id = id, path = dir .. "/" .. id .. ".md" }
@@ -201,6 +206,24 @@ local function fresh(opts, seed)
   vim.fn.bufload(note.buf)
   display(note.buf)
   M.apply_options(note.buf)
+  return note
+end
+
+-- Drop a note that never got a history row and was never edited.
+local function discard_unstarted(note)
+  if not (note and note.unstarted) then return false end
+  local buf = note.buf
+  if buf and vim.api.nvim_buf_is_valid(buf) then
+    if vim.bo[buf].modified or vim.fn.filereadable(note.path) == 1 then return false end
+    pcall(vim.api.nvim_buf_delete, buf, { force = true })
+  end
+  return true
+end
+
+local function fresh(opts, seed)
+  if not discard_unstarted(M.state.note) then save(M.state.note) end
+  local note = new_note(notes_dir(opts))
+  local id = note.id
   if seed ~= "" then
     vim.api.nvim_buf_set_lines(note.buf, 0, -1, false, vim.split(seed, "\n", { plain = true }))
   end
@@ -220,6 +243,10 @@ local function resume(opts)
   local meta = vim.b[buf].voicevim or { id = note.id, seed = "" }
   meta.target, meta.window = opts.target or "", opts.window or ""
   vim.b[buf].voicevim = meta
+  if note.unstarted then
+    note.unstarted = nil
+    history_start(note.id, meta.target, "")
+  end
   -- Put the cursor back where draft() found it. In insert mode it may sit
   -- just past the end of the line, which normal mode cannot hold.
   local cur = M.state.cursor
@@ -240,6 +267,7 @@ end
 -- A resumed note takes the new target and window. Returns the note's path.
 function M.show(opts)
   opts = opts or {}
+  if opts.dir and opts.dir ~= "" then M.state.dir = opts.dir end
   local seed = read_seed(opts.seed)
   local note
   if seed == "" and M.state.note then
@@ -275,23 +303,51 @@ function M.forget()
   M.state.note, M.state.cursor = nil, nil
 end
 
--- End a note: record the outcome, forget it, and drop its buffer and file.
--- Windows that showed it get an empty buffer, so the layout stays.
+-- An empty note that takes the place of a finished one, so :q in its
+-- window hides rather than quitting the server. It is the current note
+-- (the next unseeded show resumes it) but gets its history row only then.
+local function blank(wins)
+  local cur = vim.api.nvim_get_current_win()
+  local win = wins[1] or cur
+  local note
+  vim.api.nvim_win_call(win, function() note = new_note(notes_dir()) end)
+  for i = 2, #wins do
+    vim.api.nvim_win_call(wins[i], function()
+      vim.api.nvim_win_set_buf(0, note.buf)
+      M.apply_options(note.buf)
+    end)
+  end
+  note.unstarted = true
+  vim.b[note.buf].voicevim = { id = note.id, target = "", window = "", seed = "" }
+  M.state.note, M.state.cursor = note, nil
+  return note
+end
+
+-- End a note: record the outcome, and drop its buffer and file. If it was
+-- the current note, a blank note replaces it in its windows.
 local function finish(buf, outcome, file)
   local meta = vim.b[buf].voicevim or {}
-  if meta.id then history_finish(meta.id, outcome, file) end
   local note = M.state.note
+  local current = note and note.buf == buf
+  if meta.id then
+    -- A blank note submitted before any show has no row yet.
+    if current and note.unstarted then history_start(meta.id, meta.target, "") end
+    history_finish(meta.id, outcome, file)
+  end
   local path = vim.api.nvim_buf_get_name(buf)
-  if note and note.buf == buf then
+  if current then
     path = note.path
     M.forget()
   end
   vim.g.voicevim_draft = nil
   vim.cmd("stopinsert")
-  local empty = vim.api.nvim_create_buf(true, false)
-  vim.bo[empty].bufhidden = "wipe"
-  for _, win in ipairs(vim.fn.win_findbuf(buf)) do
-    vim.api.nvim_win_set_buf(win, empty)
+  local wins = vim.fn.win_findbuf(buf)
+  if current then
+    blank(wins)
+  else
+    local empty = vim.api.nvim_create_buf(true, false)
+    vim.bo[empty].bufhidden = "wipe"
+    for _, win in ipairs(wins) do vim.api.nvim_win_set_buf(win, empty) end
   end
   pcall(vim.api.nvim_buf_delete, buf, { force = true })
   if path ~= "" then os.remove(path) end
@@ -301,9 +357,14 @@ local function text_of(buf)
   return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
 end
 
--- Write buf's text to a temp file and return its path.
+-- Write buf's text to <notes dir>/outbox/<id>.md and return its path. Not
+-- vim.fn.tempname(): nvim deletes that folder on exit, and Hammerspoon
+-- reads (then deletes) the submit file after the URL is opened.
 local function to_tempfile(buf)
-  local file = vim.fn.tempname() .. ".md"
+  local dir = notes_dir() .. "/outbox"
+  vim.fn.mkdir(dir, "p")
+  local id = (vim.b[buf].voicevim or {}).id or M.uuid()
+  local file = dir .. "/" .. id .. ".md"
   vim.fn.writefile(vim.api.nvim_buf_get_lines(buf, 0, -1, false), file)
   return file
 end

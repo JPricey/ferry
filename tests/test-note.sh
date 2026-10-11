@@ -84,6 +84,20 @@ id=$(ask 'b:voicevim.id'); waitrow "$id" open
 send 'drop me<Esc>ZQ'
 check "ZQ cancels" "hide cancelled" "$(url_kind "$(opened)") $(outcome "$id")"
 check "server still running after all keys" "$pid" "$(ask 'getpid()')"
+
+# Submit file in the outbox; after Submit, :q in that window still hides.
+"$host" show com.example.app 4242 >/dev/null
+id=$(ask 'b:voicevim.id'); waitrow "$id" open
+send 'to outbox<Esc>ZZ'
+url=$(opened)
+file=$(python3 -c 'import sys, urllib.parse as u; print(u.parse_qs(u.urlsplit(sys.argv[1]).query)["file"][0])' "${url#-g }")
+check "submit file path is under the outbox dir" "$VOICE_VIM_NOTES_DIR/outbox/$id.md" "$file"
+check "after Submit the window shows a fresh note" "markdown 1 2" \
+  "$(ask '&filetype." ".exists("b:voicevim")." ".exists(":Hide")')"
+send ':q<CR>'
+check "after Submit, :q in that window hides" hide "$(url_kind "$(opened)")"
+check "after Submit, :q in that window leaves the server running" "$pid" "$(ask 'getpid()')"
 "$host" stop
+check "submit file survives voice-vim-host stop" "to outbox" "$(cat "$file" 2>&1)"
 
 exit $fail
