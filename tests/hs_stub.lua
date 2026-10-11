@@ -22,6 +22,7 @@
 --   rec.activations  app stubs passed to app:activate()
 --   rec.focuses      window stubs passed to win:focus()
 --   rec.timers       {delay, fn, fired}  (run them with rec:runTimers())
+--   rec.windowGets   number of hs.window.get calls
 --
 -- Controls (set on rec before or between calls):
 --   rec.hotkeyBind     nil, or function(mods, key, fn) whose result is returned
@@ -30,6 +31,7 @@
 --   rec.apps           bundle id -> app stub, for hs.application.get
 --   rec.focusedWindow  window stub returned by hs.window.focusedWindow
 --   rec.windows        window id -> window stub, for hs.window.get
+--   rec:closeWindow(id)  the window's id() then returns nil, get() misses it
 --   rec.accessibility  value of hs.accessibilityState() (default true)
 --   rec.osascriptResult  {ok, result, err} returned by hs.osascript.applescript
 --   rec.pasteboard     {contents = string|nil, changeCount = n}
@@ -81,7 +83,10 @@ end
 -- false makes win:focus() record the call but leave focus where it was).
 function S.window(rec, opts)
   local w = { _id = opts.id, _title = opts.title or "", _app = opts.app }
-  function w:id() return self._id end
+  function w:id()
+    if self._closed then return nil end
+    return self._id
+  end
   function w:title() return self._title end
   function w:application() return self._app end
   function w:focus()
@@ -102,13 +107,19 @@ function S.install()
     hotkeyBinds = {}, urlBinds = {}, urlBindOrder = {}, alerts = {},
     keyStrokes = {}, logs = {}, executes = {}, osascripts = {},
     pasteboardSets = {}, activations = {}, focuses = {}, timers = {},
-    apps = {}, windows = {}, accessibility = true,
+    apps = {}, windows = {}, windowGets = 0, accessibility = true,
     pasteboard = { contents = nil, changeCount = 0 },
     clock = 1000,
   }
 
   function rec:app(opts) return S.app(self, opts) end
   function rec:window(opts) return S.window(self, opts) end
+  function rec:closeWindow(id)
+    local w = self.windows[id]
+    if w then w._closed = true end
+    self.windows[id] = nil
+    if self.focusedWindow == w then self.focusedWindow = nil end
+  end
 
   -- Logs at `level` whose message contains `needle` (plain match).
   function rec:findLogs(level, needle)
@@ -207,7 +218,10 @@ function S.install()
 
   hs.window = {
     focusedWindow = function() return rec.focusedWindow end,
-    get = function(id) return rec.windows[id] end,
+    get = function(id)
+      rec.windowGets = rec.windowGets + 1
+      return rec.windows[id]
+    end,
   }
 
   hs.eventtap = {

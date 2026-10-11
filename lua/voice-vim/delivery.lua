@@ -22,6 +22,7 @@ local M = {}
 M.defaults = {
   interval = 0.05, -- seconds between frontmost polls
   timeout = 1.0, -- give up after this many seconds
+  settle = 0.05, -- after a match, wait this long and re-check before pasting
   restoreClipboard = false, -- restore the old clipboard after a paste
   restoreDelay = 0.3, -- seconds after the paste before restoring
 }
@@ -54,12 +55,13 @@ function M.matches(env, target, front)
 end
 
 -- deliver(env, { text, bundle, windowId }, opts)
--- opts: interval, timeout, restoreClipboard, restoreDelay,
+-- opts: interval, timeout, settle, restoreClipboard, restoreDelay,
 --       onDone(result) with result "delivered" | "unconfirmed" | "empty".
 function M.deliver(env, target, opts)
   opts = opts or {}
   local interval = opts.interval or M.defaults.interval
   local timeout = opts.timeout or M.defaults.timeout
+  local settle = opts.settle or M.defaults.settle
   local restore = opts.restoreClipboard or M.defaults.restoreClipboard
   local restoreDelay = opts.restoreDelay or M.defaults.restoreDelay
   local onDone = opts.onDone or function() end
@@ -93,30 +95,57 @@ function M.deliver(env, target, opts)
 
   local start = env.now()
   local polls = 0
-  local function poll()
-    polls = polls + 1
-    local front = env.frontmost()
-    local elapsed = env.now() - start
-    env.log(string.format("deliver: poll %d t=%.2f frontmost %s", polls, elapsed, describe(front or {})))
-    if M.matches(env, target, front) then
-      env.postPaste()
-      env.log("deliver: paste posted")
-      env.log("deliver: delivered after " .. polls .. " polls")
-      if restore then
-        env.after(restoreDelay, function()
-          if saved ~= nil then env.setClipboard(saved) end
-          env.log("deliver: clipboard restored")
-        end)
-      end
-      onDone("delivered")
-      return
+  local poll
+
+  local function paste()
+    env.postPaste()
+    env.log("deliver: paste posted")
+    env.log("deliver: delivered after " .. polls .. " polls")
+    if restore then
+      env.after(restoreDelay, function()
+        if saved ~= nil then env.setClipboard(saved) end
+        env.log("deliver: clipboard restored")
+      end)
     end
+    onDone("delivered")
+  end
+
+  -- Poll again after `interval`, or give up once the timeout is reached.
+  local function continueOrGiveUp()
+    local elapsed = env.now() - start
     -- Small epsilon so float accumulation in the clock does not add a poll.
     if elapsed + interval > timeout + 1e-9 then
       unconfirmed("target not frontmost after " .. polls .. " polls")
       return
     end
     env.after(interval, poll)
+  end
+
+  poll = function()
+    polls = polls + 1
+    local front = env.frontmost()
+    local elapsed = env.now() - start
+    env.log(string.format("deliver: poll %d t=%.2f frontmost %s", polls, elapsed, describe(front or {})))
+    if not M.matches(env, target, front) then
+      continueOrGiveUp()
+      return
+    end
+    if settle <= 0 then
+      paste()
+      return
+    end
+    -- A just-focused window may not accept keys yet: wait, then re-check.
+    env.log(string.format("deliver: matched, settling %.2fs", settle))
+    env.after(settle, function()
+      local again = env.frontmost()
+      if M.matches(env, target, again) then
+        env.log("deliver: still frontmost after settle")
+        paste()
+        return
+      end
+      env.log("deliver: match lost during settle, frontmost " .. describe(again or {}))
+      continueOrGiveUp()
+    end)
   end
   poll()
 end

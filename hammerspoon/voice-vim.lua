@@ -140,11 +140,21 @@ function M.begin()
 end
 
 -- Load the pure delivery core from the repo. Returns the module or nil.
+-- repoRoot() runs inside the pcall too, so any failure ends up here.
 local function loadDelivery()
-  local ok, mod = pcall(dofile, repoRoot() .. "/lua/voice-vim/delivery.lua")
-  if ok and type(mod) == "table" then return mod end
+  local ok, mod = pcall(function()
+    return dofile(repoRoot() .. "/lua/voice-vim/delivery.lua")
+  end)
+  if ok and type(mod) == "table" and type(mod.deliver) == "function" then return mod end
   log.e("submit: cannot load delivery.lua: " .. tostring(mod))
   return nil
+end
+
+-- Fallback when delivery cannot run: leave the text on the clipboard.
+local function copyOnly(text, why)
+  log.e("submit: " .. why .. "; text left on clipboard")
+  pcall(hs.pasteboard.setContents, text)
+  hs.alert.show("copied — paste manually")
 end
 
 -- Timers from hs.timer.doAfter are kept referenced until they fire so they
@@ -152,14 +162,17 @@ end
 local pending = {}
 
 -- The env table delivery.lua runs against, built from the real hs APIs.
-local function deliveryEnv()
+-- `win` is the target window object, resolved once per submit (nil if none);
+-- hs.window.get scans every window, so it is not called on each poll.
+local function deliveryEnv(win, text)
   local env = {}
   env.now = function() return hs.timer.secondsSinceEpoch() end
   env.after = function(sec, fn)
     local t
     t = hs.timer.doAfter(sec, function()
       if t then pending[t] = nil end
-      fn()
+      local ok, err = pcall(fn)
+      if not ok then copyOnly(text, "delivery error: " .. tostring(err)) end
     end)
     if t then pending[t] = true end
   end
@@ -168,10 +181,15 @@ local function deliveryEnv()
     local win = hs.window.focusedWindow()
     return { bundle = app and app:bundleID() or nil, windowId = win and win:id() or nil }
   end
-  env.windowExists = function(id) return id ~= nil and hs.window.get(id) ~= nil end
+  -- Cheap: asks the captured window object for its id. A closed window
+  -- returns nil (or errors), which counts as gone.
+  env.windowExists = function(id)
+    if id == nil or win == nil then return false end
+    local ok, wid = pcall(function() return win:id() end)
+    return ok and wid == id
+  end
   env.focus = function(target)
-    local win = target.windowId and hs.window.get(target.windowId) or nil
-    if win then
+    if win and env.windowExists(target.windowId) then
       log.i("submit: focusing window " .. tostring(target.windowId))
       win:focus()
       return
@@ -224,25 +242,29 @@ function M.submit(params)
 
   local delivery = loadDelivery()
   if not delivery then
-    hs.pasteboard.setContents(text)
-    hs.alert.show("copied — paste manually")
+    copyOnly(text, "delivery.lua unavailable")
     return
   end
 
-  delivery.deliver(deliveryEnv(), {
-    text = text,
-    bundle = target ~= "" and target or nil,
-    windowId = windowId,
-  }, {
-    timeout = M.config.confirmTimeout,
-    onDone = function(result)
-      if result == "delivered" then
-        log.i("submit: delivered")
-      else
-        log.w("submit: " .. tostring(result))
-      end
-    end,
-  })
+  local ok, err = pcall(function()
+    local win = windowId and hs.window.get(windowId) or nil
+    log.i("submit: target window " .. tostring(windowId) .. (win and " found" or " not found"))
+    delivery.deliver(deliveryEnv(win, text), {
+      text = text,
+      bundle = target ~= "" and target or nil,
+      windowId = windowId,
+    }, {
+      timeout = M.config.confirmTimeout,
+      onDone = function(result)
+        if result == "delivered" then
+          log.i("submit: delivered")
+        else
+          log.w("submit: " .. tostring(result))
+        end
+      end,
+    })
+  end)
+  if not ok then copyOnly(text, "delivery error: " .. tostring(err)) end
 end
 
 -- True when every modifier is Option. macOS 15+ may refuse such hotkeys.

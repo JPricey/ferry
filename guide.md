@@ -45,8 +45,8 @@ without leaving Neovim. Use it to add more text after editing.
 closes the window, brings the target window back to the front and pastes the
 text at the cursor, replacing any selection. The text stays on the clipboard
 afterwards. If the target cannot be confirmed in front within
-`confirmTimeout` seconds, nothing is pasted and an alert says
-"copied — paste manually".
+`confirmTimeout` seconds, or delivery fails, nothing is pasted and an alert
+says "copied — paste manually".
 
 ## Cancel
 

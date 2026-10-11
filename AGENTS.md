@@ -161,9 +161,11 @@ the personal dictionary, or by mirroring edits into Flow's `History` rows.
    `lua/voice-vim/delivery.lua` (loaded with `dofile`, effects passed in as
    an `env` built from `hs.*`): put the text on the clipboard, focus the
    target window (or activate the app if the window is gone), poll every
-   0.05 s up to `confirmTimeout` (1.0 s) until it is frontmost, then post
-   one global Cmd+V (`hs.eventtap.keyStroke` with no app). If it never
-   comes to front, nothing is pasted and it alerts "copied — paste
+   0.05 s up to `confirmTimeout` (1.0 s) until it is frontmost, wait a
+   0.05 s settle and re-check, then post one global Cmd+V
+   (`hs.eventtap.keyStroke` with no app). The target window is looked up
+   once per submit. If it never comes to front, or delivery.lua fails to
+   load or errors, nothing is pasted and it alerts "copied — paste
    manually". The clipboard is not restored. Each step is logged to the
    `voice-vim` logger. Under iTerm2 only, the script also closes its own
    session by `ITERM_SESSION_ID`.

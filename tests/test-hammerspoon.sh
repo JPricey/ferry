@@ -178,6 +178,7 @@ do
   check("delivered: logs keystroke", true, rec:hasLog("i", "keystroke cmd+v posted"))
   check("delivered: logs clipboard", true, rec:hasLog("i", "deliver: clipboard set"))
   check("delivered: logs result", true, rec:hasLog("i", "submit: delivered"))
+  check("delivered: hs.window.get called once", 1, rec.windowGets)
 end
 
 -- Submit where the target never comes to front: no paste, alert, text kept.
@@ -191,6 +192,59 @@ do
   check("unconfirmed: clipboard holds the text", "never mind", rec.pasteboard.contents)
   check("unconfirmed: logged", true, rec:hasLog("w", "submit: unconfirmed"))
   check("unconfirmed: polled more than once", true, rec:hasLog("i", "deliver: poll 2"))
+  check("unconfirmed: hs.window.get at most once over all polls", true, rec.windowGets <= 1)
+end
+
+-- Captured window closes before submit: falls back to the app by bundle id.
+do
+  local rec = submitSetup(true)
+  rec:closeWindow(4242)
+  local file = submitFile("window gone")
+  rec:openURL("voicevim-submit", { file = file, target = "com.example.target", window = "4242" })
+  rec:runTimers()
+  check("closed window: app activated", 1, #rec.activations)
+  check("closed window: one keystroke", 1, #rec.keyStrokes)
+  check("closed window: hs.window.get at most once", true, rec.windowGets <= 1)
+end
+
+-- delivery.lua missing or erroring, or the repo root lookup erroring: no Lua
+-- error escapes, the text stays on the clipboard, and an alert shows.
+local tmpdir = assert(os.getenv("VV_TMP"))
+local function fakeRoot(name, body)
+  local dir = tmpdir .. "/" .. name
+  os.execute("mkdir -p '" .. dir .. "/lua/voice-vim'")
+  local f = assert(io.open(dir .. "/lua/voice-vim/delivery.lua", "w"))
+  f:write(body)
+  f:close()
+  return dir
+end
+local broken = {
+  { "delivery.lua missing", { root = tmpdir .. "/no-such-root" } },
+  { "delivery.lua errors on load", { root = fakeRoot("load-error", 'error("load boom")') } },
+  { "delivery.lua returns no table", { root = fakeRoot("no-table", "return 42") } },
+  { "deliver() errors", { root = fakeRoot("deliver-error",
+      'return { deliver = function() error("deliver boom") end }') } },
+  { "deliver() errors in a timer", { root = fakeRoot("timer-error",
+      'return { deliver = function(env) env.setClipboard("partial") '
+      .. 'env.after(0.05, function() error("timer boom") end) end }') } },
+  { "repo root lookup errors", { root = nil, executeErrors = true } },
+}
+for _, c in ipairs(broken) do
+  local name, o = c[1], c[2]
+  local rec = submitSetup(true)
+  local M = stub.load(modpath)
+  M.start({ hotkey = { { "ctrl", "alt" }, "v" }, root = o.root })
+  if o.executeErrors then hs.execute = function() error("realpath boom") end end
+  local file = submitFile("keep me\n")
+  local ok, err = pcall(function()
+    rec:openURL("voicevim-submit", { file = file, target = "com.example.target", window = "4242" })
+    rec:runTimers()
+  end)
+  check(name .. ": no Lua error escapes", true, ok or tostring(err))
+  check(name .. ": clipboard holds the text", "keep me", rec.pasteboard.contents)
+  check(name .. ": alert shown", 1, countAlerts(rec, "copied — paste manually"))
+  check(name .. ": no keystroke", 0, #rec.keyStrokes)
+  check(name .. ": error logged", true, rec:hasLog("e", "text left on clipboard"))
 end
 
 -- No window id (old URL): falls back to activating the app by bundle id.
@@ -227,7 +281,7 @@ end
 os.exit(fail)
 LUA
 
-VV_ROOT="$root" perl -e 'alarm 20; exec @ARGV' nvim -l "$tmp/spec.lua" 2>&1
+VV_ROOT="$root" VV_TMP="$tmp" perl -e 'alarm 20; exec @ARGV' nvim -l "$tmp/spec.lua" 2>&1
 status=$?
 echo  # nvim -l leaves the last line unterminated
 if [ $status -eq 0 ]; then echo "all ok"; else echo "FAILED"; fi
