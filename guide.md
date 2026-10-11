@@ -8,6 +8,13 @@ features land; anything not listed here does not exist yet.
 Press **Option+V** in any app. A Ghostty window opens with Neovim in insert
 mode, ready for dictation. The app you were in becomes the paste target.
 
+## Start without the hotkey
+
+Opening `hammerspoon://voicevim-start` starts a session the same way, for
+example `open -g hammerspoon://voicevim-start` from a shell, Karabiner or a
+launcher. If the hotkey fails to bind, Hammerspoon shows an alert and logs
+`failed to bind` in its console; an Option-only hotkey logs a warning.
+
 ## Bring your selection along
 
 If text is selected when you press the hotkey, it is copied into the buffer
@@ -83,4 +90,5 @@ it after granting. Without it, submit shows an alert and pastes nothing.
 
 `hs -c 'hs.reload()'` reloads Hammerspoon from a shell. Run
 `bash tests/test-session.sh` and `bash tests/test-history.sh` after editing
-the session script, the database helper, or the sidebar.
+the session script, the database helper, or the sidebar, and
+`bash tests/test-hammerspoon.sh` after editing the Hammerspoon module.

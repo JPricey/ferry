@@ -162,13 +162,36 @@ function M.submit(params)
   end)
 end
 
+-- True when every modifier is Option. macOS 15+ may refuse such hotkeys.
+local function isOptionOnly(mods)
+  if #mods == 0 then return false end
+  for _, m in ipairs(mods) do
+    local l = tostring(m):lower()
+    if l ~= "alt" and l ~= "option" and l ~= "⌥" then return false end
+  end
+  return true
+end
+
 function M.start(cfg)
   for k, v in pairs(cfg or {}) do M.config[k] = v end
   hs.urlevent.bind("voicevim-submit", function(_, params) M.submit(params) end)
-  if M.hotkeyObj then M.hotkeyObj:delete() end
+  -- hammerspoon://voicevim-start starts a session without the hotkey
+  -- (Karabiner, a launcher, or `open -g` from a shell).
+  hs.urlevent.bind("voicevim-start", function() M.begin() end)
+  if M.hotkeyObj then M.hotkeyObj:delete(); M.hotkeyObj = nil end
   local mods, key = M.config.hotkey[1], M.config.hotkey[2]
-  M.hotkeyObj = hs.hotkey.bind(mods, key, M.begin)
-  log.i("bound " .. table.concat(mods, "+") .. "+" .. key)
+  local combo = table.concat(mods, "+") .. "+" .. key
+  if isOptionOnly(mods) then
+    log.w("hotkey " .. combo .. " is Option-only; macOS 15+ may refuse it")
+  end
+  local ok, obj = pcall(hs.hotkey.bind, mods, key, M.begin)
+  if ok and obj then
+    M.hotkeyObj = obj
+    log.i("bound " .. combo)
+  else
+    log.e("failed to bind " .. combo .. ": " .. (ok and "hs.hotkey.bind returned nil" or tostring(obj)))
+    hs.alert.show("voice-vim: could not bind " .. combo .. "; use hammerspoon://voicevim-start")
+  end
   return M
 end
 
