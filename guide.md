@@ -16,6 +16,14 @@ example `open -g hammerspoon://voicevim-start` from a shell, Karabiner or a
 launcher. If the hotkey fails to bind, Hammerspoon shows an alert and logs
 `failed to bind` in its console; an Option-only hotkey logs a warning.
 
+## Optional Hyper key
+
+`karabiner/voice-vim-hyper.json` turns a held Right Command into Hyper
+(Cmd+Ctrl+Opt+Shift), still Right Command when tapped alone, and makes
+Hyper+V open `hammerspoon://voicevim-start`. To use it, copy the file to
+`~/.config/karabiner/assets/complex_modifications/`, then enable both rules
+in Karabiner-Elements → Complex Modifications → Add rule.
+
 ## Bring your selection along
 
 If text is selected when you press the hotkey, it is copied into the buffer

@@ -89,6 +89,8 @@ to change it. Buffer-local settings live in `vim/voice-vim.vim`.
 - `tests/test-delivery.sh` — delivery core tests with a fake clock.
 - `tests/test-hammerspoon.sh` — loads the Hammerspoon module against a
   stubbed `hs` (`tests/hs_stub.lua`) under `nvim -l`.
+- `karabiner/` — optional Karabiner-Elements rules (Right Command as Hyper,
+  Hyper+V starts a session); not installed by `install.sh`.
 
 ## Notes
 
