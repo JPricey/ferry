@@ -17,11 +17,16 @@ Most milestones here end in Joe checks. Expect the orchestrator to stop at each 
 
 The orchestrator adds Joe checks to run, questions, and failed tasks here, newest last. Joe answers inline. The orchestrator moves resolved items into the milestone's Log.
 
-- Nothing yet.
+- **Diagnose paste and the hotkey: Joe checks** (all tasks done, agent checks pass). Do these in order:
+  1. Open the Hammerspoon console, then Reload Config. Your `init.lua` still sets Option+V, so look for either `bound alt+v` or `failed to bind alt+v` (plus an Option-only warning). Write the result here; it answers "did Option+V fail to bind on macOS 26?".
+  2. In a terminal: `~/Code/voice-vim/bin/voice-vim-migrate-init`. It prints the removed line and the backup path (`~/.hammerspoon/init.lua.bak`). Reload Config again and confirm the console shows `bound ctrl+alt+v` with no error. Press Ctrl+Option+V once and confirm a session opens.
+  3. Optional: `cp ~/Code/voice-vim/karabiner/voice-vim-hyper.json ~/.config/karabiner/assets/complex_modifications/`, then Karabiner-Elements → Complex Modifications → Add rule → enable both voice-vim rules. Hold right Command and press V and confirm a session opens. Tap right Command alone and confirm it still acts as Command.
+  4. Ten submits in a row, spread across Slack, the Claude app and a Claude Code pane in Ghostty/tmux (use two Ghostty windows, so the wrong-window case is tested). Each should either land in the window you started from, or show "copied — paste manually" with the text on the clipboard. For any miss, copy the `voice-vim` lines from the console here (they log target, window, focus, each frontmost check, settle and the keystroke).
+  - When 1–4 pass, set the milestone to `done`. The next milestone, "One instance toggled by a hotkey", has a hard need on the host spike, not on this one.
 
 ## Diagnose paste and the hotkey
 
-- **Status:** verifying
+- **Status:** needs-joe
 - **Needs:** nothing
 - **Deliverable:** V0 that pastes into the right window, or at least leaves the text on the clipboard, from a hotkey that always fires.
 - **Scope:**
@@ -55,6 +60,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-11: task 3b (delivery hardening) done and verified. Changes Hammerspoon behavior: 0.05 s settle re-check before Cmd+V, one window lookup per submit, every failure path leaves the text on the clipboard with one alert. Note: a window closed mid-delivery likely ends as "unconfirmed" (safe).
   - 2026-10-11: task 4 (default hotkey Ctrl+Option+V, `bin/voice-vim-migrate-init`) done and verified. Dry run on a copy of Joe's real init.lua removes only line 5 (`hotkey = { { "alt" }, "v" },`) and the result still parses. Joe's live hotkey stays Option+V until he runs the migration.
   - 2026-10-11: all tasks done; status → verifying.
+  - 2026-10-11: agent checks pass (all five test scripts, karabiner JSON valid, luajit syntax check); status → needs-joe.
 
 ## Single-instance host spike
 
