@@ -23,6 +23,11 @@
 --   rec.focuses      window stubs passed to win:focus()
 --   rec.timers       {delay, fn, fired}  (run them with rec:runTimers())
 --   rec.windowGets   number of hs.window.get calls
+--   rec.hides        app stubs passed to app:hide()
+--   rec.unhides      app stubs passed to app:unhide()
+--   rec.moves        {win, point} for win:setTopLeft(point)
+--   rec.tasks        {path, args, cb, started} for hs.task.new (never run;
+--                    finish one with rec:finishTask(i, code, out, err))
 --
 -- Controls (set on rec before or between calls):
 --   rec.hotkeyBind     nil, or function(mods, key, fn) whose result is returned
@@ -36,7 +41,12 @@
 --   rec.osascriptResult  {ok, result, err} returned by hs.osascript.applescript
 --   rec.pasteboard     {contents = string|nil, changeCount = n}
 --   rec.onKeyStroke    optional function(mods, key, delay, app) hook
---   rec.clock          seconds for hs.timer.secondsSinceEpoch; usleep advances it
+--   rec.clock          seconds for hs.timer.secondsSinceEpoch (and
+--                      hs.timer.absoluteTime, in ns); usleep and timers advance it
+--   rec.screen         {x, y, w, h} of the one screen (hs.screen.mainScreen,
+--                      allScreens, win:screen; default 0,0 1440x900)
+--   app opts.windows   list returned by app:allWindows() (default {window})
+--   window opts.size   {w, h} for win:frame() (default 800x600)
 
 local S = {}
 
@@ -60,13 +70,27 @@ local function inspect(v, depth)
   return "{" .. table.concat(parts, ", ") .. "}"
 end
 
--- App stub. opts: bundleID, name, window (window stub), frontmostOnActivate.
+-- App stub. opts: bundleID, name, window (window stub), windows (list for
+-- allWindows), frontmostOnActivate.
 function S.app(rec, opts)
-  local a = { _bundle = opts.bundleID, _name = opts.name or opts.bundleID, _window = opts.window }
+  local a = { _bundle = opts.bundleID, _name = opts.name or opts.bundleID, _window = opts.window,
+    _windows = opts.windows }
   function a:bundleID() return self._bundle end
   function a:name() return self._name end
   function a:focusedWindow() return self._window end
   function a:mainWindow() return self._window end
+  function a:allWindows() return self._windows or { self._window } end
+  function a:hide()
+    rec.hides[#rec.hides + 1] = self
+    self._hidden = true
+    return self
+  end
+  function a:unhide()
+    rec.unhides[#rec.unhides + 1] = self
+    self._hidden = false
+    return true
+  end
+  function a:isHidden() return self._hidden == true end
   function a:activate()
     rec.activations[#rec.activations + 1] = self
     if opts.frontmostOnActivate ~= false then
@@ -79,16 +103,35 @@ function S.app(rec, opts)
   return a
 end
 
+-- Screen stub: frame()/fullFrame() return rec.screen.
+function S.screen(rec)
+  local s = {}
+  function s:frame() return copy(rec.screen) end
+  function s:fullFrame() return copy(rec.screen) end
+  return s
+end
+
 -- Window stub. opts: id, title, app (app stub), focusOnFocus (default true;
 -- false makes win:focus() record the call but leave focus where it was).
 function S.window(rec, opts)
-  local w = { _id = opts.id, _title = opts.title or "", _app = opts.app }
+  local w = { _id = opts.id, _title = opts.title or "", _app = opts.app,
+    _topLeft = opts.topLeft or { x = 0, y = 0 }, _size = opts.size or { w = 800, h = 600 } }
   function w:id()
     if self._closed then return nil end
     return self._id
   end
   function w:title() return self._title end
   function w:application() return self._app end
+  function w:topLeft() return copy(self._topLeft) end
+  function w:frame()
+    return { x = self._topLeft.x, y = self._topLeft.y, w = self._size.w, h = self._size.h }
+  end
+  function w:screen() return S.screen(rec) end
+  function w:setTopLeft(pt)
+    rec.moves[#rec.moves + 1] = { win = self, point = copy(pt) }
+    self._topLeft = copy(pt)
+    return self
+  end
   function w:focus()
     rec.focuses[#rec.focuses + 1] = self
     if opts.focusOnFocus ~= false then
@@ -108,8 +151,9 @@ function S.install()
     keyStrokes = {}, logs = {}, executes = {}, osascripts = {},
     pasteboardSets = {}, activations = {}, focuses = {}, timers = {},
     apps = {}, windows = {}, windowGets = 0, accessibility = true,
+    hides = {}, unhides = {}, moves = {}, tasks = {},
     pasteboard = { contents = nil, changeCount = 0 },
-    clock = 1000,
+    clock = 1000, screen = { x = 0, y = 0, w = 1440, h = 900 },
   }
 
   function rec:app(opts) return S.app(self, opts) end
@@ -145,6 +189,13 @@ function S.install()
       end
       i = i + 1
     end
+  end
+
+  -- Finish a recorded hs.task (1-based index) and call its callback.
+  function rec:finishTask(i, code, out, err)
+    local t = assert(self.tasks[i], "no task " .. tostring(i))
+    t.finished = true
+    if t.cb then return t.cb(code or 0, out or "", err or "") end
   end
 
   -- Call a bound hammerspoon:// handler, as Hammerspoon would.
@@ -250,11 +301,30 @@ function S.install()
 
   hs.timer = {
     secondsSinceEpoch = function() return rec.clock end,
+    absoluteTime = function() return rec.clock * 1e9 end,
     usleep = function(us) rec.clock = rec.clock + us / 1e6 end,
     doAfter = function(delay, fn)
       local t = { delay = delay, fn = fn, fired = false }
       function t:stop() self.fired = true; return self end
       rec.timers[#rec.timers + 1] = t
+      return t
+    end,
+  }
+
+  hs.screen = {
+    mainScreen = function() return S.screen(rec) end,
+    allScreens = function() return { S.screen(rec) } end,
+  }
+
+  hs.task = {
+    new = function(path, cb, a3, a4)
+      local args = a4 or a3
+      if type(args) ~= "table" then args = {} end
+      local t = { path = path, args = copy(args), cb = cb, started = false, finished = false }
+      function t:start() self.started = true; return self end
+      function t:terminate() self.finished = true; return self end
+      function t:isRunning() return self.started and not self.finished end
+      rec.tasks[#rec.tasks + 1] = t
       return t
     end,
   }
