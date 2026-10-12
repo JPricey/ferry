@@ -102,6 +102,8 @@ Sections:
 15. **The project is called ferry** (Joe, 2026-10-12). It was renamed from
     its first name everywhere at once, with no aliases; git history is left
     as it was.
+16. **Sending to a tmux pane only pastes** (Joe, 2026-10-12). ferry never
+    presses Enter in the pane.
 
 ## Implementation details
 
