@@ -43,7 +43,6 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   Agent defaults unless Joe says otherwise: file name `<date>-<time>-<id8>.md`, never renamed; resending a sent note edits and sends it in place; a reopened note goes to the window captured at the latest show unless its `to:` line was chosen; non-empty cancels are kept as `cancelled`, blank ones dropped.
 - **Targets chosen after writing: question** (blocks T5 only): press Enter after a tmux paste? Recommended: only when the pane is running `claude` (submits the prompt); other panes get the paste only. Agent defaults: picker `<C-t>`, copy-and-hide `<C-y>` (insert and normal mode); the `to:` line holds the raw spec with a human label shown beside it as virtual text; recent targets kept in memory only; copy-and-hide records the note as sent to `clipboard`.
 - **Notes and history browser: H6 failed twice** (migration script). Second failure is only the hint it prints for a non-default `--to`: it omits `VOICE_VIM_INDEX`, so following it would rebuild the default index from that folder. Recommend: allow a third attempt to make the hint `VOICE_VIM_NOTES_DIR=<dest> VOICE_VIM_INDEX=<dest>/../index-<name>.sqlite voice-vim-notes rebuild` (or drop the hint). Nothing else depends on H6.
-- **Hold to talk: question** (blocks P4 only): default talk hotkey? Recommended Ctrl+Option+B (same hand shape as Ctrl+Option+V); alternative Ctrl+Option+T. Ctrl+Option+Space is out (macOS input-source switch).
 - **GROUND_TRUTHS.md: proposed updates after B3** (the per-press Ghostty windows are gone). Say yes and the orchestrator applies them:
   - Decision 7 (Ghostty sessions through AppleScript): replace with "voice-vim never opens terminal windows; the one instance is Neovide."
   - Decision 10: replace the fallback sentence with "Joe's checks passed 2026-10-12; no fallback host. Without Neovide, voice-vim alerts and does nothing."
@@ -53,6 +52,8 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - Impl 8 (Ghostty "Process exited"): delete.
   - Requirement 10: "Ending a note leaves nothing behind: send and cancel hide the one window."
   - New decision 13: "Note files live in `~/notes/scratchpads/` (Joe, 2026-10-12), one `.md` per note, not in this repo. voice-vim owns that folder; `notesDir`/`VOICE_VIM_NOTES_DIR` override it."
+  - New decision 14: "Two hotkeys (Joe, 2026-10-12): Ctrl+Option+V shows and hides the note; Ctrl+Option+B is hold to talk (Flow records while held, the text lands in the note)."
+  - New decision 15: "The project is called ferry (Joe, 2026-10-12), renamed from its first name everywhere at once with no aliases; git history is left as it was."
 
 ## Diagnose paste and the hotkey
 
@@ -345,6 +346,26 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-12: P3 verify FAILED (1st): at `talkStopTimeout` it released even while the start `open` was still running, so the stop could reach Flow before the start and leave Flow recording (dictation could later land in the target app); also a `release` that printed `idle` ended a hold with neither a stop nor an alert, and a Ctrl-X during the poll gave a false "still recording" alert. Sent to a new implementer in the same worktree.
   - 2026-10-12: P3 done and verified on the 2nd attempt. The stop is sent only when our Neovide is focused, the start task has exited and `show --talk` has told nvim; every other ending is exactly one alert or a quiet end when a Submit/Cancel/Ctrl-S already stopped Flow (`voice-vim-host flow-state`). A slow start task at the 5 s timeout → no stop, one alert. Flow API 3 (a quick second hold keeps its own stop; a paste reported twice counts once), note API 6, one reload helper for older flow/history modules. Known gap, accepted: a Ctrl-X/Ctrl-S pressed at almost the same moment as the talk key down can reach Flow before the start (added to the Joe checks). Minors left for P4: `release --force` sends a second stop to an already-idle Flow if Ctrl-S stopped it while the talk modifiers were still held; the alert says "note did not appear" also when only the start was slow.
   - 2026-10-12: P4 verify FAILED (1st): the P3 follow-up the orchestrator added ("skip `release --force` when nvim reports idle") trusts `idle`, but a stray paste clears nvim's recording flag, so a hold could end with no stop and no alert while Flow kept recording. Fix: always end an adopted hold with a stop (a second stop to an idle Flow is harmless). Sent to a new implementer in the same worktree.
+  - 2026-10-12: Joe: the talk hotkey is Ctrl+Option+B (the P4 default).
+
+## Rename to ferry
+
+- **Status:** todo
+- **Needs:** Hold to talk (P4 merged) and T3 merged, so nothing else is in flight while every file changes.
+- **Deliverable:** the project is called ferry everywhere, all at once, with no trace of the old name in the tree (Joe, 2026-10-12). Git history is left alone.
+- **Scope:**
+  - Every name form: files and folders (`hammerspoon/ferry.lua`, `lua/ferry/`, `bin/ferry-*`, `karabiner/ferry-hyper.json`), Lua module paths, env vars (`FERRY_*`), URL routes (`hammerspoon://ferry-start` …), buffer and global vars, logger, `hs.settings` key, socket (`$TMPDIR/ferry.sock`), data folder (`~/Library/Application Support/ferry`), the test tmux server, every doc (including `GROUND_TRUTHS.md`, `milestones.md`, `planning.md`, `motivations.md`, `ORCHESTRATOR.md`, `.claude/commands/`, `joe-other-feedback.md`), tests and messages.
+  - No compatibility aliases. A one-time migration step in `install.sh` moves Joe's old install (stops the old server and its Neovide, replaces the `~/.hammerspoon` link and the `init.lua` block with a `.bak`, moves the data folder and the saved window frame, reloads Hammerspoon). Joe runs it right after the merge; the next commit deletes the migration step.
+  - Fleet's docs mention the old name; fleet is not edited from here (hand Joe the list).
+  - Joe moves the repo folder (`~/Code/voice-vim` → `~/Code/ferry`) after this session, then runs `./install.sh` again.
+- **Tasks:**
+  - [ ] **R1. Rename everything and add the one-time migration.** Files: everything. Depends: P4, T3 merged; no other task in flight. Verify: every `tests/test-*.sh` passes under the new names; `tests/test-install.sh` builds a fake old install in a temp HOME (old link, old init.lua block, old data folder, an old socket) and shows `./install.sh` migrates it, a second run changes nothing; `git grep -niE 'voice.?vim'` prints only the migration step in `install.sh` and its test; luajit loadfile on `hammerspoon/**/*.lua`.
+  - [ ] **R2. Remove the migration step.** After Joe ran it. Verify: `git grep -niE 'voice.?vim'` prints nothing; every test passes.
+- **Joe checks:**
+  1. Right after R1 merges (before any Hammerspoon reload): `./install.sh`. It reports the migration; the console shows `bound ctrl+alt+v` and the talk key; one ferry window; history intact.
+  2. After this session: `mv ~/Code/voice-vim ~/Code/ferry && cd ~/Code/ferry && ./install.sh`, then start the next Claude session there.
+- **Log:**
+  - 2026-10-12: created. Joe picked "ferry" from the proposed names; rename everywhere at once with no record of the old name; Joe runs the migration through `./install.sh`; git history left alone; Joe moves the repo folder after this session.
 
 ## Notes and history browser
 
@@ -482,3 +503,4 @@ Record each change here, dated, with the reason.
 - 2026-10-12: B3 removed the new-window-per-press path (`begin`/`openTerminal`, `voicevim-cancel`, session tokens, `bin/voice-vim-session`, `bin/voice-vim-paste`, `vim/voice-vim.vim`, `spike/`, their tests) after Joe's "neovide passes". There is no fallback window any more: without Neovide, or when setting up the instance fails, Hammerspoon alerts once at load ("Neovide is not installed — run ./install.sh", or the error) and each press alerts again. `mode`, `terminal`, `autoStartFlow` and `windowTitle` are now obsolete keys (warning, ignored). Ghostty is optional in `install.sh` (only Neovide's font and colour come from it) and the "Automation for Ghostty" manual step is gone. The "Close the session window cleanly" Joe checks no longer apply (milestone marked done, superseded).
 - 2026-10-12: broke down "Notes and history browser" (H1–H8) and "Targets chosen after writing" (T1–T7) together, since both reshape the note. Contract: the target spec and `to:` line belong to Targets (`lua/voice-vim/target.lua`); the note file format belongs to Notes (`lua/voice-vim/store.lua`, frontmatter with an opaque `target`). Order across the two: T1, H1, H2, H6 in parallel; then T2 before H3 (both rework `note.lua`).
 - 2026-10-12: added "Hold to talk" at Joe's request, ahead of "Notes and history browser" (Joe expects it to be his main way in). It shares `note.lua`/`instance.lua` with T2, T7 and H8, so its tasks run after T2.
+- 2026-10-12: added "Rename to ferry" (Joe), after "Hold to talk" and T3 and before the rest of the notes and targets work, since it touches every file.
