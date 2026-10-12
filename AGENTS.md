@@ -38,7 +38,8 @@ brainstorm and loses where it disagrees. Goals are in `motivations.md` →
 If Joe started you with `/orchestrate`, read `ORCHESTRATOR.md` next. It
 defines the loop that moves the milestones forward with subagents.
 
-Layout is in `README.md`. User-facing usage is in `guide.md`. Run
+Layout is in `README.md`. User-facing usage is in `USER_GUIDE.md` (walkthrough)
+and `guide.md` (terse feature reference). Run
 `bash tests/test-session.sh` and `bash tests/test-history.sh` after touching
 the session script, the database helper, or the sidebar,
 `bash tests/test-delivery.sh` and `bash tests/test-hammerspoon.sh` after
@@ -216,3 +217,7 @@ the personal dictionary, or by mirroring edits into Flow's `History` rows.
   added, changed, or removed, update its entry there in the same change.
   Keep entries to two or three sentences and never list features that do
   not exist yet.
+- `USER_GUIDE.md` is the walkthrough for a human user (setup, daily use,
+  keys, troubleshooting). Update it in the same change whenever a feature a
+  user would notice is added, changed, or removed. Like `guide.md`, it only
+  describes what exists today.

@@ -2,7 +2,7 @@
 
 Dictate with [Wispr Flow](https://wisprflow.ai) into a throwaway Neovim
 buffer, fix it up with real Vim, then paste the result into whatever you were
-typing in. See `motivations.md` for the why.
+typing in. New here? Read `USER_GUIDE.md`. See `motivations.md` for the why.
 
 ## How it works
 
