@@ -66,9 +66,10 @@ When `~/Applications/ferry.app` (a wrapper around Neovide's binary, bundle id
 `local.ferry`) exists, Hammerspoon starts the window as that app, so the Dock,
 Cmd-Tab and the menu bar say "ferry" with its icon and the window title is
 "ferry"; a Neovide you open yourself stays "Neovide" and the hotkey never
-shows, hides or moves it. Without it ferry runs as plain Neovide and the
-console says so once; `appPath` in `start()` points elsewhere, `false` turns
-it off.
+shows, hides or moves it. Once ferry.app's window is up, ferry quits any older
+plain Neovide window still attached to its server, so only one ferry window
+exists. Without it ferry runs as plain Neovide and the console says so once;
+`appPath` in `start()` points elsewhere, `false` turns it off.
 
 ## Neovide looks like your terminal
 

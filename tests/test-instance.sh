@@ -453,6 +453,23 @@ for _, case in ipairs({ "host.show false", "never focused" }) do
   stop(sock)
 end
 
+-- hostName as a function is asked per alert (ferry.app built meanwhile).
+do
+  local name = "Neovide"
+  local t = setup({ pollTimeout = 0.2, hostName = function() return name end })
+  local rec, c, sock = t.rec, t.c, t.sock
+  t.host.show = function(cb) cb(false, "not running") end
+  c.toggle()
+  rec:runTimers()
+  name = "the ferry window"
+  c.toggle()
+  rec:runTimers()
+  check("hostName function: asked per alert", "Neovide|the ferry window",
+    tostring(tostring(rec.alerts[1]):match("ferry: (.-) did not appear")) .. "|"
+    .. tostring(tostring(rec.alerts[2]):match("ferry: (.-) did not appear")))
+  stop(sock)
+end
+
 -- A UI attached: no host.launch.
 do
   local t = setup()

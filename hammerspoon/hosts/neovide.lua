@@ -39,7 +39,9 @@
 --                and no ferry.app running (say a plain Neovide from before
 --                the wrapper is still attached, so the controller saw a UI
 --                and did not launch), show launches ferry.app itself and
---                holds the show.
+--                holds the show. Once ferry.app's window has appeared, every
+--                plain Neovide attached to our socket is quit (below), so
+--                there is never a second ferry window.
 --   hide(cb)     app:hide(). The controller refocuses the target in cb.
 --   isFocused()  -> bool, why: the frontmost app is our Neovide and its
 --                window is neither minimized nor invisible (so a press
@@ -57,6 +59,13 @@
 -- Without it, plain Neovide as before; which one is in use is logged once,
 -- and again when it changes (checked on each call, so install.sh needs no
 -- reload).
+--
+-- Old plain window: once ferry.app's launched window is found, each plain
+-- Neovide (com.neovide.neovide) whose command line holds exactly
+-- ` --server <sock> ` is quit (app:kill(), else `/bin/kill <pid>`) and
+-- logged. No other process is touched: a Neovide Joe opened himself, one on
+-- another socket, or one whose command line cannot be read. If ferry.app
+-- does not launch or its window never appears, the plain one is kept.
 --
 -- Our Neovide only: show, hide and isFocused act on the one Neovide process
 -- attached to our socket, never on a Neovide Joe runs for his own editing.
@@ -159,6 +168,9 @@ end
 --                  false: never use it)
 --   appBundleID    its bundle id (default local.ferry)
 --   appName        its app name (default ferry)
+--   killPid        function(pid) that ends a process when app:kill() is
+--                  missing or fails (default: /bin/kill <pid> through
+--                  hs.execute)
 function N.new(cfg)
   cfg = cfg or {}
   local log = cfg.log or hs.logger.new("ferry", "info")
@@ -172,6 +184,7 @@ function N.new(cfg)
       searchPath = cfg.searchPath,
       appPaths = cfg.appPaths,
       commandLine = cfg.commandLine,
+      killPid = cfg.killPid,
       appPath = (cfg.appPath == nil) and defaultAppPath() or cfg.appPath,
       appBundleID = cfg.appBundleID or N.APP_BUNDLE,
       appName = cfg.appName or N.APP_NAME,
@@ -186,7 +199,7 @@ function N.new(cfg)
     _foreign = {},          -- pid -> true for Neovide processes that are not ours
     _findTimer = nil,       -- fallback poll for the launched window
     _using = nil,           -- "app" or "plain": what was last logged
-    _stale = {},            -- pid -> true: plain Neovides on our socket, warned
+    _stale = {},            -- pid -> true: plain Neovides on our socket, logged
   }
 
   local function try(fn, ...)
@@ -377,24 +390,72 @@ function N.new(cfg)
     return nil
   end
 
-  -- With ferry.app: warn (once per pid) about a plain Neovide attached to
-  -- our socket (started before the wrapper existed). It is left alone.
-  local function warnStalePlain()
-    if not (hs.application and hs.application.applicationsForBundleID) then return end
+  -- With ferry.app: the plain Neovide apps attached to our socket (started
+  -- before the wrapper existed), as {app, pid}. Only a command line that
+  -- holds exactly ` --server <sock> ` counts; any other is remembered as
+  -- foreign, an unreadable one is skipped.
+  local function stalePlain()
+    local out = {}
+    if not (hs.application and hs.application.applicationsForBundleID) then return out end
     local list = try(hs.application.applicationsForBundleID, N.BUNDLE)
-    if type(list) ~= "table" then return end
+    if type(list) ~= "table" then return out end
     for _, a in ipairs(list) do
       local pid = pidOf(a)
-      if pid and not o._stale[pid] and not o._foreign[pid] then
+      if pid and not o._foreign[pid] then
         local cmd = commandLine(pid)
         if cmd and (" " .. cmd .. " "):find(" --server " .. o.config.sock .. " ", 1, true) then
-          o._stale[pid] = true
-          log.w("neovide: a plain Neovide (pid " .. pid .. ") is attached to our server;"
-            .. " left alone (ferry.app is in use). Quit it so only ferry shows the note")
-        else
+          out[#out + 1] = { app = a, pid = pid }
+        elseif cmd then
           o._foreign[pid] = true
         end
       end
+    end
+    return out
+  end
+
+  -- Log (once per pid) the plain Neovides on our socket while ferry.app
+  -- is launched; they are quit once its window appears.
+  local function noteStalePlain()
+    for _, s in ipairs(stalePlain()) do
+      if not o._stale[s.pid] then
+        o._stale[s.pid] = true
+        log.w("neovide: a plain Neovide (pid " .. s.pid .. ") is attached to our server;"
+          .. " it is quit once ferry.app's window appears")
+      end
+    end
+  end
+
+  local function killPid(pid)
+    if type(o.config.killPid) == "function" then return try(o.config.killPid, pid) end
+    if not hs.execute then return false end
+    local _, ok = try(hs.execute, string.format("/bin/kill %d", pid))
+    return ok == true
+  end
+
+  -- ferry.app's window is up: quit every plain Neovide on our socket, so
+  -- the old window does not stay beside it (GROUND_TRUTHS requirement 4).
+  local function quitStalePlain()
+    if not wrapperExe() then return end
+    for _, s in ipairs(stalePlain()) do
+      local how
+      local okGet, fn = pcall(function() return s.app.kill end)
+      if okGet and type(fn) == "function" then
+        local ok, res = pcall(fn, s.app)
+        if ok and res ~= false then
+          how = "app:kill()"
+        else
+          log.w("neovide: app:kill() on plain Neovide pid " .. s.pid .. " failed: " .. tostring(res))
+        end
+      end
+      if not how and killPid(s.pid) then how = "kill " .. s.pid end
+      if how then
+        log.i("neovide: quit the old plain Neovide (pid " .. s.pid .. ", --server "
+          .. o.config.sock .. ") now that ferry.app is up (" .. how .. ")")
+      else
+        log.e("neovide: could not quit the old plain Neovide (pid " .. s.pid .. "); quit it by hand")
+      end
+      if o._pid == s.pid then o._pid = nil end
+      o._stale[s.pid] = nil
     end
   end
 
@@ -483,6 +544,7 @@ function N.new(cfg)
       if win then
         log.i("neovide: window " .. tostring(call(win, "id")) .. " found after launch (no frame glue)")
         if o._pendingShow then showHeld(app, win) end
+        quitStalePlain()
         return
       end
       if now() >= deadline then
@@ -548,6 +610,7 @@ function N.new(cfg)
         log.i("neovide: window " .. tostring(id) .. " appeared after launch")
         if o.config.rememberFrame then o._watchedId = id end
         if o._pendingShow then showHeld(app or neovideApp(), win) end
+        quitStalePlain()
       end
       try(wf.adopt, bundle, before, o.config.adoptTimeout, opts)
     else
@@ -567,8 +630,9 @@ function N.new(cfg)
       end
       if wrapperExe() then
         -- The controller launches only when no UI is attached; a plain
-        -- Neovide left on our socket counts as one. Launch ferry.app here.
-        warnStalePlain()
+        -- Neovide left on our socket counts as one. Launch ferry.app here;
+        -- the plain one is quit once ferry.app's window appears.
+        noteStalePlain()
         log.w("neovide: show: ferry.app (--server " .. o.config.sock .. ") is not running; launching it")
         local launched, why
         o.launch(function(ok, w) launched, why = ok, w end)

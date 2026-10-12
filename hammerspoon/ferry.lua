@@ -298,9 +298,12 @@ local function startInstance()
   local host = neovide.new(hcfg)
   local ok, why = host.available()
   if not ok then return nil, why end
-  -- For alerts: "Neovide", or "the ferry window" with the ferry.app wrapper.
-  local _, appName = host.ident()
-  local hostName = appName == neovide.NAME and appName or "the ferry window"
+  -- For alerts, per alert: "Neovide", or "the ferry window" with the
+  -- ferry.app wrapper (install.sh may build it while Hammerspoon runs).
+  local function hostName()
+    local _, appName = host.ident()
+    return appName == neovide.NAME and appName or "the ferry window"
+  end
   local c = dofile(root .. "/hammerspoon/instance.lua").new({
     host = host, root = root, sock = sock,
     captureSelection = M.config.captureSelection == true,

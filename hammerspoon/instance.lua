@@ -158,7 +158,8 @@ end
 --   selectionTimeout  seconds to wait for Cmd+C to land (default 0.4)
 --   launchGrace       seconds after a host.launch during which uis=0 is
 --                     taken as the UI still starting (default 5)
---   hostName          name of the host window in alerts (default
+--   hostName          name of the host window in alerts, or a function
+--                     returning it (asked per alert; default
 --                     "the ferry window")
 --   startFlow         function(onExit) that starts Wispr Flow recording and
 --                     returns true once started; onExit(code) when done
@@ -215,6 +216,15 @@ function I.new(cfg)
 
   local function alert(msg)
     if hs.alert and hs.alert.show then try(hs.alert.show, msg) end
+  end
+
+  -- The host window's name for an alert, asked each time (a function
+  -- config follows ferry.app being built or removed while running).
+  local function hostName()
+    local n = c.config.hostName
+    if type(n) == "function" then n = try(n) end
+    if type(n) ~= "string" or n == "" then return "the ferry window" end
+    return n
   end
 
   local h = c.host
@@ -432,7 +442,7 @@ function I.new(cfg)
       return
     end
     log.w("show: failed (" .. tostring(why) .. "); alerting, the next press relaunches")
-    alert("ferry: " .. c.config.hostName .. " did not appear — check the Hammerspoon console")
+    alert("ferry: " .. hostName() .. " did not appear — check the Hammerspoon console")
   end
 
   local function hostShow(press)
@@ -801,7 +811,7 @@ function I.new(cfg)
           return withhold(now, "the note never took the recording",
             "ferry: the note was not ready — Flow is still recording; stop it in Wispr Flow")
         end
-        return withhold(now, c.config.hostName .. " not focused")
+        return withhold(now, hostName() .. " not focused")
       end
       c._talkTimer = try(hs.timer.doAfter, c.config.pollInterval, step)
     end

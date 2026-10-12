@@ -86,6 +86,9 @@
 --                      finds it and hs.application.applicationsForBundleID
 --                      lists the apps with that bundle id
 --   rec.unminimizes    window stubs passed to win:unminimize()
+--   rec.kills          app stubs passed to app:kill(); the app quits
+--                      (gone from applicationForPID / applicationsForBundleID)
+--                      unless app opts.killFails, which makes kill() raise
 --   window opts.minimized  initial win:isMinimized() (default false);
 --                      win:minimize() sets it. win:isVisible() is false
 --                      while minimized or while its app is hidden
@@ -135,6 +138,11 @@ function S.app(rec, opts)
     return true
   end
   function a:isHidden() return self._hidden == true end
+  function a:kill()
+    rec.kills[#rec.kills + 1] = self
+    if opts.killFails then error("kill failed") end
+    self._quit = true
+  end
   function a:activate()
     rec.activations[#rec.activations + 1] = self
     if opts.frontmostOnActivate ~= false then
@@ -240,7 +248,7 @@ function S.install()
     apps = {}, windows = {}, windowGets = 0, accessibility = true,
     hides = {}, unhides = {}, moves = {}, tasks = {},
     settings = {}, bundlePaths = {}, appList = {}, setFrames = {}, fullScreenSets = {}, watchers = {}, closes = {},
-    unminimizes = {},
+    unminimizes = {}, kills = {},
     pasteboard = { contents = nil, changeCount = 0 },
     clock = 1000, screen = { x = 0, y = 0, w = 1440, h = 900 },
     seq = 0, modifiers = {},

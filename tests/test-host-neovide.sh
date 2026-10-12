@@ -102,7 +102,8 @@ end
 
 -- Process command lines by pid (rec.cmdlines); "ours" stands for a
 -- Neovide started with --server <this adapter's sock>. rec.cmdlineReads
--- counts reads per pid.
+-- counts reads per pid. The kill fallback is recorded in rec.killedPids
+-- (stub pids are made up: never /bin/kill them).
 local function new(rec, cfg)
   cfg = cfg or {}
   cfg.root = cfg.root or root
@@ -111,6 +112,11 @@ local function new(rec, cfg)
   if cfg.appPath == nil then cfg.appPath = NOAPP end
   rec.cmdlines = rec.cmdlines or {}
   rec.cmdlineReads = rec.cmdlineReads or {}
+  rec.killedPids = rec.killedPids or {}
+  cfg.killPid = cfg.killPid or function(pid)
+    rec.killedPids[#rec.killedPids + 1] = pid
+    return true
+  end
   local h
   cfg.commandLine = cfg.commandLine or function(pid)
     rec.cmdlineReads[pid] = (rec.cmdlineReads[pid] or 0) + 1
@@ -123,13 +129,15 @@ local function new(rec, cfg)
 end
 
 -- Neovide app stub with one window; not frontmost, hidden. cmdline: its
--- command line (default "ours").
+-- command line (default "ours"). opts: extra app stub opts (killFails).
 local nextPid = 7000
-local function neovide(rec, id, cmdline)
+local function neovide(rec, id, cmdline, opts)
   nextPid = nextPid + 1
   rec.cmdlines = rec.cmdlines or {}
   rec.cmdlines[nextPid] = cmdline or "ours"
-  local app = rec:app({ bundleID = NEOVIDE, name = "Neovide", windows = {}, pid = nextPid })
+  local o = { bundleID = NEOVIDE, name = "Neovide", windows = {}, pid = nextPid }
+  for k, v in pairs(opts or {}) do o[k] = v end
+  local app = rec:app(o)
   local win = rec:window({ id = id or 50, app = app })
   app._window = win
   app._windows[1] = win
@@ -342,26 +350,83 @@ end
 
 -- ferry.app in use but not running while a plain Neovide from before is
 -- attached to our socket (the controller sees a UI and does not launch):
--- show launches ferry.app itself, warns about the plain one, never shows it.
+-- show launches ferry.app itself, never shows the plain one, and quits it
+-- once ferry.app's window appears (never a second window). Joe's own
+-- Neovide, one on another socket (or a socket path that only starts with
+-- ours) and one whose command line cannot be read are left running.
 do
   local rec = stub.install()
   other(rec)
   local plain = neovide(rec, 72)
+  local joes = neovide(rec, 73, "/Applications/Neovide.app/Contents/MacOS/neovide")
+  local otherSock = neovide(rec, 74, "neovide --server " .. work .. "/other.sock")
   local h = new(rec, { appPath = APP })
+  local prefix = neovide(rec, 75, "neovide --server " .. h.config.sock .. "x")
+  local unreadable = neovide(rec, 76, nil)
+  rec.cmdlines[unreadable:pid()] = nil
   local got
   h.show(function(ok) got = ok end)
   check("stale plain: show launches ferry.app", true,
     rec.tasks[1] ~= nil and has(rec.tasks[1].args[2], APP .. "/Contents/MacOS/ferry'"))
   check("stale plain: show reports ok (held)", true, got)
-  check("stale plain: warns about the plain Neovide on our socket", true,
+  check("stale plain: logs the plain Neovide on our socket", true,
     rec:hasLog("w", "a plain Neovide (pid " .. plain:pid() .. ") is attached to our server"))
+  check("stale plain: not quit before ferry.app's window appears", 0, #rec.kills)
   local app, win = ferryApp(rec, 82)
   rec:runTimers()
   check("stale plain: ferry.app shown when it appears", "1 1", count(rec.activations, app) .. " " .. count(rec.focuses, win))
   check("stale plain: plain Neovide never shown", "0 0", count(rec.unhides, plain) .. " " .. count(rec.activations, plain))
+  check("stale plain: the plain Neovide on our socket is quit (app:kill)", "1 1",
+    #rec.kills .. " " .. count(rec.kills, plain))
+  check("stale plain: no kill fallback needed", 0, #rec.killedPids)
+  check("stale plain: quit logged", true,
+    rec:hasLog("i", "quit the old plain Neovide (pid " .. plain:pid() .. ", --server " .. h.config.sock .. ")"))
+  check("stale plain: Joe's, other-socket, prefix-socket and unreadable Neovides untouched", "0 0 0 0",
+    count(rec.kills, joes) .. " " .. count(rec.kills, otherSock) .. " "
+    .. count(rec.kills, prefix) .. " " .. count(rec.kills, unreadable))
   h.show(function() end)
-  check("stale plain: warned once", 1, #rec:findLogs("w", "a plain Neovide (pid"))
+  check("stale plain: logged once", 1, #rec:findLogs("w", "a plain Neovide (pid"))
   check("stale plain: no second launch", 1, #rec.tasks)
+  check("stale plain: no second quit", 1, #rec.kills)
+end
+
+-- app:kill() fails: falls back to killing the pid. Without the frame glue
+-- the fallback poll's find quits it the same way.
+do
+  local rec = stub.install()
+  other(rec)
+  local plain = neovide(rec, 77, nil, { killFails = true })
+  local h = new(rec, { appPath = APP, root = work .. "/no-root" })
+  h.show(function() end)
+  ferryApp(rec, 83)
+  rec:runTimers()
+  check("stale plain, kill fails: falls back to kill <pid>", "1 " .. plain:pid(),
+    #rec.kills .. " " .. tostring(rec.killedPids[1]))
+  check("stale plain, kill fails: fallback logged", true, rec:hasLog("i", "(kill " .. plain:pid() .. ")"))
+end
+
+-- ferry.app does not launch, or its window never appears: the plain
+-- Neovide is kept (it is the only window showing the note).
+do
+  local rec = stub.install()
+  other(rec)
+  local plain = neovide(rec, 78)
+  local h = new(rec, { appPath = APP })
+  hs.task.new = function() return nil end
+  local got
+  h.show(function(ok) got = ok end)
+  rec:runTimers()
+  check("failed ferry.app launch: show fails, plain Neovide kept", "false 0 0",
+    tostring(got) .. " " .. #rec.kills .. " " .. #rec.killedPids)
+
+  rec = stub.install()
+  other(rec)
+  plain = neovide(rec, 79)
+  h = new(rec, { appPath = APP })
+  h.show(function() end)
+  rec.clock = rec.clock + 60
+  rec:runTimers()
+  check("ferry.app window never appears: plain Neovide kept", "0 0", #rec.kills .. " " .. #rec.killedPids)
 end
 
 -- show, hide, isFocused on a running Neovide.

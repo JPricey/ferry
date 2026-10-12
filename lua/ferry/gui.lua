@@ -12,15 +12,17 @@
 -- after any ColorScheme it re-applies the background. With no GUI nothing
 -- changes, so terminal UIs keep their transparent look.
 --
--- The window title is "ferry" ('title' on, 'titlestring' ferry) while a GUI
--- is attached. After a UILeave that leaves no Neovide UI listed (g:neovide
--- stays set once Neovide has attached, so it is not asked), the previous
--- values come back.
+-- The window title is "ferry" ('title' on, 'titlestring' ferry) only while
+-- a Neovide UI is listed now (nvim_list_uis, client name neovide; checked
+-- on UIEnter, ChanInfo and UILeave). g:neovide stays set once Neovide has
+-- attached, so it is not asked: a later terminal --remote-ui keeps its own
+-- title. When no Neovide UI is listed, the previous values come back.
 local M = {}
 
 -- Bumped when a running server must reload this module (bin/ferry-host
 -- reloads it when the loaded one reports a lower api). 1: window title.
-M.api = 1
+-- 2: the title only while a Neovide UI is listed.
+M.api = 2
 M.TITLE = "ferry"
 
 M.settings = { font = "", bg = "" }
@@ -56,13 +58,14 @@ function M.apply_font()
   return true
 end
 
--- Title "ferry" when on (default: a GUI is attached); else the earlier
--- 'title' and 'titlestring' come back.
+-- Title "ferry" when on (default: a Neovide UI is listed now); else the
+-- earlier 'title' and 'titlestring' come back.
 function M.apply_title(on)
-  if on == nil then on = M.attached() end
+  if on == nil then on = M.listed() end
   if on then
-    if not M.saved_title then
-      M.saved_title = { title = vim.o.title, titlestring = vim.o.titlestring }
+    -- Kept in g:ferry_saved_title so a reload of this module keeps it.
+    if vim.g.ferry_saved_title == nil then
+      vim.g.ferry_saved_title = { title = vim.o.title, titlestring = vim.o.titlestring }
     end
     pcall(function()
       vim.o.title = true
@@ -70,9 +73,9 @@ function M.apply_title(on)
     end)
     return true
   end
-  local saved = M.saved_title
-  if saved then
-    M.saved_title = nil
+  local saved = vim.g.ferry_saved_title
+  if type(saved) == "table" then
+    vim.g.ferry_saved_title = nil
     pcall(function()
       vim.o.titlestring = saved.titlestring
       vim.o.title = saved.title
@@ -108,6 +111,10 @@ function M.setup(settings)
     vim.schedule(M.apply)
   end })
   vim.api.nvim_create_autocmd("ColorScheme", { group = group, callback = function() M.apply_bg() end })
+  -- Neovide may name its client after attaching.
+  vim.api.nvim_create_autocmd("ChanInfo", { group = group, callback = function()
+    vim.schedule(function() M.apply_title() end)
+  end })
   -- The leaving UI is still listed during UILeave.
   vim.api.nvim_create_autocmd("UILeave", { group = group, callback = function()
     vim.schedule(function() M.apply_title(M.listed()) end)

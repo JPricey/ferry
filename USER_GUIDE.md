@@ -287,10 +287,12 @@ with how long it took, the target, the window, each check, the paste.
   brings it back.
 - **The Dock says "Neovide", not "ferry".** ferry runs as its own app only
   when `~/Applications/ferry.app` exists; the console's `neovide: no
-  ferry.app at …` line says it was not found. If a `neovide: a plain
-  Neovide … is attached to our server` line shows up, an older Neovide
-  window is still connected to ferry: quit it, and the next press opens
-  ferry as its own app.
+  ferry.app at …` line says it was not found. An older plain Neovide window
+  still connected to ferry (from before ferry.app existed) is quit by ferry
+  itself once ferry.app's window is up (`neovide: quit the old plain
+  Neovide …` in the console); if ferry.app fails to start, the old window is
+  kept so the note stays reachable. A Neovide you opened yourself is never
+  touched.
 - **The hotkey does nothing.** Reload Config and look for `bound ctrl+alt+v`
   in the console. A `failed to bind` line means another app holds the key;
   pick a different `hotkey`, or use the start URL. For the hold to talk
