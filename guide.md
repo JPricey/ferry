@@ -83,7 +83,9 @@ Opening `hammerspoon://ferry-start` does what the hotkey does, for
 example `open -g hammerspoon://ferry-start` from a shell, Karabiner or a
 launcher. `hammerspoon://ferry-talk?state=down` and `?state=up` are hold
 to talk's key down and key up, for a Karabiner rule (`to` and
-`to_after_key_up`). If a hotkey fails to bind, Hammerspoon shows an alert
+`to_after_key_up`). `hammerspoon://ferry-edit` shows ferry over the front
+window without touching the note, for a file a tool has already opened in
+the ferry server. If a hotkey fails to bind, Hammerspoon shows an alert
 and logs `failed to bind` in its console (`… (talk)` for the talk hotkey);
 an Option-only hotkey logs a warning.
 

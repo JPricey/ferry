@@ -488,6 +488,59 @@ do
   stop(sock)
 end
 
+-- showEdit (hammerspoon://ferry-edit): the show path without ferry-host
+-- show, so the note is untouched; onHide refocuses the captured window.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  c.showEdit()
+  rec:runTimers()
+  check("showEdit: runs status", 1, #execs(rec, "'status'"))
+  check("showEdit: never a show argv", 0, #execs(rec, "'show'"))
+  check("showEdit: no note in the server", "0", ask(sock, 'exists("b:ferry")'))
+  check("showEdit: launch, then host.show, focused", "host.launch,host.show true",
+    table.concat(t.order, ",") .. " " .. tostring(rec:hasLog("i", "show: host focused after")))
+  check("showEdit: target 4242 logged, shown", "true true",
+    tostring(rec:hasLog("i", "show: target com.example.target window 4242")) .. " " .. tostring(c.shown))
+  c.onHide()
+  check("showEdit then onHide refocuses 4242", 4242, lastFocusId(rec))
+  stop(sock)
+end
+
+-- showEdit with the host already focused keeps the old target; one during
+-- the pre-warm waits for it; a server that is down shows nothing.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  c.toggle()
+  rec:runTimers()
+  c.showEdit()
+  rec:runTimers()
+  check("showEdit while focused: keeps target, logged", true,
+    rec:hasLog("i", "edit: host already focused; keeping target com.example.target window 4242"))
+  check("showEdit while focused: one show argv (the toggle's)", 1, #execs(rec, "'show'"))
+  c.onHide()
+  check("showEdit while focused, then onHide refocuses 4242", 4242, lastFocusId(rec))
+  stop(sock)
+  c.showEdit()
+  check("showEdit, server down: logged, no host.show, no alert", "true 2 0",
+    tostring(rec:hasLog("w", "edit: server down")) .. " " .. count(t.order, "host.show") .. " " .. #rec.alerts)
+
+  local w = setup({ warm = false })
+  w.c.showEdit()
+  check("showEdit during pre-warm: waits, no status yet", "true 0",
+    tostring(w.rec:hasLog("i", "edit: waiting for the pre-warm")) .. " " .. #execs(w.rec, "'status'"))
+  ensure(w.sock)
+  w.rec:finishTask(#w.rec.tasks, 0, "", "")
+  w.rec:runTimers()
+  check("showEdit after pre-warm: status, host.show, no show argv", "1 1 0",
+    #execs(w.rec, "'status'") .. " " .. count(w.order, "host.show") .. " " .. #execs(w.rec, "'show'"))
+  w.c.disable()
+  w.c.showEdit()
+  check("showEdit disabled: nothing more", 1, #execs(w.rec, "'status'"))
+  stop(w.sock)
+end
+
 -- captureSelection on: Cmd+C into the target, selection seeds a fresh note.
 do
   local t = setup({ captureSelection = true })

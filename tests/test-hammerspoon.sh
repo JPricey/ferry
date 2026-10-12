@@ -77,6 +77,11 @@ do
   check("ferry-submit bound", "function", type(rec.urlBinds["ferry-submit"]))
   check("ferry-start bound", "function", type(rec.urlBinds["ferry-start"]))
   check("ferry-talk bound", "function", type(rec.urlBinds["ferry-talk"]))
+  check("ferry-edit bound", "function", type(rec.urlBinds["ferry-edit"]))
+  local edits = 0
+  M._instance.showEdit = function() edits = edits + 1 end
+  rec:openURL("ferry-edit", {})
+  check("ferry-edit reaches the controller's showEdit", 1, edits)
   check("defaults: two hotkey binds", 2, #rec.hotkeyBinds)
   local b = rec.hotkeyBinds[1]
   check("hotkey mods are configured mods", table.concat(M.config.hotkey[1], "+"), table.concat(b.mods, "+"))

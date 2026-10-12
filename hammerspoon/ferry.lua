@@ -343,6 +343,11 @@ end
 -- instance.
 function M.toggle() callInstance("toggle", "press") end
 
+-- hammerspoon://ferry-edit (bin/ferry-edit, which has already opened its
+-- file in the server): show ferry over the terminal without touching the
+-- note.
+function M.showEdit() callInstance("showEdit", "edit") end
+
 -- The talk hotkey pressed (hammerspoon://ferry-talk?state=down): start
 -- Flow and show the note. Without an instance: the same alert as toggle,
 -- and Flow is never started.
@@ -419,6 +424,7 @@ function M.start(cfg)
   -- launcher, or `open -g` from a shell).
   hs.urlevent.bind("ferry-start", function() M.toggle() end)
   hs.urlevent.bind("ferry-talk", onTalkURL)
+  hs.urlevent.bind("ferry-edit", function() M.showEdit() end)
   if M.hotkeyObj then M.hotkeyObj:delete(); M.hotkeyObj = nil end
   if M.talkHotkeyObj then M.talkHotkeyObj:delete(); M.talkHotkeyObj = nil end
   M.hotkeyObj = bindHotkey(M.config.hotkey, "", "ferry-start", M.toggle)

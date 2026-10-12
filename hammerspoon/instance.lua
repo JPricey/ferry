@@ -43,6 +43,10 @@
 --   show: host focused after N ms     hide: target focused after N ms
 -- Each press also logs `toggle: focused=<bool> (<why>) -> show|hide`.
 --
+-- showEdit() (hammerspoon://ferry-edit, after bin/ferry-edit opened its file
+--   in the server): the show path without `ferry-host show`, so the note is
+--   untouched. Host focused: the old target is kept. Logs `edit: ...`.
+--
 -- onSubmit(p) (hammerspoon://ferry-submit?file=&target=&window=):
 --   host.hide, then deliver(p). deliver is injected (B2: ferry.lua's
 --   M.submit, which focuses p's target and pastes).
@@ -463,10 +467,10 @@ function I.new(cfg)
   end
 
   -- Number of UIs attached to the server, from `ferry-host status`
-  -- (nil when it does not answer `up uis=N`).
+  -- (nil when it does not answer `up uis=N`), and its output.
   local function attachedUIs()
     local _, out = runSync("show", { "status" })
-    return tonumber(out:match("up uis=(%d+)"))
+    return tonumber(out:match("up uis=(%d+)")), out
   end
 
   -- No UI attached: launch the host, then call host.show once while
@@ -507,6 +511,19 @@ function I.new(cfg)
     end)
   end
 
+  -- The server holds what to show (the note, or an edit): launch the host
+  -- when no UI is attached (uis 0), else show it; then poll for focus.
+  local function showHost(press, uis)
+    c.shown = true
+    if uis == 0 then
+      launchAndPoll(press)
+      return
+    end
+    if uis then c._launchedAt = nil else log.w("show: status did not report uis") end
+    hostShow(press)
+    pollShow(press)
+  end
+
   -- press: { t0 = key press, alerted }. again: { seed = path } on the one
   -- retry after the server was down.
   local function showRest(press, again)
@@ -537,15 +554,7 @@ function I.new(cfg)
       return
     end
     if press.talk then press.adopted = true end  -- nvim knows Flow is recording
-    c.shown = true
-    local uis = attachedUIs()
-    if uis == 0 then
-      launchAndPoll(press)
-      return
-    end
-    if uis then c._launchedAt = nil else log.w("show: status did not report uis") end
-    hostShow(press)
-    pollShow(press)
+    showHost(press, (attachedUIs()))
   end
 
   -- Show the host with the note. t0: the key press (default now). opts.talk:
@@ -562,6 +571,46 @@ function I.new(cfg)
       return press
     end
     showRest(press)
+    return press
+  end
+
+  -- hammerspoon://ferry-edit: bin/ferry-edit has already opened its file in
+  -- the server, so show the host as c.show does (target, pre-warm wait,
+  -- launch, host.show, poll) but never run `ferry-host show`: the note is
+  -- left alone. With the host already focused the old target is kept (the
+  -- edit hides back to it). A server that is down has no edit to show:
+  -- nothing is shown and ferry-edit falls back to the terminal.
+  function c.showEdit(t0)
+    if c._disabled then log.w("edit: ignored, the controller is disabled"); return end
+    local press = { t0 = t0 or nowMs(), alerted = false }
+    stopPoll()
+    local focused, why = try(h.isFocused)
+    focused = focused == true
+    log.i(string.format("edit: show requested; focused=%s (%s) shown=%s %s", tostring(focused),
+      tostring(why), tostring(c.shown), describeFocus()))
+    if focused then
+      local t = c.target
+      log.i(string.format("edit: host already focused; keeping target %s window %s",
+        tostring(t and t.bundle), tostring(t and t.winId)))
+    else
+      captureTarget()
+    end
+    local function rest()
+      if c._disabled then return end
+      local uis, out = attachedUIs()
+      if out == "down" then
+        log.w("edit: server down, nothing to show; ferry-edit falls back to the terminal")
+        return
+      end
+      log.i("edit: showing the host (no ferry-host show)")
+      showHost(press, uis)
+    end
+    if c._warming then
+      log.i("edit: waiting for the pre-warm ensure to finish")
+      c._afterWarm = rest
+      return press
+    end
+    rest()
     return press
   end
 
