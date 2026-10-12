@@ -1,12 +1,17 @@
--- ferry history sidebar.
+-- ferry notes browser: the history sidebar.
 --
--- A left split listing past sessions from the history database. Keys:
---   <CR>  insert the session's text into the dictation buffer
---   p     replace the dictation buffer with it and submit
---   y     yank it to the system clipboard
---   K     preview the full text in a float
---   d     delete it from history
---   R     refresh        <Tab> back to the dictation buffer     q  close
+-- A left split listing the note files (lua/ferry/store.lua) from the
+-- index (`bin/ferry-notes list`): every note but the current one, drafts
+-- included, pinned first, then newest first. Each row: ★ pinned, then
+-- ● draft or ~ cancelled (blank: sent), the time, the target app and the
+-- first line. Keys:
+--   <CR>  open the note for editing (note.open: the current note is saved
+--         as a draft; the opened one takes the target of the latest show)
+--   s     open it and send it again (same file, state sent)
+--   y     copy it to the clipboard      P  pin or unpin it
+--   d     delete it (after a confirm; the file moves to <notes>/.trash)
+--   K     preview it in a float         i  insert it into the current note
+--   R     refresh        <Tab> back to the note        q  close
 -- The note keys (<C-x>, ZZ, :wq, :x send; <C-q>, ZQ cancel; :q hides; <C-s>
 -- toggles Flow) act on the tab's note, as in the note (note.bind_note_keys).
 local M = {}
@@ -15,7 +20,10 @@ local M = {}
 -- the note module reloads an older one (keeping M.state). 1: open() binds
 -- the note keys on the sidebar. 2: <CR> and p take the whole note as its
 -- body (no `to:` header); bind_keys rebinds an open sidebar's keys.
-M.api = 2
+-- 3: rows come from the notes index (ferry-notes), not ferry-db; new keys
+-- (<CR> open, s send, P pin, i insert); the note module refreshes an open
+-- sidebar after the reload, since its rows are ferry-db rows.
+M.api = 3
 
 M.width = 38
 M.state = { win = nil, buf = nil, main_win = nil, rows = {}, preview_win = nil }
@@ -25,36 +33,62 @@ local function root()
   return vim.fn.fnamemodify(src, ":p:h:h:h")
 end
 
-local function db_cmd(args)
-  local cmd = { root() .. "/bin/ferry-db" }
-  vim.list_extend(cmd, args)
-  local out = vim.fn.system(cmd)
-  if vim.v.shell_error ~= 0 then
-    vim.notify("ferry: history command failed: " .. table.concat(args, " "), vim.log.levels.WARN)
-    return nil
-  end
-  return out
+local function note() return require("ferry.note") end
+
+-- The notes folder the note module uses (ferry-host passes it on every call).
+local function notes_dir()
+  local ok, n = pcall(note)
+  if ok and type(n.dir) == "function" then return n.dir() end
+  local env = os.getenv("FERRY_NOTES_DIR")
+  if env and env ~= "" then return env end
+  return (os.getenv("HOME") or "") .. "/notes/scratchpads"
 end
 
--- The entry to leave out of the list: the note being written (b:ferry.id
--- in the dictation window).
-local function exclude_id()
-  local st = M.state
-  local win = st.main_win
+-- Run bin/ferry-notes on the notes folder. Returns its stdout, or nil after
+-- a notice.
+local function notes_cmd(args)
+  local cmd = { root() .. "/bin/ferry-notes" }
+  vim.list_extend(cmd, args)
+  local ok, obj = pcall(vim.system, cmd, { text = true, env = { FERRY_NOTES_DIR = notes_dir() } })
+  local r = ok and obj:wait(10000) or nil
+  if not r or r.code ~= 0 then
+    local why = r and (r.stderr or ""):match("[^\n]+") or tostring(obj)
+    vim.notify("ferry: notes command failed: " .. table.concat(args, " ") .. (why and ": " .. why or ""),
+      vim.log.levels.WARN)
+    return nil
+  end
+  return r.stdout
+end
+
+local function key(path) return vim.fn.resolve(vim.fn.fnamemodify(path, ":p")) end
+
+-- Paths left out of the list: the current note's file, and the note in the
+-- sidebar's main window.
+local function excluded()
+  local set = {}
+  local function add(p) if p and p ~= "" then set[key(p)] = true end end
+  local ok, n = pcall(note)
+  local cur = ok and n.current and n.current()
+  if cur then add(cur.path) end
+  local win = M.state.main_win
   if not (win and vim.api.nvim_win_is_valid(win)) then win = vim.api.nvim_get_current_win() end
-  local meta = vim.b[vim.api.nvim_win_get_buf(win)].ferry
-  if type(meta) == "table" and meta.id and meta.id ~= "" then return meta.id end
-  return nil
+  local buf = vim.api.nvim_win_get_buf(win)
+  if type(vim.b[buf].ferry) == "table" then add(vim.api.nvim_buf_get_name(buf)) end
+  return set
 end
 
 function M.load()
-  local args = { "list", "--limit", "200" }
-  local sid = exclude_id()
-  if sid then vim.list_extend(args, { "--exclude", sid }) end
-  local out = db_cmd(args)
+  -- Note files written a moment ago are indexed in the background.
+  pcall(function() note().wait_index(3000) end)
+  local out = notes_cmd({ "list", "--limit", "200" })
   if not out or out == "" then return {} end
   local ok, rows = pcall(vim.json.decode, out)
-  return ok and rows or {}
+  if not ok or type(rows) ~= "table" then return {} end
+  local skip, kept = excluded(), {}
+  for _, r in ipairs(rows) do
+    if not skip[key(r.path)] then kept[#kept + 1] = r end
+  end
+  return kept
 end
 
 local function truncate(s, width)
@@ -67,30 +101,39 @@ local function truncate(s, width)
   return out .. "…"
 end
 
--- Build display lines and a line -> session index map.
+M.marks = { pinned = "★", draft = "●", cancelled = "~" }
+
+-- Build display lines, a line -> row index map and highlights. Pinned
+-- notes go under "── Pinned", the rest under their date.
 function M.render(rows, width)
   local lines, map, hl = {}, {}, {}
   local last_label
   if #rows == 0 then
-    lines[1] = "  no history yet"
+    lines[1] = "  no notes yet"
     hl[#hl + 1] = { 0, "Comment", 0, -1 }
     return lines, map, hl
   end
   for i, r in ipairs(rows) do
-    if r.date_label ~= last_label then
+    local label = r.pinned and "Pinned" or r.date_label
+    if label ~= last_label then
       if #lines > 0 then lines[#lines + 1] = "" end
-      lines[#lines + 1] = "── " .. r.date_label
+      lines[#lines + 1] = "── " .. label
       hl[#hl + 1] = { #lines - 1, "Title", 0, -1 }
-      last_label = r.date_label
+      last_label = label
     end
-    local mark = r.outcome == "cancelled" and "~" or " "
-    local head = string.format("%s%s %-7s ", mark, r.time, truncate(r.app, 7))
-    local preview = r.preview ~= "" and r.preview or "(empty)"
+    local pin = r.pinned and M.marks.pinned or " "
+    local mark = M.marks[r.state] or " "
+    local app = truncate(r.app or "", 7)
+    local head = pin .. mark .. r.time .. " " .. app .. string.rep(" ", 7 - vim.fn.strdisplaywidth(app)) .. " "
+    local preview = (r.preview or "") ~= "" and r.preview or "(empty)"
     lines[#lines + 1] = head .. truncate(preview, width - vim.fn.strdisplaywidth(head) - 1)
     local ln = #lines - 1
-    hl[#hl + 1] = { ln, "Number", 1, 6 }
-    hl[#hl + 1] = { ln, "Identifier", 7, 7 + #truncate(r.app, 7) }
-    if r.outcome == "cancelled" then hl[#hl + 1] = { ln, "Comment", 0, 1 } end
+    local p, m = #pin, #pin + #mark
+    if r.pinned then hl[#hl + 1] = { ln, "Special", 0, p } end
+    if r.state == "draft" then hl[#hl + 1] = { ln, "Constant", p, m } end
+    if r.state == "cancelled" then hl[#hl + 1] = { ln, "Comment", p, m } end
+    hl[#hl + 1] = { ln, "Number", m, m + #r.time }
+    hl[#hl + 1] = { ln, "Identifier", m + #r.time + 1, m + #r.time + 1 + #app }
     map[#lines] = i
   end
   return lines, map, hl
@@ -100,8 +143,10 @@ local function current_row()
   local st = M.state
   if not (st.win and vim.api.nvim_win_is_valid(st.win)) then return nil end
   local ln = vim.api.nvim_win_get_cursor(st.win)[1]
-  local idx = st.map[ln]
-  return idx and st.rows[idx] or nil
+  local idx = (st.map or {})[ln]
+  local r = idx and st.rows[idx] or nil
+  -- Rows a ferry-db sidebar (history api 2 and older) listed have no path.
+  return r and r.path and r or nil
 end
 
 local function main_win()
@@ -114,16 +159,26 @@ local function main_win()
   return nil
 end
 
-local function text_lines(r)
-  local t = r.text:gsub("\n$", "")
-  return vim.split(t, "\n", { plain = true })
+-- The note's body lines, read from its file (the file is the truth), with
+-- trailing blank lines dropped. nil after a notice.
+local function body_of(r)
+  local meta, lines = require("ferry.store").read(r.path)
+  if not meta then
+    vim.notify("ferry: cannot read " .. r.path .. ": " .. tostring(lines), vim.log.levels.WARN)
+    return nil
+  end
+  while #lines > 1 and lines[#lines] == "" do lines[#lines] = nil end
+  if #lines == 0 then lines = { "" } end
+  return lines
 end
 
+-- i: put the note's text into the current note, below the cursor line (an
+-- empty note is replaced).
 function M.insert()
   local r = current_row(); if not r then return end
   local win = main_win(); if not win then return end
+  local lines = body_of(r); if not lines then return end
   local buf = vim.api.nvim_win_get_buf(win)
-  local lines = text_lines(r)
   local body = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
   vim.api.nvim_set_current_win(win)
   if #body == 1 and body[1] == "" then
@@ -134,25 +189,65 @@ function M.insert()
   end
 end
 
-function M.paste_to_target()
+-- <CR>: make the note the current one, in the note window.
+function M.open_note()
   local r = current_row(); if not r then return end
-  local win = main_win(); if not win then return end
-  local buf = vim.api.nvim_win_get_buf(win)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, text_lines(r))
-  vim.api.nvim_set_current_win(win)
-  vim.cmd("Submit")
+  local buf = note().open(r.path)
+  if buf then M.refresh() end
+  return buf
 end
 
+-- s: open the note and send it again to the latest show's target.
+function M.send()
+  local r = current_row(); if not r then return end
+  local n = note()
+  local buf = n.open(r.path)
+  if not buf then return end
+  n.submit(buf)
+  M.refresh()
+end
+
+-- y: the note's text on the clipboard. A clipboard that fails gives the
+-- note's error notice, never an error.
 function M.yank()
   local r = current_row(); if not r then return end
-  vim.fn.setreg("+", r.text)
-  vim.fn.setreg('"', r.text)
-  vim.notify(string.format("ferry: yanked %d words", r.words))
+  local lines = body_of(r); if not lines then return end
+  local text = table.concat(lines, "\n")
+  local n = note()
+  if not n.to_clipboard(text) then
+    vim.notify(n.CLIP_FAIL, vim.log.levels.ERROR)
+    return
+  end
+  pcall(vim.fn.setreg, '"', text)
+  vim.notify(string.format("ferry: copied %d words", r.words or 0))
 end
 
+-- P: pin or unpin the note (frontmatter `pinned`).
+function M.pin()
+  local r = current_row(); if not r then return end
+  if notes_cmd({ "pin", r.id, r.pinned and "off" or "on" }) then M.refresh(r.path) end
+end
+
+-- Swappable (tests): true to delete.
+function M.confirm(msg)
+  return vim.fn.confirm(msg, "&Delete\n&Keep", 2) == 1
+end
+
+-- d: after a confirm, move the note's file to <notes>/.trash.
 function M.delete()
   local r = current_row(); if not r then return end
-  db_cmd({ "delete", r.id })
+  local preview = (r.preview or "") ~= "" and r.preview or "(empty)"
+  if not M.confirm("Delete \"" .. truncate(preview, 40) .. "\"?") then return end
+  if not notes_cmd({ "delete", r.id }) then return end
+  -- A hidden buffer of that note (a draft left by a seeded show) goes too,
+  -- so it can never write the file back.
+  local cur = note().current()
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_get_name(b) ~= "" and key(vim.api.nvim_buf_get_name(b)) == key(r.path)
+      and not (cur and cur.buf == b) and vim.fn.bufwinid(b) == -1 then
+      pcall(vim.api.nvim_buf_delete, b, { force = true })
+    end
+  end
   M.refresh()
 end
 
@@ -170,18 +265,18 @@ function M.preview()
     M.close_preview(); return
   end
   local r = current_row(); if not r then return end
-  local lines = text_lines(r)
+  local lines = body_of(r); if not lines then return end
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].filetype = "markdown"
   vim.bo[buf].modifiable = false
   vim.bo[buf].bufhidden = "wipe"
-  local width = math.min(80, vim.o.columns - M.width - 6)
+  local width = math.max(20, math.min(80, vim.o.columns - M.width - 6))
   local height = math.min(#lines + 1, vim.o.lines - 6)
   st.preview_win = vim.api.nvim_open_win(buf, false, {
     relative = "win", win = st.win, anchor = "NW", row = 0, col = M.width + 1,
     width = width, height = math.max(height, 1), style = "minimal", border = "rounded",
-    title = string.format(" %s · %s · %s · %d words ", r.date_label, r.time, r.app, r.words),
+    title = string.format(" %s · %s · %s · %s · %d words ", r.date_label, r.time, r.app, r.state, r.words or 0),
   })
   vim.wo[st.preview_win].wrap = true
   vim.wo[st.preview_win].linebreak = true
@@ -192,7 +287,9 @@ function M.focus_main()
   if win then vim.api.nvim_set_current_win(win) end
 end
 
-function M.refresh()
+-- Reload the rows. The cursor goes to the row of keep_path when it is
+-- listed, else to the first row.
+function M.refresh(keep_path)
   local st = M.state
   if not (st.buf and vim.api.nvim_buf_is_valid(st.buf)) then return end
   st.rows = M.load()
@@ -204,13 +301,17 @@ function M.refresh()
   local ns = vim.api.nvim_create_namespace("ferry-history")
   vim.api.nvim_buf_clear_namespace(st.buf, ns, 0, -1)
   for _, h in ipairs(hl) do
-    vim.api.nvim_buf_add_highlight(st.buf, ns, h[2], h[1], h[3], h[4])
+    pcall(vim.api.nvim_buf_add_highlight, st.buf, ns, h[2], h[1], h[3], h[4])
   end
-  -- Park the cursor on the first entry.
   if st.win and vim.api.nvim_win_is_valid(st.win) then
+    local first, want
     for ln = 1, #lines do
-      if map[ln] then vim.api.nvim_win_set_cursor(st.win, { ln, 0 }); break end
+      if map[ln] then
+        first = first or ln
+        if keep_path and key(st.rows[map[ln]].path) == key(keep_path) then want = ln end
+      end
     end
+    if want or first then vim.api.nvim_win_set_cursor(st.win, { want or first, 0 }) end
   end
 end
 
@@ -234,18 +335,22 @@ end
 
 -- The sidebar's own keys on buf, bound to this module's functions. The note
 -- module reruns it when it reloads an older history module, so a sidebar
--- that module opened stops calling the old functions.
+-- that module opened stops calling the old functions (and loses its old
+-- p key).
 function M.bind_keys(buf)
   local function map(lhs, fn, desc)
     vim.keymap.set("n", lhs, fn, { buffer = buf, silent = true, nowait = true, desc = desc })
   end
-  map("<CR>", M.insert, "insert into buffer")
-  map("p", M.paste_to_target, "paste to target and submit")
-  map("y", M.yank, "yank to clipboard")
+  pcall(vim.keymap.del, "n", "p", { buffer = buf })
+  map("<CR>", M.open_note, "open the note")
+  map("s", M.send, "open the note and send it again")
+  map("y", M.yank, "copy to clipboard")
+  map("P", M.pin, "pin or unpin")
+  map("d", M.delete, "delete (to .trash)")
   map("K", M.preview, "preview")
-  map("d", M.delete, "delete from history")
+  map("i", M.insert, "insert into the current note")
   map("R", M.refresh, "refresh")
-  map("<Tab>", M.focus_main, "back to buffer")
+  map("<Tab>", M.focus_main, "back to the note")
   map("q", M.close, "close sidebar")
   map("<Esc>", M.close_preview, "close preview")
 end
@@ -267,7 +372,7 @@ function M.open()
   local wo = vim.wo[st.win]
   wo.number, wo.relativenumber, wo.signcolumn, wo.foldcolumn = false, false, "no", "0"
   wo.wrap, wo.cursorline, wo.winfixwidth, wo.spell, wo.list = false, true, true, false, false
-  wo.statusline = " history "
+  wo.statusline = " notes "
 
   M.bind_keys(st.buf)
   -- Send, cancel, hide and Flow keys act on the note, not on this buffer.

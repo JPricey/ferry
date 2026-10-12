@@ -149,19 +149,20 @@ empty note, or one unchanged from its starting text, also cancels.
 
 ## Browse history
 
-Every note is recorded. `:History` or `<leader>h` toggles a sidebar on the
-left listing past dictations newest first, grouped by day (it opens with
-the note); press `<Tab>` to jump
-back. The note keys work there too and act on the note, not the sidebar:
-`<C-x>`, `ZZ`, `:wq` and `:x` send it, `<C-q>` and `ZQ` cancel, `:q` hides
-and `<C-s>` toggles Flow from insert mode at the end of the note.
+`:History` or `<leader>h` toggles a sidebar on the left (it opens with the
+note) listing every note file but the current one, drafts included: pinned
+first, then newest first by day, marked `★` pinned, `●` draft, `~`
+cancelled, with the target app and first line; `<Tab>` jumps back. The note
+keys work there too and act on the note: `<C-x>`, `ZZ`, `:wq` and `:x` send
+it, `<C-q>` and `ZQ` cancel, `:q` hides and `<C-s>` toggles Flow.
 
-## Reuse a past dictation
+## Reuse a past note
 
-In the sidebar, `<CR>` inserts the entry into your buffer, `p` replaces the
-note's text with it and sends it, `y` copies it to the clipboard, `K` previews the
-full text (`Esc` closes it), `d` deletes it, `R` refreshes the list and `q`
-closes the sidebar. Cancelled notes with text show a `~`.
+In the sidebar, `<CR>` opens the note for editing (the current one is saved
+as a draft; the opened one goes to the app of the latest show), `s` opens
+it and sends it again, `y` copies it, `P` pins or unpins it, `d` deletes it
+after a confirm (to `.trash`), `K` previews it (`Esc` closes), `i` inserts
+it into the current note, `R` refreshes and `q` closes the sidebar.
 
 ## Notes are files
 

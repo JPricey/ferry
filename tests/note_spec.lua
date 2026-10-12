@@ -196,17 +196,17 @@ check("next show resumes the draft", p5 .. " " .. id5 .. " keep me",
 
 -- --- history sidebar excludes the current note -----------------------------
 local _, id9 = show()
-local fin = work .. "/fin.txt"
-vim.fn.writefile({ "listed elsewhere" }, fin)
-vim.fn.system({ db, "finish", id9, "submitted", fin })
+set({ "listed elsewhere" })
+vim.cmd("silent write")
 local hist = require("ferry.history")
 local function listed(id)
   for _, r in ipairs(hist.load()) do if r.id == id then return true end end
   return false
 end
-check("history excludes b:ferry.id of the note", false, listed(id9))
+check("history excludes the current note, file and all", false, listed(id9))
 check("history lists other notes", true, listed(id1))
 show()
+set({})
 vim.cmd("Cancel")
 
 -- --- the target: captured at the latest show, the buffer is the body ------

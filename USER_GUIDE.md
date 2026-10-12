@@ -201,31 +201,39 @@ or cancel instead of hide; it never skips the wait.
 
 ## History
 
-Every note is saved. Press `<leader>h` to show or hide a sidebar on the
-left that lists past dictations, newest first, grouped by day, with the app
-each one went to (it opens by itself each time the note appears). `<Tab>`
-jumps back to your text.
+Every note is saved as a file. Press `<leader>h` to show or hide a sidebar
+on the left that lists your notes (it opens by itself each time the note
+appears): every note except the one you are writing, drafts included.
+Pinned notes come first, then the rest newest first, grouped by day. Each
+row shows a mark (`★` pinned, `●` draft, `~` cancelled, nothing for sent),
+the time, the app it went to and its first line. `<Tab>` jumps back to your
+text.
 
-On an entry in the sidebar:
+On a note in the sidebar:
 
 | Key | What it does |
 | --- | --- |
-| `Enter` | Insert it into your buffer |
-| `p` | Replace your note's text with it and send it |
+| `Enter` | Open it for editing. The note you were writing is saved as a draft (find it in the list); the opened note is sent to the app you came from at the latest hotkey press |
+| `s` | Open it and send it again right away (the same file is marked sent) |
 | `y` | Copy it to the clipboard |
+| `P` | Pin it to the top, or unpin it |
+| `d` | Delete it, after you confirm (the file moves to `.trash` in the notes folder) |
 | `K` | Preview the full text |
-| `d` | Delete it |
+| `i` | Insert its text into the note you are writing |
 | `R` | Refresh the list |
 | `q` | Close the sidebar (`:q` hides the whole window) |
 | `Esc` | Close the preview |
+
+A sent note you open and change becomes a draft again until you send it.
 
 The note keys also work while the sidebar is focused, and act on your note:
 `Ctrl-X`, `ZZ`, `:wq` and `:x` send it, `Ctrl-Q` and `ZQ` cancel it, `:q`
 hides, and `Ctrl-S` starts or stops Flow (focus moves back to the note, in
 insert mode at the end of the text).
 
-Cancelled notes that had text are marked with `~`. The history lives in
-`~/Library/Application Support/ferry/history.sqlite`.
+The list comes from a search index of the notes folder
+(`~/Library/Application Support/ferry/index.sqlite`, rebuilt from the files
+whenever needed).
 
 ## Teach Flow the words you keep fixing
 

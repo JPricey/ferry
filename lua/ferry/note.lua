@@ -16,8 +16,8 @@
 -- file on its first change (an untouched blank note leaves nothing);
 -- drafts autosave about 1 s after a change, and on draft and Hide. Submit
 -- marks the file `sent`, Cancel `cancelled`; a blank Cancel deletes it.
--- The history database (ferry-db) is still written alongside, until the
--- browser moves to the index.
+-- The history database (ferry-db) is still written alongside; the browser
+-- (lua/ferry/history.lua) lists the index and opens a note with M.open.
 --
 -- In a note, :Submit (ZZ, <C-x>, :wq, :x), :Cancel (ZQ) and :Hide (:q)
 -- call M.host instead of exiting. Hide keeps the note as the draft.
@@ -86,14 +86,18 @@ local store = require("ferry.store")
 -- Bumped when the module changes in a way an already-running server must
 -- pick up: bin/ferry-host reloads the module (keeping M.state and a
 -- swapped M.host) when the loaded one reports a different api.
-M.api = 12
+M.api = 13
 
--- history api 2: open() binds the note keys on the sidebar; <CR> and p
--- take the whole note as its body. A sidebar the old module opened keeps
--- its keys bound to the old functions, so rebind them to the new ones.
+-- history api 3: the browser on the notes index (open, send, pin, ...).
+-- A sidebar the old module opened keeps its keys bound to the old
+-- functions and lists ferry-db rows, so rebind its keys to the new ones
+-- and list it again.
 local function history()
-  return current("ferry.history", 2, function(_, new)
-    if new.is_open() then new.bind_keys(new.state.buf) end
+  return current("ferry.history", 3, function(_, new)
+    if new.is_open() then
+      new.bind_keys(new.state.buf)
+      vim.schedule(function() pcall(new.refresh) end)
+    end
   end)
 end
 
@@ -112,6 +116,9 @@ local function notes_dir(opts)
   if env and env ~= "" then return env end
   return (os.getenv("HOME") or "") .. "/notes/scratchpads"
 end
+
+-- The notes folder (the history browser lists it).
+function M.dir() return notes_dir() end
 
 local function use_dir(opts)
   if type(opts) == "table" and opts.dir and opts.dir ~= "" then M.state.dir = opts.dir end
@@ -184,7 +191,9 @@ end
 
 -- Reindex one note file (or drop its row when the file is gone) in the
 -- background. The index lives in $FERRY_INDEX (ferry-notes' default
--- otherwise); the notes folder is the file's own.
+-- otherwise); the notes folder is the file's own. Jobs still running are
+-- kept in `indexing` until they exit, for M.wait_index.
+local indexing, index_n = {}, 0
 local function index(path)
   -- Spelled the way the notes folder is (nvim resolves /tmp to
   -- /private/tmp in buffer names), so the index keeps one path per file.
@@ -193,8 +202,20 @@ local function index(path)
     dir = notes_dir()
     path = dir .. "/" .. vim.fn.fnamemodify(path, ":t")
   end
-  pcall(vim.system, { repo_root() .. "/bin/ferry-notes", "index", path },
-    { text = true, env = { FERRY_NOTES_DIR = dir } }, function() end)
+  index_n = index_n + 1
+  local n = index_n
+  local ok, obj = pcall(vim.system, { repo_root() .. "/bin/ferry-notes", "index", path },
+    { text = true, env = { FERRY_NOTES_DIR = dir } }, function() indexing[n] = nil end)
+  if ok then indexing[n] = obj end
+end
+
+-- Wait (up to ms each) for the background index jobs, so a list that
+-- follows sees every note file written so far.
+function M.wait_index(ms)
+  for n, obj in pairs(indexing) do
+    pcall(obj.wait, obj, ms or 3000)
+    indexing[n] = nil
+  end
 end
 
 -- An error notice, shown after the current command: raised inside :write
@@ -415,7 +436,9 @@ local function attach(buf)
   au("BufWriteCmd", function(a)
     if same_file(a.file, vim.api.nvim_buf_get_name(buf)) then
       if readable(vim.api.nvim_buf_get_name(buf)) or not is_blank(select(2, parts(buf))) then
-        write_note(buf)
+        -- Edited text is a draft again (a sent note opened from the
+        -- browser); an unchanged one keeps its state.
+        write_note(buf, { state = vim.bo[buf].modified and "draft" or nil })
       else
         vim.bo[buf].modified = false
       end
@@ -549,6 +572,8 @@ local function to_clipboard(text)
 end
 
 local CLIP_FAIL = "ferry: could not copy to the clipboard — note kept"
+-- For the history browser's copy.
+M.to_clipboard, M.CLIP_FAIL = to_clipboard, CLIP_FAIL
 
 -- The default host talks to Hammerspoon. submit{file,target,window} reuses
 -- V0's ferry-submit URL (Hammerspoon reads, delivers and deletes the
@@ -805,6 +830,7 @@ local function on(v) return v ~= nil and v ~= "" and v ~= "0" and v ~= false and
 function M.show(opts)
   opts = opts or {}
   if opts.dir and opts.dir ~= "" then M.state.dir = opts.dir end
+  M.state.captured = { target = opts.target or "", window = opts.window or "" }
   local seed = read_seed(opts.seed)
   local note
   if seed == "" and M.state.note then
@@ -906,6 +932,67 @@ end
 -- Forget the current note so the next show() opens a fresh one.
 function M.forget()
   M.state.note, M.state.cursor = nil, nil
+end
+
+-- Open a note file (the history browser's <CR> and s) as the current note,
+-- in the note window, normal mode, cursor on its last line. The note that
+-- was current is saved as a draft first (an untouched blank one is
+-- dropped) and its buffer let go once the opened one is shown. The opened
+-- note takes the target captured at the latest show; its file keeps its
+-- state until its text changes (then draft). Not while Flow is recording
+-- or a finish waits for its paste. Returns the buffer, or nil after a
+-- notice.
+function M.open(path)
+  if flow.recording() or flow.state.waiting then
+    vim.notify("ferry: Flow is still recording; open the note when it is done", vim.log.levels.WARN)
+    return nil
+  end
+  path = vim.fn.fnamemodify(path, ":p")
+  local meta = readable(path) and store.read(path)
+  if not meta then
+    vim.notify("ferry: cannot read " .. path, vim.log.levels.WARN)
+    return nil
+  end
+  local prev = M.state.note
+  local cap = M.state.captured
+  if not cap and prev and prev.buf and vim.api.nvim_buf_is_valid(prev.buf) then
+    local m = vim.b[prev.buf].ferry or {}
+    cap = { target = m.target or "", window = m.window or "" }
+  end
+  cap = cap or { target = "", window = "" }
+  if prev and same_file(prev.path, path) then
+    local cur = note_buf(prev)
+    display(cur)
+    return cur
+  end
+  local old
+  if prev then
+    old = note_buf(prev)
+    save(old)
+  end
+  local buf = vim.fn.bufadd(path)
+  if buf == old then old = nil end
+  if not (vim.api.nvim_buf_is_loaded(buf) and vim.bo[buf].modified) then
+    vim.fn.bufload(buf)
+    attach(buf)
+    load(buf)
+  end
+  vim.b[buf].ferry_body = true
+  local id = rawget(meta, "id") or M.uuid()
+  local created = vim.fn.getftime(path)
+  local note = { id = id, path = path, buf = buf, created = created > 0 and created or os.time() }
+  display(buf)
+  M.apply_options(buf)
+  vim.b[buf].ferry = { id = id, target = cap.target, window = cap.window, seed = "", created = note.created }
+  M.state.note, M.state.cursor, M.state.listed = note, nil, id
+  vim.cmd("stopinsert")
+  vim.api.nvim_win_set_cursor(0, { vim.api.nvim_buf_line_count(buf), 0 })
+  -- The old note's buffer goes once it is saved (a failed save keeps it).
+  if old and prev.unstarted then discard_unstarted(prev) end
+  if old and vim.api.nvim_buf_is_valid(old) and not vim.bo[old].modified and vim.fn.bufwinid(old) == -1 then
+    pcall(vim.api.nvim_buf_delete, old, { force = true })
+  end
+  return buf
 end
 
 -- An empty note that takes the place of a finished one, so :q in its

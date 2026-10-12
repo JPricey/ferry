@@ -252,9 +252,12 @@ logged to the `ferry` logger.
 going and `finish` on submit or cancel, recording target, seed, final
 text, and outcome in
 `~/Library/Application Support/ferry/history.sqlite`. Empty cancels
-are dropped and drafts stay `open` rows the sidebar hides.
-`lua/ferry/history.lua` renders the sidebar by shelling out to
-`ferry-db list` (JSON); the note layout opens it on the left.
+are dropped and drafts stay `open` rows (ferry-db goes in H5).
+`lua/ferry/history.lua` (api 3) renders the notes browser from
+`bin/ferry-notes list` (JSON over the notes index), every note but the
+current one; the note layout opens it on the left. `<CR>` and `s` go
+through `note.open(path)`, which saves the current note as a draft and
+makes the file current with the latest show's target.
 
 ## Conventions
 

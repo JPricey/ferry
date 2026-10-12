@@ -1,0 +1,196 @@
+-- The notes browser (lua/ferry/history.lua) on a fixture notes folder, with
+-- a recording stub host and a fake clipboard.
+-- Run by tests/test-history.sh: nvim --headless --clean -l tests/history_spec.lua <root> <work>
+-- The shell sets FERRY_NOTES_DIR, FERRY_INDEX, FERRY_OUTBOX and FERRY_DB to
+-- temp paths.
+local root, work = arg[1], arg[2]
+vim.opt.rtp:prepend(root)
+local note = require("ferry.note")
+local store = require("ferry.store")
+local dir = vim.env.FERRY_NOTES_DIR
+
+-- Never touch the system clipboard. clip_mode "throw": the + copy raises.
+local clip, clip_mode = {}, nil
+vim.g.clipboard = {
+  name = "ferry-test",
+  copy = {
+    ["+"] = function(lines)
+      if clip_mode == "throw" then error("fake clipboard copy failed") end
+      clip["+"] = lines
+    end,
+    ["*"] = function(lines) clip["*"] = lines end,
+  },
+  paste = { ["+"] = function() return clip["+"] or {} end, ["*"] = function() return clip["*"] or {} end },
+}
+local notices = {}
+vim.notify = function(msg) notices[#notices + 1] = msg end
+
+io.stdout:setvbuf("line")
+local fail = 0
+local function check(name, want, got)
+  if want == got then
+    io.stdout:write("ok   ", name, "\n")
+  else
+    io.stdout:write("FAIL ", name, ": want '", tostring(want), "' got '", tostring(got), "'\n")
+    fail = 1
+  end
+end
+
+-- Fixture notes: today at 10:00 (draft), 09:00 (sent), 08:00 (cancelled),
+-- and yesterday at 07:00 (sent, pinned).
+local function iso(t)
+  local z = os.date("%z", t)
+  return os.date("%Y-%m-%dT%H:%M:%S", t) .. z:sub(1, 3) .. ":" .. z:sub(4, 5)
+end
+local function at(h, days)
+  local d = os.date("*t")
+  d.hour, d.min, d.sec = h, 0, 0
+  d.day = d.day - (days or 0)
+  return os.time(d)
+end
+local paths = {}
+local function fixture(name, id, state, t, body, extra)
+  local meta = { "id", "state", "created", "updated", "target",
+    id = id, state = state, created = iso(t), updated = iso(t), target = "app:com.example.app#1" }
+  for k, v in pairs(extra or {}) do store.set(meta, k, v) end
+  paths[name] = dir .. "/" .. store.name(t, id)
+  vim.fn.mkdir(dir, "p")
+  assert(store.write(paths[name], meta, body))
+end
+fixture("bravo", "bbbbbbbb-0000-4000-8000-000000000002", "draft", at(10), { "bravo draft" })
+fixture("alpha", "aaaaaaaa-0000-4000-8000-000000000001", "sent", at(9), { "alpha sent", "line two" },
+  { sent = iso(at(9)) })
+fixture("charlie", "cccccccc-0000-4000-8000-000000000003", "cancelled", at(8), { "charlie cancelled" })
+fixture("delta", "dddddddd-0000-4000-8000-000000000004", "sent", at(7, 1), { "delta pinned" },
+  { pinned = "true" })
+vim.fn.system({ root .. "/bin/ferry-notes", "rebuild" })
+
+-- Recording stub host.
+local calls = {}
+note.host = {
+  submit = function(p) calls[#calls + 1] = { p = p, text = table.concat(vim.fn.readfile(p.file), "|") } end,
+  hide = function() end,
+}
+
+local h = require("ferry.history")
+local function show(t, w)
+  local p = note.show({ target = t, window = w })
+  vim.cmd("stopinsert")
+  h.refresh()
+  return p
+end
+local function rows() -- the sidebar's row lines, joined by |
+  local out = {}
+  for ln, l in ipairs(vim.api.nvim_buf_get_lines(h.state.buf, 0, -1, false)) do
+    out[#out + 1] = l
+  end
+  return table.concat(out, "|")
+end
+-- Press keys on the sidebar row whose line holds text.
+local function press(text, keys)
+  vim.api.nvim_set_current_win(h.state.win)
+  for ln, l in ipairs(vim.api.nvim_buf_get_lines(h.state.buf, 0, -1, false)) do
+    if h.state.map[ln] and l:find(text, 1, true) then vim.api.nvim_win_set_cursor(h.state.win, { ln, 0 }) end
+  end
+  vim.v.errmsg = ""
+  local ok, err = pcall(vim.api.nvim_feedkeys, vim.keycode(keys), "xt", false)
+  return ok and vim.v.errmsg == "" and "" or ("error: " .. tostring(err) .. vim.v.errmsg)
+end
+local function fmeta(path, k) local m = store.read(path); return m and tostring(rawget(m, k)) or "none" end
+local function fbody(path) local _, b = store.read(path); return b and table.concat(b, "|") or "none" end
+local function buflines(b) return table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false), "|") end
+
+-- The current note, with a file: never listed.
+local cur = show("com.example.app", "4242")
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { "current text" })
+vim.cmd("silent write")
+h.refresh()
+check("rows: pinned first, then newest first; marks ★ pinned, ● draft, ~ cancelled; the app; current note left out",
+  "── Pinned|★ 07:00 app     delta pinned||── Today| ●10:00 app     bravo draft|  09:00 app     alpha sent| ~08:00 app     charlie cancelled",
+  rows())
+
+-- <CR>: bravo becomes the current note; the old one (unsaved typing) is
+-- kept as a draft file and listed.
+vim.api.nvim_buf_set_lines(vim.api.nvim_win_get_buf(h.state.main_win), 0, -1, false, { "current text edited" })
+local old_buf = vim.api.nvim_win_get_buf(h.state.main_win)
+check("<CR> runs without error", "", press("bravo draft", "<CR>"))
+local nb = vim.api.nvim_get_current_buf()
+check("<CR> makes that note current, in the note window, focused",
+  "true true bravo draft", tostring(vim.fn.resolve(note.current().path) == vim.fn.resolve(paths.bravo))
+  .. " " .. tostring(vim.api.nvim_get_current_win() == h.state.main_win) .. " " .. buflines(nb))
+check("<CR>: the opened note takes the target of the latest show", "com.example.app 4242",
+  vim.b[nb].ferry.target .. " " .. vim.b[nb].ferry.window)
+check("<CR>: the old note is a draft file with its unsaved typing, its buffer let go",
+  "draft current text edited false", fmeta(cur, "state") .. " " .. fbody(cur) .. " "
+  .. tostring(vim.api.nvim_buf_is_valid(old_buf)))
+check("<CR>: the old note is listed, the opened one is not", "true false",
+  tostring(rows():find("current text edited", 1, true) ~= nil) .. " " .. tostring(rows():find("bravo", 1, true) ~= nil))
+-- Edited, the opened note saves into the same file as a draft.
+vim.api.nvim_buf_set_lines(nb, 0, -1, false, { "bravo draft", "more" })
+vim.cmd("silent write")
+check("the opened note writes its own file", "draft bravo draft|more bbbbbbbb-0000-4000-8000-000000000002",
+  fmeta(paths.bravo, "state") .. " " .. fbody(paths.bravo) .. " " .. fmeta(paths.bravo, "id"))
+
+-- s: open alpha and send it again, in place, to the latest show's target.
+show("com.second", "77")
+local sent_before = fmeta(paths.alpha, "sent")
+calls = {}
+check("s runs without error", "", press("alpha sent", "s"))
+check("s calls host.submit once with that note's body and the latest target",
+  "1 com.second 77 alpha sent|line two", #calls .. " " .. (calls[1] and (calls[1].p.target .. " "
+  .. calls[1].p.window .. " " .. calls[1].text) or ""))
+check("s: the same file says state sent, with a new sent time", "sent true",
+  fmeta(paths.alpha, "state") .. " " .. tostring(fmeta(paths.alpha, "sent") ~= sent_before))
+check("s: bravo (current before) kept as a draft", "draft bravo draft|more",
+  fmeta(paths.bravo, "state") .. " " .. fbody(paths.bravo))
+check("s: a blank note is current after the send", "", buflines(vim.api.nvim_win_get_buf(h.state.main_win)))
+local n_md = #vim.fn.glob(dir .. "/*.md", false, true)
+check("s sends in place: no new note file", 5, n_md)
+
+-- y: the fake clipboard gets the text; a failing clipboard gives the
+-- note's notice, not an error.
+check("y runs without error", "", press("charlie cancelled", "y"))
+check("y puts the note's text on +", "charlie cancelled", table.concat(clip["+"] or {}, "|"))
+clip_mode, notices = "throw", {}
+check("y with a failing clipboard: no error", "", press("charlie cancelled", "y"))
+check("y with a failing clipboard: the note's error notice", note.CLIP_FAIL, notices[#notices])
+clip_mode = nil
+
+-- P flips `pinned:`.
+press("charlie cancelled", "P")
+check("P pins: pinned: true in the file, the row under Pinned with ★", "true true",
+  fmeta(paths.charlie, "pinned") .. " " .. tostring(rows():find(
+    "── Pinned|★~08:00 app     charlie cancelled|★ 07:00 app     delta pinned||── Today|", 1, true) == 1))
+press("charlie cancelled", "P")
+check("P again unpins: no pinned key", "nil", fmeta(paths.charlie, "pinned"))
+
+-- K previews the body.
+press("alpha sent", "K")
+local pv = h.state.preview_win
+check("K opens a preview of the body", "alpha sent|line two",
+  pv and vim.api.nvim_win_is_valid(pv) and buflines(vim.api.nvim_win_get_buf(pv)) or "none")
+h.close_preview()
+
+-- i inserts the note's text into the current (blank) note.
+press("delta pinned", "i")
+check("i fills the current blank note", "delta pinned", buflines(vim.api.nvim_win_get_buf(h.state.main_win)))
+
+-- d deletes after a confirm.
+h.confirm = function() return false end
+press("charlie cancelled", "d")
+check("d, not confirmed: file kept, row kept", "1 true",
+  vim.fn.filereadable(paths.charlie) .. " " .. tostring(rows():find("charlie", 1, true) ~= nil))
+h.confirm = function() return true end
+press("charlie cancelled", "d")
+check("d, confirmed: the file moves to .trash and the row goes", "0 1 false",
+  vim.fn.filereadable(paths.charlie) .. " " .. vim.fn.filereadable(dir .. "/.trash/" .. vim.fs.basename(paths.charlie))
+  .. " " .. tostring(rows():find("charlie", 1, true) ~= nil))
+
+-- R lists a note written outside ferry after an index run.
+fixture("echo", "eeeeeeee-0000-4000-8000-000000000005", "draft", at(11), { "echo outside" })
+vim.fn.system({ root .. "/bin/ferry-notes", "index", paths.echo })
+press("alpha sent", "R")
+check("R refreshes", true, rows():find("echo outside", 1, true) ~= nil)
+
+io.stdout:write("RESULT=" .. fail .. "\n")
+vim.cmd("qall!")
