@@ -43,6 +43,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   Agent defaults unless Joe says otherwise: file name `<date>-<time>-<id8>.md`, never renamed; resending a sent note edits and sends it in place; a reopened note goes to the window captured at the latest show unless its `to:` line was chosen; non-empty cancels are kept as `cancelled`, blank ones dropped.
 - **Targets chosen after writing: question** (blocks T5 only): press Enter after a tmux paste? Recommended: only when the pane is running `claude` (submits the prompt); other panes get the paste only. Agent defaults: picker `<C-t>`, copy-and-hide `<C-y>` (insert and normal mode); the `to:` line holds the raw spec with a human label shown beside it as virtual text; recent targets kept in memory only; copy-and-hide records the note as sent to `clipboard`.
 - **Notes and history browser: H6 failed twice** (migration script). Second failure is only the hint it prints for a non-default `--to`: it omits `FERRY_INDEX`, so following it would rebuild the default index from that folder. Recommend: allow a third attempt to make the hint `FERRY_NOTES_DIR=<dest> FERRY_INDEX=<dest>/../index-<name>.sqlite ferry-notes rebuild` (or drop the hint). Nothing else depends on H6.
+- **Rename to ferry: run the migration NOW** (R1 merged; the hotkey is dead until you do): `cd ~/Code/voice-vim && ./install.sh`. If it prints a draft path, open that file and paste the text into a new note. Then Ctrl+Option+V shows one ferry window and `<leader>h` lists your history. Tell the orchestrator when done (R2 then removes the migration code). Later, after the session: `mv ~/Code/voice-vim ~/Code/ferry && cd ~/Code/ferry && ./install.sh`.
 - **Hold to talk: Joe checks** (P1–P4 merged; P5, a false-alert fix, comes after the rename). Reload Config first, start from a Slack message field:
   1. Console shows `bound ctrl+alt+v` and the talk key bound (`… (talk)`).
   2. Hold Ctrl+Option+B, say "one two three four five", release: the note appears, Flow's indicator shows while held, the text lands in the note in insert mode with "one" not clipped, nothing lands in Slack. Copy the `talk:` lines and `show: host focused after` from the console.
@@ -361,7 +362,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 
 ## Rename to ferry
 
-- **Status:** todo
+- **Status:** needs-joe
 - **Needs:** Hold to talk (P4 merged) and T3 merged, so nothing else is in flight while every file changes.
 - **Deliverable:** the project is called ferry everywhere, all at once, with no trace of the old name in the tree (Joe, 2026-10-12). Git history is left alone.
 - **Scope:**
@@ -370,7 +371,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - Fleet's docs mention the old name; fleet is not edited from here (hand Joe the list).
   - Joe moves the repo folder to `~/Code/ferry` after this session, then runs `./install.sh` again.
 - **Tasks:**
-  - [ ] **R1. Rename everything and add the one-time migration.** Files: everything. Depends: P4, T3 merged; no other task in flight. Verify: every `tests/test-*.sh` passes under the new names; `tests/test-install.sh` builds a fake old install in a temp HOME (old link, old init.lua block, old data folder, an old socket) and shows `./install.sh` migrates it, a second run changes nothing; `git grep -niE 'voice.?vim'` prints only the migration step in `install.sh` and its test; luajit loadfile on `hammerspoon/**/*.lua`.
+  - [x] **R1. Rename everything and add the one-time migration.** Files: everything. Depends: P4, T3 merged; no other task in flight. Verify: every `tests/test-*.sh` passes under the new names; `tests/test-install.sh` builds a fake old install in a temp HOME (old link, old init.lua block, old data folder, an old socket) and shows `./install.sh` migrates it, a second run changes nothing; `git grep -niE 'voice.?vim'` prints only the migration step in `install.sh` and its test; luajit loadfile on `hammerspoon/**/*.lua`.
   - [ ] **R2. Remove the migration step.** After Joe ran it. Verify: `git grep -niE 'voice.?vim'` prints nothing; every test passes.
 - **Joe checks:**
   1. Right after R1 merges (before any Hammerspoon reload): `./install.sh`. It reports the migration. If it prints a draft path, open that file and paste the text into a new note. The console shows `bound ctrl+alt+v` and the talk key; one ferry window; history intact.
@@ -378,6 +379,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 - **Log:**
   - 2026-10-12: created. Joe picked "ferry" from the proposed names; rename everywhere at once with no record of the old name; Joe runs the migration through `./install.sh`; git history left alone; Joe moves the repo folder after this session.
   - 2026-10-12: R1 implemented: every path, identifier, URL route, env var, setting key, message and doc renamed (also the two-letter abbreviation in test temp dirs and locals); `joe-other-feedback.md` left to Joe. The migration block in `install.sh` (between its BEGIN/END markers) saves the open draft through the old server, copies the old notes dir and outbox, stops only the Neovide started with `--server <old socket>` and the server listening on it, moves the data folder (both present: a `missing:` line, nothing moved), moves the saved window frame with `hs -c` before the reload, removes the old link (step 6 links `ferry.lua`) and renames the `init.lua` block with a `.bak` (`.bak.<time>` when one exists). The live-upgrade tests in `test-host.sh` and `test-note.sh` still start servers from commits before the rename; they read the old name from that commit's `lua/` folder and map it, so the old name is not written in the tree.
+  - 2026-10-12: R1 done and verified (replica of Joe's setup: draft saved, old Neovide and server stopped and nothing else, data moved, init.lua rewritten with a timestamped .bak, link replaced, window frame moved, second run a no-op), plus a small fix (print the new draft path; find an old server under any TMPDIR). Merged 2ddfc0a, 86635be; Joe's hotkey is dead until he runs `./install.sh`. R2 waits for that. In R2 also drop the live-upgrade tests that rebuild pre-rename trees (a pre-rename server can no longer exist after the migration).
 
 ## Notes and history browser
 
