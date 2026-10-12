@@ -17,9 +17,17 @@ The note's first line names its target, for example
 from), or `to: clipboard` when no app was captured; you type below it, and
 only the text below it is sent. Edit it like any text to send elsewhere
 (`app:<bundle id>` with an optional `#<window id>`); delete it to use the
-captured window. Any other target (`clipboard`, `tmux:…`, `fleet:…`) or a
-line that does not parse is not sent yet: the text goes on the clipboard
-with a "copied — target …" message and the note stays open.
+captured window. `to: clipboard` copies the text and hides the note (see
+below). Any other target (`tmux:…`, `fleet:…`) or a line that does not
+parse is not sent yet: the text goes on the clipboard with a "copied —
+target …" message and the note stays open.
+
+## Copy and hide
+
+`Ctrl-Y` (insert or normal mode, also from the history sidebar) or `:Copy`
+puts the text below the `to:` line on the clipboard and hides the note,
+whatever the `to:` line says. The note is recorded as sent to `clipboard`
+and the next press opens a fresh one; a blank note is cancelled instead.
 
 ## Drafts
 

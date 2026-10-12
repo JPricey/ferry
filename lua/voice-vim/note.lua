@@ -28,6 +28,8 @@
 -- captured target (b:voicevim.auto_spec); a resume rewrites it only while it
 -- still equals auto_spec, so an edited header is kept. Submit sends the body
 -- to the header's target, or to the captured one when line 1 is not a header.
+-- `to: clipboard` copies the body and hides; :Copy (<C-y>) does that for any
+-- header.
 local M = {}
 
 -- A module note.lua needs at api `want` or later. A running server can hold
@@ -61,7 +63,7 @@ local target = require("voice-vim.target")
 -- Bumped when the module changes in a way an already-running server must
 -- pick up: bin/voice-vim-host reloads the module (keeping M.state and a
 -- swapped M.host) when the loaded one reports a different api.
-M.api = 6
+M.api = 7
 
 -- history api 1: open() binds the note keys on the sidebar. Reloaded now
 -- when already loaded, so a sidebar opened from a :History command an older
@@ -235,11 +237,13 @@ function M.apply_options(buf)
   cmd("Submit", "submit")
   cmd("Cancel", "cancel")
   cmd("Hide", "hide")
+  cmd("Copy", "copy")
   local o = { buffer = buf, silent = true }
   vim.keymap.set("n", "ZZ", "<Cmd>Submit<CR>", o)
   vim.keymap.set({ "n", "i" }, "<C-x>", "<Cmd>Submit<CR>", o)
   vim.keymap.set("n", "ZQ", "<Cmd>Cancel<CR>", o)
   vim.keymap.set({ "n", "i" }, "<C-q>", "<Cmd>Cancel<CR>", o)
+  vim.keymap.set({ "n", "i" }, "<C-y>", "<Cmd>Copy<CR>", o)
   for lhs, rhs in pairs({ wq = "Submit", x = "Submit", q = "Hide" }) do
     vim.cmd(string.format(
       "cnoreabbrev <buffer> <expr> %s getcmdtype() ==# ':' && getcmdline() ==# '%s' ? '%s' : '%s'",
@@ -666,19 +670,36 @@ local function cancel_now(buf)
   M.host.hide({})
 end
 
--- Submit: a blank body, or one unchanged from the seed, is a cancel. An
--- app target goes to the host with only the body. Any other target, or a
--- header that does not parse, cannot be sent yet: the body goes on the
--- clipboard and the note stays current and shown.
-local function submit_now(buf)
+-- The body as text, or nil when it is blank or unchanged from the seed
+-- (a Submit or Copy of it is a cancel).
+local function body_text(buf, body)
   local meta = vim.b[buf].voicevim or {}
-  local spec, body = parts(buf)
   local text = table.concat(body, "\n")
   local trim = function(s) return (s:gsub("\n+$", "")) end
-  if not text:find("%S") or trim(text) == trim(meta.seed or "") then
-    return cancel_now(buf)
-  end
+  if not text:find("%S") or trim(text) == trim(meta.seed or "") then return nil end
+  return text
+end
+
+-- Copy: the body on the clipboard (first, so a failure later still leaves
+-- it there), recorded as submitted to `clipboard`, then hide.
+local function copy_body(buf, body, text)
+  vim.fn.setreg("+", text)
+  local file = to_tempfile(buf, body)
+  finish(buf, "submitted", file, "clipboard")
+  os.remove(file)
+  M.host.hide({})
+end
+
+-- Submit: a blank body, or one unchanged from the seed, is a cancel. An
+-- app target goes to the host with only the body; `clipboard` is a Copy.
+-- Any other target, or a header that does not parse, cannot be sent yet:
+-- the body goes on the clipboard and the note stays current and shown.
+local function submit_now(buf)
+  local spec, body = parts(buf)
+  local text = body_text(buf, body)
+  if not text then return cancel_now(buf) end
   local t, err = target.parse(spec)
+  if t and t.kind == "clipboard" then return copy_body(buf, body, text) end
   if not (t and t.kind == "app") then
     vim.fn.setreg("+", text)
     vim.notify(string.format("voice-vim: copied — target %q %s", spec,
@@ -688,6 +709,14 @@ local function submit_now(buf)
   local file = to_tempfile(buf, body)
   finish(buf, "submitted", file, target.render(t))
   M.host.submit({ file = file, target = t.bundle, window = t.window and tostring(t.window) or "" })
+end
+
+-- Copy and hide (:Copy, <C-y>): whatever the header says.
+local function copy_now(buf)
+  local _, body = parts(buf)
+  local text = body_text(buf, body)
+  if not text then return cancel_now(buf) end
+  copy_body(buf, body, text)
 end
 
 -- Hide: keep the note as the draft (history row stays open) and hide.
@@ -705,6 +734,7 @@ end
 function M.cancel(buf) buf = bufnr(buf); after_flow(buf, cancel_now) end
 function M.submit(buf) buf = bufnr(buf); after_flow(buf, submit_now) end
 function M.hide(buf) buf = bufnr(buf); after_flow(buf, hide_now) end
+function M.copy(buf) buf = bufnr(buf); after_flow(buf, copy_now) end
 
 -- The note of the current tab: the buffer with b:voicevim in the sidebar's
 -- main window, else in any window of the tab, else the current note.
@@ -725,7 +755,7 @@ function M.tab_note()
   return nil
 end
 
--- Run a note key ("submit", "cancel", "hide" or "flow") from another window
+-- Run a note key ("submit", "cancel", "hide", "copy" or "flow") from another window
 -- of the tab, such as the history sidebar: focus the tab's note (so Flow's
 -- paste lands there), then act on it, never on the window the key came from.
 function M.for_tab_note(action)
@@ -762,7 +792,7 @@ end
 -- global mapping (e.g. <C-x> = :write) or :wq never hits that buffer.
 function M.bind_note_keys(buf)
   if not (buf and vim.api.nvim_buf_is_valid(buf)) then return end
-  for name, action in pairs({ Submit = "submit", Cancel = "cancel", Hide = "hide" }) do
+  for name, action in pairs({ Submit = "submit", Cancel = "cancel", Hide = "hide", Copy = "copy" }) do
     vim.api.nvim_buf_create_user_command(buf, name, function() M.for_tab_note(action) end,
       { force = true, bang = true })
   end
@@ -771,6 +801,7 @@ function M.bind_note_keys(buf)
   vim.keymap.set("n", "<C-x>", "<Cmd>Submit<CR>", o)
   vim.keymap.set("n", "ZQ", "<Cmd>Cancel<CR>", o)
   vim.keymap.set("n", "<C-q>", "<Cmd>Cancel<CR>", o)
+  vim.keymap.set("n", "<C-y>", "<Cmd>Copy<CR>", o)
   vim.keymap.set("n", "<C-s>", function() M.for_tab_note("flow") end, o)
   vim.api.nvim_buf_call(buf, function()
     for lhs, rhs in pairs({ wq = "Submit", x = "Submit", q = "Hide" }) do

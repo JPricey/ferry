@@ -54,6 +54,10 @@ url_kind() { case $1 in *voicevim-submit*target=com.example.app\&window=4242*) e
 rm -f "$work/open.log"
 "$host" ensure >/dev/null
 pid=$(ask 'getpid()')
+# Never touch the system clipboard: a fake + and * provider on the server,
+# set before anything uses a clipboard register.
+ask "luaeval('(function() _G.vvclip = {}; local c, p = {}, {}; for _, r in ipairs({\"+\", \"*\"}) do c[r] = function(l) _G.vvclip[r] = l end; p[r] = function() return _G.vvclip[r] or {} end end; vim.g.clipboard = { name = \"vvtest\", copy = c, paste = p }; return 1 end)()')" >/dev/null
+clipped() { ask "luaeval('table.concat(_G.vvclip[\"+\"] or {}, \"|\")')"; }
 
 "$host" show com.example.app 4242 >/dev/null
 check "after show: line 1 is the target header, insert mode on row 2" "to: app:com.example.app#4242 i 2" \
@@ -108,6 +112,15 @@ send 'words<Esc><C-q>'
 check "<C-q> in normal mode cancels" "hide cancelled" "$(url_kind "$(opened)") $(outcome "$id")"
 check "server still running after all keys" "$pid" "$(ask 'getpid()')"
 
+# Copy and hide: <C-y> in insert mode copies the body, whatever the header.
+"$host" show com.example.app 4242 >/dev/null
+id=$(ask 'b:voicevim.id'); waitrow "$id" open
+send 'copied<C-y>'
+check "<C-y> in insert mode copies the body and hides" "hide submitted copied" \
+  "$(url_kind "$(opened)") $(outcome "$id") $(clipped)"
+check "<C-y>: the history row's target is clipboard" clipboard \
+  "$("$db" get "$id" | python3 -c 'import json,sys;print(json.load(sys.stdin)["target"])')"
+
 # Submit file in the outbox; after Submit, :q in that window still hides.
 "$host" show com.example.app 4242 >/dev/null
 id=$(ask 'b:voicevim.id'); waitrow "$id" open
@@ -158,6 +171,9 @@ side_key '<C-q>' 'drop'
 check "<C-q> in the sidebar cancels the note" "hide cancelled" "$(url_kind "$(opened)") $(outcome "$id")"
 side_key ZQ 'drop'
 check "ZQ in the sidebar cancels the note" "hide cancelled" "$(url_kind "$(opened)") $(outcome "$id")"
+side_key '<C-y>' 'side copy'
+check "<C-y> in the sidebar copies the note and hides" "hide submitted side copy" \
+  "$(url_kind "$(opened)") $(outcome "$id") $(clipped)"
 side_key ':q<CR>' 'kept'
 check ":q in the sidebar hides and keeps the draft, to: line and all" "hide to: app:com.example.app#4242|kept open 2" \
   "$(url_kind "$(opened)") $(paste -sd'|' - <"$(ask 'g:voicevim_draft')" 2>&1) $(outcome "$id") $(ask 'winnr("$")')"
@@ -169,7 +185,7 @@ check "<C-s> in the sidebar starts Flow from the note, in insert mode at the end
 send '<C-s>'; opened >/dev/null
 
 # Live upgrade: a server running the note at api 4 with 4f113ac's history
-# module (sidebar without note keys). show reloads the note to api 6; the
+# module (sidebar without note keys). show reloads the note to api 7; the
 # sidebar reopened with q then :History or <leader>h has the note keys.
 old=$work/old; mkdir -p "$old/lua/voice-vim"; ln -s "$root/bin" "$old/bin"
 for m in note history; do
@@ -198,7 +214,7 @@ upgrade_key() { # reopen: keys that reopen the sidebar from the note
 }
 upgrade_key ':History<CR>'
 check "after upgrade: q then :History, <C-x> in the sidebar sends the note" \
-  "6 2 voice-vim://history submit submitted " \
+  "7 2 voice-vim://history submit submitted " \
   "$(ask 'luaeval("require\"voice-vim.note\".api")') $side $(url_kind "$(opened)") $(outcome "$id") $(ask 'v:errmsg')"
 upgrade_key '\h'
 check "after upgrade: q then <leader>h, <C-x> in the sidebar sends the note" \

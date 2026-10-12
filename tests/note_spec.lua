@@ -319,6 +319,46 @@ set({ "to: app:com.a#1", "to: app:com.a#1", "direct" })
 vim.cmd("Submit")
 check("Submit drops header repeats under line 1", "submit com.a 1 direct\n", sent())
 
+-- --- clipboard target and copy-and-hide (T3) -----------------------------
+local function clipped() return table.concat(clip["+"] or {}, "\n") end
+local function target_of(id) return tostring((row(id) or {}).target) end
+reset(); clip["+"] = nil
+local _, idc = show()
+header("clipboard")
+body({ "copy me", "two" })
+vim.cmd("Submit")
+check("to: clipboard + Submit: + holds the body, one hide, no submit", "hide copy me\ntwo", kinds() .. " " .. clipped())
+check("to: clipboard + Submit: row submitted, target clipboard", "submitted clipboard",
+  outcome(idc) .. " " .. target_of(idc))
+local _, idc2 = show()
+check("after a clipboard Submit the next show is fresh", "true to: app:com.example.app#4242|",
+  tostring(idc2 ~= idc) .. " " .. lines())
+
+check("note has :Copy and <C-y> maps (n, i)", "2 <Cmd>Copy<CR> <Cmd>Copy<CR>",
+  vim.fn.exists(":Copy") .. " " .. vim.fn.maparg("<C-y>", "n") .. " " .. vim.fn.maparg("<C-y>", "i"))
+reset(); clip["+"] = nil
+vim.wait(3000, function() return outcome(idc2) == "open" end, 20)
+vim.api.nvim_feedkeys(vim.keycode("Ayanked<C-y>"), "x", false)
+check("<C-y> in insert mode on an app note: + holds the body, one hide, no submit", "hide yanked",
+  kinds() .. " " .. clipped())
+check("<C-y>: row submitted, target clipboard", "submitted clipboard", outcome(idc2) .. " " .. target_of(idc2))
+local _, idc3 = show()
+check("after <C-y> the next show is fresh", "true to: app:com.example.app#4242|",
+  tostring(idc3 ~= idc2) .. " " .. lines())
+
+reset(); clip["+"] = nil
+header("bogus:x")
+body({ "any header" })
+vim.cmd("Copy")
+check(":Copy ignores a header that does not parse", "hide any header submitted clipboard",
+  kinds() .. " " .. clipped() .. " " .. outcome(idc3) .. " " .. target_of(idc3))
+
+reset(); clip["+"] = nil
+local _, idc4 = show()
+vim.cmd("Copy")
+check(":Copy of a blank body cancels: hide, + untouched, row dropped", "hide  none",
+  kinds() .. " " .. clipped() .. " " .. outcome(idc4))
+
 -- --- voice keys: Flow toggle and the wait for its last paste -------------
 -- Flow pastes into the note as a bracketed paste, i.e. a vim.paste call.
 local function paste_later(text, ms)

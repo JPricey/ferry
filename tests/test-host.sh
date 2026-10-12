@@ -159,10 +159,10 @@ check "an existing Normal guibg is left alone" "#123456" "$(bg)"
 
 # --- a server started before this change gets layout and GUI on show ---------
 g=$("$host" show com.example.app 4242)
-ask "luaeval('(function() local n = require\"voice-vim.note\"; n.api = 5; n.old = true; vim.g.voicevim_gui = nil; vim.cmd(\"vsplit | split\"); return 1 end)()')" >/dev/null
+ask "luaeval('(function() local n = require\"voice-vim.note\"; n.api = 6; n.old = true; vim.g.voicevim_gui = nil; vim.cmd(\"vsplit | split\"); return 1 end)()')" >/dev/null
 "$host" draft >/dev/null
 h=$("$host" show com.example.app 4242)
-check "old server (note api 5): show reloads the note module to 6 and keeps the draft" "6 true $g" \
+check "old server (note api 6): show reloads the note module to 7 and keeps the draft" "7 true $g" \
   "$(ask 'luaeval("require\"voice-vim.note\".api")') $(ask 'luaeval("require\"voice-vim.note\".old == nil")') $h"
 check "old server: show applies the layout" "history $(basename "$g")" "$(wins)"
 check "old server: show loads the GUI settings" "{'bg': '#001e27', 'font': 'Test Mono:h13'}" "$(ask 'string(g:voicevim_gui)')"
@@ -228,8 +228,8 @@ u=$("$host" show com.example.app 4242)
 ask "nvim_buf_set_lines(0, 1, -1, v:false, ['upgrade draft'])" >/dev/null
 "$host" draft >/dev/null
 ask "luaeval('(function() require\"voice-vim.note\".api = 3; local f = require\"voice-vim.flow\"; f.api = nil; f.adopt_start = nil; return 1 end)()')" >/dev/null
-check "API-3 server: talk reloads note (api 6) and flow (api 3), keeps the draft and its target" \
-  "talk $u 6 3 to: app:com.example.app#4242|upgrade draft com.example.app 4242 true" \
+check "API-3 server: talk reloads note (api 7) and flow (api 3), keeps the draft and its target" \
+  "talk $u 7 3 to: app:com.example.app#4242|upgrade draft com.example.app 4242 true" \
   "$("$host" talk) $(lua 'require"voice-vim.note".api') $(lua 'require"voice-vim.flow".api') $(ask 'join(getline(1, "$"), "|")') $(ask 'b:voicevim.target." ".b:voicevim.window') $(rec)"
 check "API-3 server: release after the upgrade sends one stop" "released|-g wispr-flow://stop-hands-free" \
   "$("$host" release)|$(sleep 0.3; opened)"
@@ -238,7 +238,7 @@ paste " done"
 
 # Live upgrade from main 54d10b6 (note api 5, flow api 2, history api 1): a
 # server started from that code keeps running while the repo under it moves
-# to this code (note 6, flow 3). The next host call reloads both modules.
+# to this code (note 7, flow 3). The next host call reloads both modules.
 # Draft, target and to: line are kept, a recording in progress and a pending
 # release wait survive, each release sends exactly one stop, and a paste the
 # old and the new paste hook both report counts once.
@@ -261,8 +261,8 @@ opened >/dev/null
 live=$work/live1; old_server "$live"
 "$live/bin/voice-vim-host" talk >/dev/null
 upgrade "$live"
-check "upgrade with a recording: release reloads to note 6, flow 3, keeps draft, to: line and target, one stop" \
-  "released 6 3 to: app:com.example.app#4242|live draft com.example.app 4242 true|-g wispr-flow://stop-hands-free" \
+check "upgrade with a recording: release reloads to note 7, flow 3, keeps draft, to: line and target, one stop" \
+  "released 7 3 to: app:com.example.app#4242|live draft com.example.app 4242 true|-g wispr-flow://stop-hands-free" \
   "$("$live/bin/voice-vim-host" release) $(apis) $(body) $(ask 'b:voicevim.target." ".b:voicevim.window') $(waiting)|$(sleep 0.3; opened)"
 # A quick second hold during that wait: the new talk adds the new paste hook
 # beside the old one, so the first paste is reported twice.
@@ -293,7 +293,7 @@ check "54d10b6 server: release sends one stop and waits" "true -g wispr-flow://s
   "$(waiting) $(sleep 0.3; opened)"
 upgrade "$live"
 check "upgrade with a pending release wait: release reloads, keeps draft and target, the wait, sends no second stop" \
-  "released 6 3 to: app:com.example.app#4242|live draft com.example.app 4242 true " \
+  "released 7 3 to: app:com.example.app#4242|live draft com.example.app 4242 true " \
   "$("$live/bin/voice-vim-host" release) $(apis) $(body) $(ask 'b:voicevim.target." ".b:voicevim.window') $(waiting) $(sleep 0.3; opened)"
 vpaste " landed"
 check "upgrade: Flow's paste ends the old wait, lands once, recording off" \

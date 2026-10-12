@@ -73,6 +73,7 @@ All of these work in insert mode, so you never have to leave it.
 | --- | --- |
 | `Ctrl-X` | Send the text to the window you started from. `ZZ`, `:Submit`, `:wq` and `:x` do the same. |
 | `Ctrl-Q` | Throw the note away without sending. `ZQ` and `:Cancel` do the same. |
+| `Ctrl-Y` | Copy the text to the clipboard and hide, whatever the `to:` line says. `:Copy` does the same. |
 | `Ctrl+Option+V` | Hide the note and keep it as a draft. `:q` does the same. |
 | `Ctrl-S` | Start Wispr Flow listening; press again to stop. |
 | `<leader>d` | Start Wispr Flow from normal mode (`:Dictate`). |
@@ -121,10 +122,14 @@ the app (its bundle id) and window you pressed the hotkey from. It reads
 - **Delete the line** and Ctrl-X sends to the window you pressed from.
 - **Hide and come back from another app**: an untouched `to:` line follows
   you to the new window; one you edited stays as you left it.
-- **Other targets are not sent yet.** `to: clipboard`, `to: tmux:…`,
-  `to: fleet:…`, or a line voice-vim cannot read: Ctrl-X puts the text on
-  the clipboard, says "copied — target …", and leaves the note open so
-  you can fix the line or paste by hand.
+- **Copy instead of sending.** With `to: clipboard`, Ctrl-X copies the
+  text and hides the note. Ctrl-Y does the same from any note, whatever
+  its `to:` line says, also while the history sidebar is focused. Then
+  press Cmd+V wherever you want it.
+- **Other targets are not sent yet.** `to: tmux:…`, `to: fleet:…`, or a
+  line voice-vim cannot read: Ctrl-X puts the text on the clipboard, says
+  "copied — target …", and leaves the note open so you can fix the line or
+  paste by hand.
 
 ## Cancelling
 
