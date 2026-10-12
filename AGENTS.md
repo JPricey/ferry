@@ -81,6 +81,11 @@ relaunched after granting it.
 
 Joe's installed voice-vim is this repo: `~/.hammerspoon/voice-vim.lua` is a
 symlink into it. Edits here go live the next time Hammerspoon reloads.
+Joe's running nvim server also reloads `lua/voice-vim/note.lua` on its next
+show when the note API version changes. So uncommitted edits in the main
+checkout go live too: work that touches `lua/voice-vim/`, `hammerspoon/` or
+`bin/voice-vim-host` happens in a git worktree, and only verified commits
+land in the main checkout.
 
 - Do not reload or relaunch Hammerspoon (`hs -c`, `hs.reload()`), run
   `install.sh`, or edit `~/.hammerspoon/` or `~/.config/karabiner/`. Joe
