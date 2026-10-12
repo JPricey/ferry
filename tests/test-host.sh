@@ -180,5 +180,43 @@ t0=$(date +%s)
 check "ghostty hanging: ensure works within 4 s, no GUI settings" "0 yes {'bg': '', 'font': ''}" \
   "$? $([ $(($(date +%s) - t0)) -le 4 ] && echo yes) $(ask 'string(g:voicevim_gui)')"
 "$host" stop
+rm -f "$work/ghostty.mode"
+
+# --- a config that resets the runtimepath, like lazy.nvim ----------------------
+# Plain init: rtp is reset during startup, dropping `--cmd 'set rtp^=<repo>'`.
+printf 'vim.opt.rtp = vim.env.VIMRUNTIME\n' >"$work/init.lua"
+nvim --headless -u "$work/init.lua" --listen "$VOICE_VIM_SOCK" --cmd "set rtp^=$root" </dev/null >/dev/null 2>&1 &
+for _ in $(seq 100); do [ "$(ask v:vim_did_enter)" = 1 ] && break; sleep 0.05; done
+check "lazy-style init: the server lost the repo from its runtimepath" 0 "$(ask "index(nvim_list_runtime_paths(), '$root') >= 0")"
+i=$("$host" show com.example.app 4242 2>&1)
+check "lazy-style init: show works without a prior ensure" "yes i com.example.app" \
+  "$(case $i in "$VOICE_VIM_NOTES_DIR"/*.md) echo yes ;; *) echo "no ($i)" ;; esac) $(ask 'mode()') $(ask 'b:voicevim.target')"
+check "lazy-style init: show loads the GUI settings" "{'bg': '#001e27', 'font': 'Test Mono:h13'}" "$(ask 'string(g:voicevim_gui)')"
+"$host" stop
+nvim --headless -u "$work/init.lua" --listen "$VOICE_VIM_SOCK" </dev/null >/dev/null 2>&1 &
+for _ in $(seq 100); do [ "$(ask v:vim_did_enter)" = 1 ] && break; sleep 0.05; done
+check "lazy-style init: draft works without a prior ensure or show" "$VOICE_VIM_NOTES_DIR yes" \
+  "$("$host" show com.example.app 4242 >/dev/null; d=$("$host" draft 2>&1); dirname "$d") $(test -n "$(ask 'g:voicevim_draft')" && echo yes)"
+"$host" stop
+# vim.wait lets the server answer requests mid-init, before the reset (as
+# lazy can while it loads), so an ensure that does not wait for VimEnter
+# fixes rtp too early.
+printf 'vim.wait(1000)\nvim.opt.rtp = vim.env.VIMRUNTIME\n' >"$work/init.lua"
+VOICE_VIM_HOST_NVIM_FLAGS="-u $work/init.lua" "$host" ensure >/dev/null
+r=$?
+for _ in $(seq 100); do [ "$(ask v:vim_did_enter)" = 1 ] && break; sleep 0.05; done
+check "lazy-style init: after ensure on a fresh start and VimEnter the repo is on rtp" "0 1" \
+  "$r $(ask "index(nvim_list_runtime_paths(), '$root') >= 0")"
+j=$("$host" show com.example.app 4242 2>&1)
+check "lazy-style init: ensure on a fresh start, then show works" "yes i" \
+  "$(case $j in "$VOICE_VIM_NOTES_DIR"/*.md) echo yes ;; *) echo "no ($j)" ;; esac) $(ask 'mode()')"
+"$host" stop
+# VimEnter variant: the reset happens in a VimEnter autocmd.
+printf 'vim.api.nvim_create_autocmd("VimEnter", { callback = function() vim.opt.rtp = vim.env.VIMRUNTIME end })\n' >"$work/init.lua"
+VOICE_VIM_HOST_NVIM_FLAGS="-u $work/init.lua" "$host" ensure >/dev/null
+k=$("$host" show com.example.app 4242 2>&1)
+check "VimEnter rtp reset: ensure on a fresh start, then show works" "yes 1" \
+  "$(case $k in "$VOICE_VIM_NOTES_DIR"/*.md) echo yes ;; *) echo "no ($k)" ;; esac) $(ask "index(nvim_list_runtime_paths(), '$root') >= 0")"
+"$host" stop
 
 exit $fail

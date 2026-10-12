@@ -46,10 +46,20 @@ vimstr() { local s=${1//\'/\'\'}; printf "'%s'" "$s"; }
 
 rexpr() { "$nvim_bin" --server "$sock" --remote-expr "$1"; }
 
-# The note module, as a Lua expression. A server started before the module
-# last changed (note.api differs) reloads it, keeping its state and host.
+# Quote a string as a Lua literal inside a Vim '...' string (luaeval).
+luastr() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; s=${s//\'/\'\'}; printf '"%s"' "$s"; }
+
+# Lua statement: prepend the repo to the runtimepath when it is missing.
+# Plugin managers (lazy.nvim) reset rtp during startup, dropping the
+# `--cmd 'set rtp^=<repo>'` entry, so every call that requires a voice-vim
+# module runs this first, in the same round trip.
+rtp_fix="local vvr = $(luastr "$root"); if not vim.tbl_contains(vim.opt.rtp:get(), vvr) then vim.opt.rtp:prepend(vvr) end"
+
+# The note module, as a Lua expression (repo put on rtp first). A server
+# started before the module last changed (note.api differs) reloads it,
+# keeping its state and host.
 note_api=2
-note_mod="(function(want) local n = require(\"voice-vim.note\"); if n.api == want then return n end; package.loaded[\"voice-vim.note\"] = nil; local ok, m = pcall(require, \"voice-vim.note\"); if not ok then package.loaded[\"voice-vim.note\"] = n; return n end; m.state = n.state; if n.host ~= n.default_host then m.host = n.host end; return m end)($note_api)"
+note_mod="(function(want) $rtp_fix; local n = require(\"voice-vim.note\"); if n.api == want then return n end; package.loaded[\"voice-vim.note\"] = nil; local ok, m = pcall(require, \"voice-vim.note\"); if not ok then package.loaded[\"voice-vim.note\"] = n; return n end; m.state = n.state; if n.host ~= n.default_host then m.host = n.host end; return m end)($note_api)"
 
 ghostty_bin() {
   command -v ghostty 2>/dev/null && return
@@ -108,12 +118,16 @@ ensure() {
     local i
     for i in $(seq 100); do alive && break; sleep 0.05; done
     alive || { echo "voice-vim-host: server did not start on $sock" >&2; return 1; }
+    # The server answers before its init has finished; a plugin manager
+    # there may still reset rtp. Wait for VimEnter (up to 5 s) so the rtp
+    # fix below sticks.
+    for i in $(seq 100); do [ "$(rexpr v:vim_did_enter 2>/dev/null)" = 1 ] && break; sleep 0.05; done
     echo "voice-vim-host: started on $sock"
   fi
-  # Put the repo on the runtimepath (a reused server may lack it) and load
-  # the note module now, so the first show is not slowed by it.
-  # Also hand it the GUI settings (re-read on every ensure).
-  rexpr "luaeval('(function(a) local r = a.root; if not vim.tbl_contains(vim.opt.rtp:get(), r) then vim.opt.rtp:prepend(r) end; local n = $note_mod; return require(\"voice-vim.gui\").setup(a.gui) end)(_A)', {'root': $(vimstr "$root"), 'gui': $(gui_dict)})" >/dev/null
+  # Put the repo on the runtimepath (note_mod does it; a reused server may
+  # lack it) and load the note module now, so the first show is not slowed
+  # by it. Also hand it the GUI settings (re-read on every ensure).
+  rexpr "luaeval('(function(a) local n = $note_mod; return require(\"voice-vim.gui\").setup(a) end)(_A)', $(gui_dict))" >/dev/null
 }
 
 show() { # target window [seedfile]
@@ -127,7 +141,7 @@ show() { # target window [seedfile]
     || { echo "voice-vim-host: show failed: $out" >&2; return 1; }
   printf '%s\n' "${out%%$'\n'*}"
   case $out in
-    *$'\n?gui') rexpr "luaeval('require\"voice-vim.gui\".setup(_A)', $(gui_dict))" >/dev/null 2>&1 ;;
+    *$'\n?gui') rexpr "luaeval('(function(a) $rtp_fix; return require\"voice-vim.gui\".setup(a) end)(_A)', $(gui_dict))" >/dev/null 2>&1 ;;
   esac
   return 0
 }
