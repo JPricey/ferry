@@ -51,7 +51,7 @@ buffer like any other text field. Stop with the Flow shortcut, not Escape.
 
 ## Dictate again from inside the buffer
 
-`Ctrl-S` in insert or normal mode starts a Flow hands-free session, and
+In Neovim, `Ctrl-S` in insert or normal mode starts a Flow hands-free session, and
 pressing it again stops it; you stay in insert mode. `:Dictate` (or
 `<leader>d` in normal mode) also starts one. If you stop Flow with its own
 shortcut instead, the next `Ctrl-S` starts a new session.
