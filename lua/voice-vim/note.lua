@@ -13,7 +13,12 @@
 -- Submit files go in <notes dir>/outbox/ (they must outlive the server, so
 -- not vim.fn.tempname()). After Submit or Cancel the window shows a new,
 -- empty note, so :q there still hides instead of quitting the server.
+--
+-- Voice keys: <C-s> toggles Wispr Flow hands-free, <C-q> cancels. Submit,
+-- Cancel and Hide first wait for Flow's last paste when Flow is recording
+-- (flow.finish_then), so the last words land in the note, not the target.
 local M = {}
+local flow = require("voice-vim.flow")
 
 -- The current (unfinished) note: { id = uuid, path = file, buf = bufnr,
 -- unstarted = true while it has no history row (see blank()) }.
@@ -152,11 +157,13 @@ function M.apply_options(buf)
     setlocal bufhidden=hide
     setlocal formatoptions-=t
   ]])
-  -- Start a Flow hands-free dictation from inside the note.
-  vim.api.nvim_buf_create_user_command(buf, "Dictate", function()
-    vim.system({ "open", "-g", "wispr-flow://start-hands-free" })
-  end, { force = true })
+  -- Wispr Flow: a paste into the note means Flow stopped. :Dictate starts
+  -- hands-free; <C-s> toggles it without leaving insert mode.
+  flow.attach(buf)
+  vim.api.nvim_buf_create_user_command(buf, "Dictate", function() flow.start() end, { force = true })
   vim.keymap.set("n", "<leader>d", "<Cmd>Dictate<CR>", { buffer = buf, silent = true })
+  vim.keymap.set({ "n", "i" }, "<C-s>", "<Cmd>lua require'voice-vim.flow'.toggle()<CR>",
+    { buffer = buf, silent = true })
   vim.api.nvim_buf_create_user_command(buf, "History", function()
     require("voice-vim.history").toggle()
   end, { force = true })
@@ -173,6 +180,7 @@ function M.apply_options(buf)
   vim.keymap.set("n", "ZZ", "<Cmd>Submit<CR>", o)
   vim.keymap.set({ "n", "i" }, "<C-x>", "<Cmd>Submit<CR>", o)
   vim.keymap.set("n", "ZQ", "<Cmd>Cancel<CR>", o)
+  vim.keymap.set({ "n", "i" }, "<C-q>", "<Cmd>Cancel<CR>", o)
   for lhs, rhs in pairs({ wq = "Submit", x = "Submit", q = "Hide" }) do
     vim.cmd(string.format(
       "cnoreabbrev <buffer> <expr> %s getcmdtype() ==# ':' && getcmdline() ==# '%s' ? '%s' : '%s'",
@@ -369,10 +377,21 @@ local function to_tempfile(buf)
   return file
 end
 
+local function bufnr(buf)
+  return (buf and buf ~= 0) and buf or vim.api.nvim_get_current_buf()
+end
+
+-- Run fn(buf) once Flow's last paste has landed (at once when Flow is idle).
+-- The buffer may be gone by then (another finish ran first).
+local function after_flow(buf, fn)
+  flow.finish_then(buf, function()
+    if vim.api.nvim_buf_is_valid(buf) then fn(buf) end
+  end)
+end
+
 -- Cancel: record the text as cancelled (blank notes are dropped from
 -- history) and hide.
-function M.cancel(buf)
-  buf = (buf and buf ~= 0) and buf or vim.api.nvim_get_current_buf()
+local function cancel_now(buf)
   local file = to_tempfile(buf)
   finish(buf, "cancelled", file)
   os.remove(file)
@@ -381,13 +400,12 @@ end
 
 -- Submit, deciding like bin/voice-vim-session: blank, or unchanged from the
 -- seed, is a cancel. Otherwise the text goes to the host with the target.
-function M.submit(buf)
-  buf = (buf and buf ~= 0) and buf or vim.api.nvim_get_current_buf()
+local function submit_now(buf)
   local meta = vim.b[buf].voicevim or {}
   local text = text_of(buf)
   local trim = function(s) return (s:gsub("\n+$", "")) end
   if not text:find("%S") or trim(text) == trim(meta.seed or "") then
-    return M.cancel(buf)
+    return cancel_now(buf)
   end
   local file = to_tempfile(buf)
   finish(buf, "submitted", file)
@@ -395,8 +413,7 @@ function M.submit(buf)
 end
 
 -- Hide: keep the note as the draft (history row stays open) and hide.
-function M.hide(buf)
-  buf = (buf and buf ~= 0) and buf or vim.api.nvim_get_current_buf()
+local function hide_now(buf)
   local note = M.state.note
   if note and note.buf == buf then
     M.draft()
@@ -407,9 +424,15 @@ function M.hide(buf)
   M.host.hide({})
 end
 
+function M.cancel(buf) buf = bufnr(buf); after_flow(buf, cancel_now) end
+function M.submit(buf) buf = bufnr(buf); after_flow(buf, submit_now) end
+function M.hide(buf) buf = bufnr(buf); after_flow(buf, hide_now) end
+
 -- Neovide sends Cmd+V as <D-v>; terminals never do. Paste the + register,
--- which is where Wispr Flow puts the dictation.
-vim.keymap.set({ "i", "c" }, "<D-v>", "<C-r><C-o>+", { desc = "voice-vim: paste clipboard" })
-vim.keymap.set("n", "<D-v>", '"+p', { desc = "voice-vim: paste clipboard" })
+-- which is where Wispr Flow puts the dictation, then tell flow a paste
+-- landed (terminal pastes reach it through the vim.paste hook instead).
+local on_paste = "<Cmd>lua require'voice-vim.flow'.on_paste(0)<CR>"
+vim.keymap.set({ "i", "c" }, "<D-v>", "<C-r><C-o>+" .. on_paste, { desc = "voice-vim: paste clipboard" })
+vim.keymap.set("n", "<D-v>", '"+p' .. on_paste, { desc = "voice-vim: paste clipboard" })
 
 return M

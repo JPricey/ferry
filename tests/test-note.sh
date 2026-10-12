@@ -83,6 +83,22 @@ check "ZZ submits" "submit submitted" "$(url_kind "$(opened)") $(outcome "$id")"
 id=$(ask 'b:voicevim.id'); waitrow "$id" open
 send 'drop me<Esc>ZQ'
 check "ZQ cancels" "hide cancelled" "$(url_kind "$(opened)") $(outcome "$id")"
+
+# Voice keys: <C-q> cancels from insert mode; <C-s> toggles Flow (the fake
+# `open` logs its URL) and stays in insert mode.
+"$host" show com.example.app 4242 >/dev/null
+id=$(ask 'b:voicevim.id'); waitrow "$id" open
+send 'x<C-q>'
+check "<C-q> in insert mode cancels" "hide cancelled" "$(url_kind "$(opened)") $(outcome "$id")"
+
+"$host" show com.example.app 4242 >/dev/null
+id=$(ask 'b:voicevim.id'); waitrow "$id" open
+send '<C-s>'
+check "<C-s> starts Flow and stays in insert mode" "-g wispr-flow://start-hands-free i" "$(opened) $(ask 'mode()')"
+send '<C-s>'
+check "<C-s> again stops Flow, still in insert mode" "-g wispr-flow://stop-hands-free i" "$(opened) $(ask 'mode()')"
+send 'words<Esc><C-q>'
+check "<C-q> in normal mode cancels" "hide cancelled" "$(url_kind "$(opened)") $(outcome "$id")"
 check "server still running after all keys" "$pid" "$(ask 'getpid()')"
 
 # Submit file in the outbox; after Submit, :q in that window still hides.

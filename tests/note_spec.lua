@@ -8,6 +8,7 @@
 local root, work = arg[1], arg[2]
 vim.opt.rtp:prepend(root)
 local note = require("voice-vim.note")
+local flow = require("voice-vim.flow")
 local db = root .. "/bin/voice-vim-db"
 
 -- Never touch the system clipboard: a fake + and * provider.
@@ -22,12 +23,16 @@ local notices = {}
 local real_notify = vim.notify
 vim.notify = function(msg, ...) notices[#notices + 1] = msg; return real_notify(msg, ...) end
 
+-- io.stdout, not print: print goes through nvim's message grid, which
+-- drops newlines after a mode change.
+io.stdout:setvbuf("line")
+local function say(s) io.stdout:write(s, "\n") end
 local fail = 0
 local function check(name, want, got)
   if want == got then
-    print("ok   " .. name)
+    say("ok   " .. name)
   else
-    print("FAIL " .. name .. ": want '" .. tostring(want) .. "' got '" .. tostring(got) .. "'")
+    say("FAIL " .. name .. ": want '" .. tostring(want) .. "' got '" .. tostring(got) .. "'")
     fail = 1
   end
 end
@@ -48,6 +53,14 @@ local stub = {
 }
 local function reset() calls = {} end
 note.host = stub
+
+-- Flow URLs and host calls in one ordered event list. flow.open is swapped,
+-- so nothing (not even the fake `open`) is run for Flow here.
+local events = {}
+flow.open = function(url) events[#events + 1] = url:match("wispr%-flow://(%S+)") or url end
+stub.submit = (function(f) return function(p) events[#events + 1] = "submit"; f(p) end end)(stub.submit)
+stub.hide = (function(f) return function(p) events[#events + 1] = "hide"; f(p) end end)(stub.hide)
+local function flow_events() local e = table.concat(events, ","); events = {}; return e end
 
 local function row(id)
   local out = vim.fn.system({ db, "get", id })
@@ -76,6 +89,11 @@ check("note has Submit/Cancel/Hide commands and ZZ, <C-x>, ZQ maps",
   table.concat({ vim.fn.exists(":Submit"), vim.fn.exists(":Cancel"), vim.fn.exists(":Hide"),
     vim.fn.maparg("ZZ", "n"), vim.fn.maparg("<C-x>", "n"), vim.fn.maparg("<C-x>", "i"),
     vim.fn.maparg("ZQ", "n") }, " "))
+check("note has <C-q> maps (n, i) to Cancel", "<Cmd>Cancel<CR> <Cmd>Cancel<CR>",
+  vim.fn.maparg("<C-q>", "n") .. " " .. vim.fn.maparg("<C-q>", "i"))
+check("note has <C-s> maps (n, i) to the Flow toggle", true,
+  vim.fn.maparg("<C-s>", "n"):find("voice-vim.flow'.toggle()", 1, true) ~= nil
+  and vim.fn.maparg("<C-s>", "i") == vim.fn.maparg("<C-s>", "n"))
 set({ "hello world", "second line" })
 vim.cmd("Submit")
 check("Submit calls host.submit once", "submit", kinds())
@@ -166,6 +184,58 @@ vim.env.VOICE_VIM_SESSION_ID = nil
 show()
 vim.cmd("Cancel")
 
+-- --- voice keys: Flow toggle and the wait for its last paste -------------
+-- Flow pastes into the note as a bracketed paste, i.e. a vim.paste call.
+local function paste_later(text, ms)
+  vim.defer_fn(function()
+    events[#events + 1] = "paste"
+    vim.paste({ text }, -1)
+  end, ms)
+end
+local function at_end() vim.cmd("normal! G$") end
+
+reset(); events = {}
+show()
+vim.cmd("Dictate")
+check(":Dictate starts Flow", "start-hands-free true", flow_events() .. " " .. tostring(flow.recording()))
+vim.api.nvim_feedkeys(vim.keycode("<C-s>"), "x", false)
+check("<C-s> after :Dictate stops Flow", "stop-hands-free false", flow_events() .. " " .. tostring(flow.recording()))
+
+reset(); events = {}
+local _, id7 = show()
+vim.cmd("stopinsert")
+set({ "typed" })
+at_end()
+vim.api.nvim_feedkeys(vim.keycode("<C-s>"), "x", false)
+paste_later(" pasted", 300)
+vim.cmd("Submit")
+check("Submit while recording waits (no host call yet)", "", kinds())
+vim.wait(3000, function() return #calls > 0 end, 10)
+vim.wait(100)
+check("Ctrl-S then :Submit: start, stop, paste, then one host.submit",
+  "start-hands-free,stop-hands-free,paste,submit", flow_events())
+check("Ctrl-S then :Submit: file holds typed and pasted text", "submit typed pasted\n",
+  kinds() .. " " .. tostring((calls[1] or {})[3]))
+check("Ctrl-S then :Submit records a submitted row", "submitted", outcome(id7))
+
+reset(); events = {}
+local _, id8 = show()
+vim.cmd("stopinsert")
+set({ "never mind" })
+at_end()
+flow.toggle()
+paste_later(" more", 300)
+vim.cmd("Cancel")
+vim.wait(100)
+check("Cancel while recording sends stop and waits", "start-hands-free,stop-hands-free ",
+  table.concat(events, ",") .. " " .. kinds())
+vim.wait(3000, function() return #calls > 0 end, 10)
+vim.wait(100)
+check("Cancel while recording: host.hide only after the paste",
+  "start-hands-free,stop-hands-free,paste,hide", flow_events())
+check("Cancel while recording records a cancelled row", "cancelled", outcome(id8))
+check("Flow is idle after the voice-key cases", false, flow.recording())
+
 -- --- default host ---------------------------------------------------------
 note.host = note.default_host
 local log = work .. "/open.log"
@@ -202,5 +272,5 @@ check("failed open copies the text to +", "clipboard fallback", table.concat(cli
 check("failed open notifies copied — paste manually", "voice-vim: copied — paste manually", notices[1])
 os.remove(work .. "/open.fail")
 
-print(fail == 0 and "note_spec: all ok" or "note_spec: FAILED")
+say(fail == 0 and "note_spec: all ok" or "note_spec: FAILED")
 os.exit(fail)
