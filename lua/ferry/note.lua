@@ -93,7 +93,8 @@ local function say(msg, level) require("ferry.notice").notify(msg, level) end
 -- swapped M.host) when the loaded one reports a different api.
 -- 15: one-line notices; a wiped buffer's note keeps its fork's file id.
 -- 16: a pending $EDITOR edit wins show, talk, release and draft.
-M.api = 16
+-- 17: browse (the history sidebar focused after show).
+M.api = 17
 
 -- history api 4: the browser on the notes index (open, send, pin, ...,
 -- / search; opening syncs); 5: one-line notices. A sidebar the old
@@ -936,6 +937,27 @@ end
 -- Forget the current note so the next show() opens a fresh one.
 function M.forget()
   M.state.note, M.state.cursor = nil, nil
+end
+
+-- The browse hotkey: show (resume the note, which takes the new target and
+-- window; no seed, no talk), then focus the history sidebar, opened even
+-- when it is off (opts.sidebar or FERRY_SIDEBAR "0"), synced, search
+-- cleared, cursor on its first note row, normal mode. Returns the note's
+-- path.
+function M.browse(opts)
+  opts = vim.tbl_extend("force", opts or {}, { seed = "", talk = "", sidebar = "1" })
+  local hist = history()
+  local before = hist.is_open() and hist.state.win or nil
+  local path = M.show(opts)
+  -- layout() opened it (synced and listed) unless it was already open.
+  if hist.is_open() and hist.state.win == before then
+    hist.reset()
+  elseif not hist.is_open() then
+    hist.open()
+  end
+  vim.cmd("stopinsert")
+  if hist.is_open() then vim.api.nvim_set_current_win(hist.state.win) end
+  return path
 end
 
 -- Open a note file (the history browser's <CR> and s) as the current note,

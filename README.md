@@ -84,7 +84,7 @@ commands live in `lua/ferry/note.lua`.
 - `lua/ferry/delivery.lua` — pure delivery core used by submit: set the
   clipboard, focus the target, poll until it is frontmost, paste once.
 - `bin/ferry-host` — starts the Neovim server and drives the note
-  (`ensure`, `show`, `draft`, `stop`).
+  (`ensure`, `show`, `browse`, `draft`, `stop`).
 - `lua/ferry/note.lua` — the note inside the server: show, drafts,
   Submit, Cancel, Hide, layout.
 - `lua/ferry/flow.lua` — Wispr Flow hands-free start/stop and waiting

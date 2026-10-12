@@ -3,7 +3,7 @@
 # note in it. Every call goes through `nvim --server <sock> --remote-expr`;
 # the server side is lua/ferry/note.lua.
 #
-# Usage: ferry-host ensure|show|talk|release|flow-state|draft|attach-cmd|status|stop
+# Usage: ferry-host ensure|show|browse|talk|release|flow-state|draft|attach-cmd|status|stop
 #   ensure                          start the server unless one answers, and
 #                                   load the note module into it
 #   show [--talk] <target> <window> [seed]
@@ -12,6 +12,11 @@
 #                                   in insert mode; prints the note's path.
 #                                   --talk: Flow was started (hold to talk),
 #                                   so the note treats it as recording
+#   browse <target> <window>        like show without a seed (resume, take the
+#                                   new target), then focus the history
+#                                   sidebar (opened even with FERRY_SIDEBAR=0,
+#                                   synced), first note row, normal mode;
+#                                   prints the note's path
 #   talk                            hold to talk in the note already shown:
 #                                   insert at the cursor, Flow recording;
 #                                   prints `talk <path>` or `no note`
@@ -82,7 +87,7 @@ rtp_fix="local ferryr = $(luastr "$root"); if not vim.tbl_contains(vim.opt.rtp:g
 # The note module, as a Lua expression (repo put on rtp first). A server
 # started before the module last changed (note.api differs) reloads it,
 # keeping its state and host.
-note_api=16
+note_api=17
 note_mod="(function(want) $rtp_fix; local n = require(\"ferry.note\"); if n.api == want then return n end; package.loaded[\"ferry.note\"] = nil; local ok, m = pcall(require, \"ferry.note\"); if not ok then package.loaded[\"ferry.note\"] = n; return n end; m.state = n.state; if n.host ~= n.default_host then m.host = n.host end; return m end)($note_api)"
 
 # The GUI module, as a Lua expression (rtp fixed by the caller). A server
@@ -160,17 +165,20 @@ ensure() {
   rexpr "luaeval('(function(a) local n = $note_mod; return $gui_mod.setup(a) end)(_A)', $(gui_dict))" >/dev/null
 }
 
-show() { # [--talk] target window [seedfile]
+show() { # [--talk|--browse] target window [seedfile]
   need_server
-  local talk=""
-  if [ "${1:-}" = --talk ]; then talk=1; shift; fi
+  local talk="" fn=show
+  case ${1:-} in
+    --talk) talk=1; shift ;;
+    --browse) fn=browse; shift ;;
+  esac
   local seed=${3:-}
   if [ -n "$seed" ]; then seed=$(cd "$(dirname "$seed")" && pwd)/$(basename "$seed"); fi
   # The reply is the note's path, plus a "?gui" line when the server has no
   # GUI settings yet (started before they existed): those are loaded after.
   local out
-  out=$(rexpr "luaeval('(function(a) local p = $note_mod.show(a); if vim.g.ferry_gui == nil then p = p .. \"\\n?gui\" end; return p end)(_A)', {'target': $(vimstr "${1:-}"), 'window': $(vimstr "${2:-}"), 'seed': $(vimstr "$seed"), 'dir': $(vimstr "$notes"), 'sidebar': $(vimstr "${FERRY_SIDEBAR:-}"), 'talk': $(vimstr "$talk")})" 2>&1) \
-    || { echo "ferry-host: show failed: $out" >&2; return 1; }
+  out=$(rexpr "luaeval('(function(a) local p = $note_mod.$fn(a); if vim.g.ferry_gui == nil then p = p .. \"\\n?gui\" end; return p end)(_A)', {'target': $(vimstr "${1:-}"), 'window': $(vimstr "${2:-}"), 'seed': $(vimstr "$seed"), 'dir': $(vimstr "$notes"), 'sidebar': $(vimstr "${FERRY_SIDEBAR:-}"), 'talk': $(vimstr "$talk")})" 2>&1) \
+    || { echo "ferry-host: $fn failed: $out" >&2; return 1; }
   printf '%s\n' "${out%%$'\n'*}"
   case $out in
     *$'\n?gui') rexpr "luaeval('(function(a) $rtp_fix; return $gui_mod.setup(a) end)(_A)', $(gui_dict))" >/dev/null 2>&1 ;;
@@ -195,6 +203,7 @@ stop() {
 case ${1:-} in
   ensure)     ensure ;;
   show)       shift; show "$@" ;;
+  browse)     show --browse "${2:-}" "${3:-}" ;;
   talk)       need_server; call talk "{'dir': $(vimstr "$notes")}" ;;
   release)    need_server
               force=''; [ "${2:-}" = --force ] && force=1

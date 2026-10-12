@@ -161,6 +161,38 @@ gap
 f=$(FERRY_SIDEBAR=0 "$host" show com.example.app 4242)
 check "FERRY_SIDEBAR=0: show leaves only the note" "$(basename "$f")" "$(wins)"
 
+# --- browse: show, then the sidebar focused ------------------------------------
+# The sidebar's cursor line maps to row 1 (the first note row), and that row.
+hrow() { ask "luaeval('(function() local h = require\"ferry.history\"; local i = h.state.map[vim.api.nvim_win_get_cursor(0)[1]]; return tostring(i) .. \" \" .. (i and vim.fn.fnamemodify(h.state.rows[i].path, \":t\") or \"\") end)()')"; }
+# The current note's target and window, and its file name (a blank note's
+# file name takes each show's time).
+notetarget() { ask "luaeval('(function() local m = vim.b[require\"ferry.note\".current().buf].ferry; return m.target .. \" \" .. m.window end)()')"; }
+notefile() { ask "luaeval('vim.fn.fnamemodify(require\"ferry.note\".current().path, \":t\")')"; }
+br=$(FERRY_SIDEBAR=0 "$host" browse com.browse.app 77)
+nf=$(notefile)
+check "FERRY_SIDEBAR=0 browse: same note (id), sidebar left, note right" "${f##*-} $nf history $nf" \
+  "${br##*-} $(basename "$br") $(wins)"
+check "FERRY_SIDEBAR=0 browse: the sidebar is current, mode n, cursor on the first note row" "history n 1" \
+  "$(ask 'expand("%:t")') $(ask 'mode()') $(hrow | cut -d' ' -f1)"
+check "FERRY_SIDEBAR=0 browse: the note takes the new target" "com.browse.app 77" "$(notetarget)"
+# Already open, with a search and the note focused in insert mode: browse
+# syncs (a file written outside ferry is listed first), clears the search.
+"$host" show com.example.app 4242 >/dev/null
+ask "luaeval('(function() require\"ferry.history\".state.query = \"nomatchword\"; require\"ferry.history\".refresh() end)()')" >/dev/null
+printf -- '---\nid: eeeeeeee-0000-4000-8000-000000000005\nstate: draft\ncreated: %s\nupdated: %s\n---\nbrowse outside\n' \
+  "$(date -u -v+1M +%Y-%m-%dT%H:%M:%SZ)" "$(date -u -v+1M +%Y-%m-%dT%H:%M:%SZ)" >"$FERRY_NOTES_DIR/zz-outside.md"
+check "before browse: the note is current, in insert mode" "$(notefile) i" "$(ask 'expand("%:t")') $(ask 'mode()')"
+"$host" browse com.example.app 4242 >/dev/null
+check "browse com.example.app 4242: the sidebar is current, mode n, cursor on the first note row" "history n 1" \
+  "$(ask 'expand("%:t")') $(ask 'mode()') $(hrow | cut -d' ' -f1)"
+check "browse with the sidebar open: synced, search cleared, the outside note first" "1 zz-outside.md nil" \
+  "$(hrow) $(ask "luaeval('tostring(require\"ferry.history\".state.query)')")"
+check "browse: the note takes the new target, one sidebar and the note" "com.example.app 4242 history $(notefile)" \
+  "$(notetarget) $(wins)"
+rm -f "$FERRY_NOTES_DIR/zz-outside.md"
+"$host" show com.example.app 4242 >/dev/null
+check "show after browse: the note is current again, in insert mode" "$(notefile) i" "$(ask 'expand("%:t")') $(ask 'mode()')"
+
 # --- GUI appearance ------------------------------------------------------------
 # A stand-in UI over the socket (raw msgpack): with a name it first names its
 # client so (Neovide names itself "neovide"); without, it is like a terminal
