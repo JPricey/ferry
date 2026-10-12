@@ -942,7 +942,7 @@ end
 -- The browse hotkey: show (resume the note, which takes the new target and
 -- window; no seed, no talk), then focus the history sidebar, opened even
 -- when it is off (opts.sidebar or FERRY_SIDEBAR "0"), synced, search
--- cleared, cursor on its first note row, normal mode. Returns the note's
+-- cleared, cursor on the newest note row, normal mode. Returns the note's
 -- path.
 function M.browse(opts)
   opts = vim.tbl_extend("force", opts or {}, { seed = "", talk = "", sidebar = "1" })
@@ -956,7 +956,20 @@ function M.browse(opts)
     hist.open()
   end
   vim.cmd("stopinsert")
-  if hist.is_open() then vim.api.nvim_set_current_win(hist.state.win) end
+  if hist.is_open() then
+    -- The newest note: the first row past the pinned ones (rows are pinned
+    -- first, then newest first); only pinned notes: the first; none: line 1.
+    local st, first, newest = hist.state, nil, nil
+    for ln = 1, vim.api.nvim_buf_line_count(st.buf) do
+      local i = (st.map or {})[ln]
+      if i then
+        first = first or ln
+        if not st.rows[i].pinned then newest = ln; break end
+      end
+    end
+    vim.api.nvim_set_current_win(st.win)
+    vim.api.nvim_win_set_cursor(st.win, { newest or first or 1, 0 })
+  end
   return path
 end
 

@@ -15,7 +15,7 @@
 #   browse <target> <window>        like show without a seed (resume, take the
 #                                   new target), then focus the history
 #                                   sidebar (opened even with FERRY_SIDEBAR=0,
-#                                   synced), first note row, normal mode;
+#                                   synced), newest note row, normal mode;
 #                                   prints the note's path
 #   talk                            hold to talk in the note already shown:
 #                                   insert at the cursor, Flow recording;

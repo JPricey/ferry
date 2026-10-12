@@ -162,7 +162,7 @@ f=$(FERRY_SIDEBAR=0 "$host" show com.example.app 4242)
 check "FERRY_SIDEBAR=0: show leaves only the note" "$(basename "$f")" "$(wins)"
 
 # --- browse: show, then the sidebar focused ------------------------------------
-# The sidebar's cursor line maps to row 1 (the first note row), and that row.
+# The row index under the sidebar's cursor, and that row's file name.
 hrow() { ask "luaeval('(function() local h = require\"ferry.history\"; local i = h.state.map[vim.api.nvim_win_get_cursor(0)[1]]; return tostring(i) .. \" \" .. (i and vim.fn.fnamemodify(h.state.rows[i].path, \":t\") or \"\") end)()')"; }
 # The current note's target and window, and its file name (a blank note's
 # file name takes each show's time).
@@ -172,7 +172,7 @@ br=$(FERRY_SIDEBAR=0 "$host" browse com.browse.app 77)
 nf=$(notefile)
 check "FERRY_SIDEBAR=0 browse: same note (id), sidebar left, note right" "${f##*-} $nf history $nf" \
   "${br##*-} $(basename "$br") $(wins)"
-check "FERRY_SIDEBAR=0 browse: the sidebar is current, mode n, cursor on the first note row" "history n 1" \
+check "FERRY_SIDEBAR=0 browse: the sidebar is current, mode n, cursor on the newest note row" "history n 1" \
   "$(ask 'expand("%:t")') $(ask 'mode()') $(hrow | cut -d' ' -f1)"
 check "FERRY_SIDEBAR=0 browse: the note takes the new target" "com.browse.app 77" "$(notetarget)"
 # Already open, with a search and the note focused in insert mode: browse
@@ -183,13 +183,20 @@ printf -- '---\nid: eeeeeeee-0000-4000-8000-000000000005\nstate: draft\ncreated:
   "$(date -u -v+1M +%Y-%m-%dT%H:%M:%SZ)" "$(date -u -v+1M +%Y-%m-%dT%H:%M:%SZ)" >"$FERRY_NOTES_DIR/zz-outside.md"
 check "before browse: the note is current, in insert mode" "$(notefile) i" "$(ask 'expand("%:t")') $(ask 'mode()')"
 "$host" browse com.example.app 4242 >/dev/null
-check "browse com.example.app 4242: the sidebar is current, mode n, cursor on the first note row" "history n 1" \
+check "browse com.example.app 4242: the sidebar is current, mode n, cursor on the newest note row" "history n 1" \
   "$(ask 'expand("%:t")') $(ask 'mode()') $(hrow | cut -d' ' -f1)"
 check "browse with the sidebar open: synced, search cleared, the outside note first" "1 zz-outside.md nil" \
   "$(hrow) $(ask "luaeval('tostring(require\"ferry.history\".state.query)')")"
 check "browse: the note takes the new target, one sidebar and the note" "com.example.app 4242 history $(notefile)" \
   "$(notetarget) $(wins)"
-rm -f "$FERRY_NOTES_DIR/zz-outside.md"
+# A pinned note is listed first (under "── Pinned"); browse still lands on
+# the newest note.
+printf -- '---\nid: eeeeeeee-0000-4000-8000-000000000006\nstate: draft\npinned: true\ncreated: 2020-01-01T00:00:00Z\nupdated: 2020-01-01T00:00:00Z\n---\npinned old\n' \
+  >"$FERRY_NOTES_DIR/aa-pinned.md"
+"$host" browse com.example.app 4242 >/dev/null
+check "browse with a pinned note: row 1 is the pinned note, cursor on the newest note" "aa-pinned.md 2 zz-outside.md" \
+  "$(ask "luaeval('vim.fn.fnamemodify(require\"ferry.history\".state.rows[1].path, \":t\")')") $(hrow)"
+rm -f "$FERRY_NOTES_DIR/zz-outside.md" "$FERRY_NOTES_DIR/aa-pinned.md"
 "$host" show com.example.app 4242 >/dev/null
 check "show after browse: the note is current again, in insert mode" "$(notefile) i" "$(ask 'expand("%:t")') $(ask 'mode()')"
 
