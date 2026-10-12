@@ -198,5 +198,62 @@ check("hanging open: the next URL still goes out",
   "-g wispr-flow://hang | -g wispr-flow://start-hands-free", got)
 check("hanging open: next URL within 1.5 s", true, (vim.uv.hrtime() - t2) / 1e6 < 1500)
 
+-- --- hold to talk: adopt_start / release -------------------------------------
+-- Hammerspoon starts Flow itself; adopt_start only records that it did.
+vim.wait(1000, function() return not flow.busy() end, 10)
+check("busy() false when the queue is idle", false, flow.busy())
+flow.state.recording = false
+flow.adopt_start()
+check("adopt while idle: recording", true, flow.recording())
+check("adopt while idle: no URL", "", opened(1, 300))
+
+flow.adopt_start()
+check("adopt while recording: still recording", true, flow.recording())
+check("adopt while recording: no URL", "", opened(1, 300))
+
+-- A link in flight (say our own stop): queue one start behind it.
+flow.state.recording = false
+flow.open("wispr-flow://hang")
+check("busy() true with a link in flight", true, flow.busy())
+flow.adopt_start()
+check("adopt behind a hanging link: recording", true, flow.recording())
+check("adopt behind a hanging link: start after it",
+  "-g wispr-flow://hang | -g wispr-flow://start-hands-free", opened(2, 3000))
+vim.wait(1000, function() return not flow.busy() end, 10)
+
+-- release: one stop, a wait of kind "release", ended by Flow's paste.
+reset_buf()
+flow.paste_timeout_ms = 4000
+check("release while recording returns true", true, flow.release(buf))
+check("release: kind release", "release", flow.state.waiting and flow.state.waiting.kind)
+check("release: not recording", false, flow.recording())
+check("release: one stop", "-g wispr-flow://stop-hands-free", opened(1))
+check("second release during the wait returns true", true, flow.release(buf))
+check("second release sends nothing", "", opened(1, 300))
+vim.paste({ "talked" }, -1)
+vim.wait(1000, function() return flow.state.waiting == nil end, 10)
+check("release: a paste ends the wait", nil, flow.state.waiting)
+check("release: paste lands", "talked", text())
+
+-- finish_then during a release takes the wait over and runs after the paste.
+reset_buf()
+flow.adopt_start()
+flow.release(buf)
+opened(1)
+local after
+flow.finish_then(buf, function() after = text() end)
+check("finish_then during a release: kind finish", "finish", flow.state.waiting and flow.state.waiting.kind)
+vim.wait(200, function() return false end, 10)
+check("finish_then during a release: not run before the paste", nil, after)
+check("finish_then during a release: no second stop", "", opened(1, 300))
+vim.paste({ "last words" }, -1)
+vim.wait(1000, function() return after ~= nil end, 10)
+check("finish_then during a release: runs after the paste and sees it", "last words", after)
+
+-- release while idle: nothing sent, false.
+check("release while idle returns false", false, flow.release(buf))
+check("release while idle: no wait", nil, flow.state.waiting)
+check("release while idle logs nothing", "", opened(1, 300))
+
 say(fail == 0 and "flow_spec: all ok" or "flow_spec: FAILED")
 os.exit(fail)

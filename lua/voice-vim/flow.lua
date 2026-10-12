@@ -20,6 +20,12 @@
 -- can never let Flow's paste land in the target (GROUND_TRUTHS req. 8).
 -- There is no "press again to skip the wait"; the wait ends by itself
 -- within paste_timeout_ms.
+--
+-- Hold to talk: Hammerspoon starts Flow itself, then adopt_start() tells us
+-- a recording is in progress (no URL, unless our own links are in flight).
+-- release(buf) is the key-up stop: a finish_then with nothing to run
+-- (waiting.kind = "release"), so a Submit/Cancel right after takes it over
+-- and still waits for Flow's paste.
 local M = {}
 
 M.paste_timeout_ms = 4000
@@ -34,7 +40,7 @@ M.NO_DICTATION = "voice-vim: no dictation arrived"
 
 -- recording: Flow was started by us (or assumed) and has not pasted yet.
 -- waiting: the pending finish_then, { timer = uv timer, buf, fn = action,
--- pasted = fn } or nil.
+-- pasted = fn, kind = "finish" | "release" } or nil.
 M.state = { recording = false, waiting = nil }
 local attached = {}
 
@@ -63,6 +69,19 @@ function M.open(url)
 end
 
 function M.recording() return M.state.recording end
+
+-- True while a deep link is in flight or queued.
+function M.busy() return busy or #queue > 0 end
+
+-- Flow was started elsewhere (Hammerspoon's talk key). With the queue idle
+-- nothing is sent: Flow is already recording. With a link in flight or
+-- queued (say a stop), Flow may see that link after the outside start, so
+-- one start is queued behind it. Already recording: nothing.
+function M.adopt_start()
+  if M.state.recording then return end
+  M.state.recording = true
+  if M.busy() then M.open(M.START_URL) end
+end
 
 -- Treat a Flow recording started elsewhere as ours (tests use it).
 function M.assume_recording() M.state.recording = true end
@@ -121,10 +140,14 @@ local function stop_waiting()
   end
 end
 
-function M.finish_then(buf, fn)
+-- kind (default "finish") is stored on the wait so callers can tell a
+-- key-up release from a Submit/Cancel; a takeover sets the new kind.
+function M.finish_then(buf, fn, kind)
+  kind = kind or "finish"
   if M.state.waiting then
     -- Takes over the wait (one stop already went out); see the header.
     M.state.waiting.fn = fn
+    M.state.waiting.kind = kind
     return
   end
   if not M.state.recording then
@@ -141,7 +164,7 @@ function M.finish_then(buf, fn)
   local start, tick0 = now_ms(), tick()
   local last_tick, last_change = tick0, nil
   local timer = vim.uv.new_timer()
-  local w = { timer = timer, buf = buf, fn = fn }
+  local w = { timer = timer, buf = buf, fn = fn, kind = kind }
   M.state.waiting = w
 
   local function done(notice)
@@ -162,6 +185,17 @@ function M.finish_then(buf, fn)
       return done(last_change == nil and M.NO_DICTATION or nil)
     end
   end))
+end
+
+-- Key-up stop: stop Flow and wait for its paste with nothing to run after.
+-- A later finish_then takes the wait over. Returns true while a wait is in
+-- progress (a wait already running is left as it is), false when idle
+-- (nothing sent).
+function M.release(buf)
+  if M.state.waiting then return true end
+  if not M.state.recording then return false end
+  M.finish_then(buf, function() end, "release")
+  return true
 end
 
 return M
