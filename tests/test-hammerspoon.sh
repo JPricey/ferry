@@ -282,6 +282,141 @@ do
   check("confirmTimeout default", 1.0, M.config.confirmTimeout)
 end
 
+-- Window frame (hammerspoon/window-frame.lua through begin()): stub Ghostty
+-- with one existing window; each successful AppleScript opens a new focused
+-- window, as Ghostty's `new window` does.
+local FRAME_KEY = "voice-vim.windowFrame"
+local function fs(f)
+  if type(f) ~= "table" then return tostring(f) end
+  return string.format("%s,%s %sx%s", tostring(f.x), tostring(f.y), tostring(f.w), tostring(f.h))
+end
+local function frameSetup(cfg)
+  local rec, M = fresh()
+  local ghostty = rec:app({ bundleID = "com.mitchellh.ghostty", windows = {} })
+  ghostty._windows[1] = rec:window({ id = 1, app = ghostty })
+  rec.frontmost = rec:app({ bundleID = "com.example.target" })
+  local nextId = 100
+  local applescript = hs.osascript.applescript
+  hs.osascript.applescript = function(script)
+    local ok, res, err = applescript(script)
+    if ok and script:find('application "Ghostty"', 1, true) then
+      nextId = nextId + 1
+      local w = rec:window({ id = nextId, app = ghostty })
+      ghostty._windows[#ghostty._windows + 1] = w
+      rec.focusedWindow = w
+    end
+    return ok, res, err
+  end
+  cfg = cfg or {}
+  cfg.captureSelection = false
+  M.start(cfg)
+  return rec, M, ghostty
+end
+local function cleanupScripts(rec)
+  for _, script in ipairs(rec.osascripts) do
+    local file = script:match("'([^']*%-voice%-vim%.md)'")
+    if file then os.remove(file); os.remove((file:gsub("%-voice%-vim%.md$", ""))) end
+  end
+end
+
+do
+  local rec, M, ghostty = frameSetup()
+  M.begin()
+  local win = ghostty._windows[2]
+  check("frame: begin opens one Ghostty window", 1, #rec.osascripts)
+  check("frame: one setFrame", 1, #rec.setFrames)
+  check("frame: setFrame on the new window", win, rec.setFrames[1] and rec.setFrames[1].win)
+  check("frame: nothing saved gives the default", "360,225 720x450", fs(rec.setFrames[1] and rec.setFrames[1].frame))
+  check("frame: logs frame: default", true, rec:hasLog("i", "frame: default 360,225 720x450"))
+  check("frame: new window watched", win, rec.watchers[1] and rec.watchers[1].win)
+  rec:placeWindow(win, { x = 100, y = 120, w = 900, h = 500 })
+  rec:fireWatcher(win, "AXWindowMoved")
+  rec:runTimers()
+  check("frame: watcher move saved to voice-vim.windowFrame", "100,120 900x500", fs(rec.settings[FRAME_KEY]))
+  local glue = M._frameGlue
+  M.begin()
+  local win2 = ghostty._windows[3]
+  check("frame: second begin sets the second window", win2, rec.setFrames[2] and rec.setFrames[2].win)
+  check("frame: second window gets the saved frame", "100,120 900x500", fs(rec.setFrames[2] and rec.setFrames[2].frame))
+  check("frame: logs frame: restored", true, rec:hasLog("i", "frame: restored 100,120 900x500"))
+  check("frame: glue loaded once and kept", true, glue ~= nil and M._frameGlue == glue)
+  cleanupScripts(rec)
+end
+
+-- windowSize sets the first-open fraction.
+do
+  local rec, M = frameSetup({ windowSize = 1 })
+  M.begin()
+  check("frame: windowSize 1 fills the main screen", "0,0 1440x900", fs(rec.setFrames[1] and rec.setFrames[1].frame))
+  cleanupScripts(rec)
+end
+
+-- Failing AppleScript: no window, no setFrame, no adopt polling.
+do
+  local rec, M = frameSetup()
+  rec.osascriptResult = { false, nil, { NSAppleScriptErrorMessage = "no" } }
+  M.begin()
+  rec:runTimers()
+  check("frame: failing osascript causes no setFrame", 0, #rec.setFrames)
+  check("frame: failing osascript does not poll", false, rec:hasLog("w", "session window not found"))
+  cleanupScripts(rec)
+end
+
+-- iTerm2: frame is not managed.
+do
+  local rec, M = frameSetup({ terminal = "iTerm2" })
+  M.begin()
+  rec:runTimers()
+  check("frame: iTerm2 opens a window", 1, #rec.osascripts)
+  check("frame: terminal=iTerm2 causes no setFrame", 0, #rec.setFrames)
+  check("frame: iTerm2 logged", true, rec:hasLog("i", "frame: not managed under iTerm2"))
+  cleanupScripts(rec)
+end
+
+-- rememberFrame = false: no setFrame, no watcher.
+do
+  local rec, M = frameSetup({ rememberFrame = false })
+  M.begin()
+  rec:runTimers()
+  check("frame: rememberFrame off opens the window", 1, #rec.osascripts)
+  check("frame: rememberFrame off causes no setFrame", 0, #rec.setFrames)
+  check("frame: rememberFrame off watches nothing", 0, #rec.watchers)
+  cleanupScripts(rec)
+end
+
+-- Glue cannot load (no window-frame.lua under root): the session still
+-- opens, the error is logged, and the next begin() tries again.
+do
+  local rec, M = frameSetup({ root = tmpdir .. "/no-frame-root" })
+  local ok = pcall(M.begin)
+  check("frame: glue load error does not raise", true, ok)
+  check("frame: glue load error still opens the window", 1, #rec.osascripts)
+  check("frame: glue load error logged", true, rec:hasLog("e", "frame: cannot load window-frame.lua"))
+  check("frame: glue load error sets no frame", 0, #rec.setFrames)
+  M.begin()
+  check("frame: glue load retried next session", 2, #rec:findLogs("e", "frame: cannot load window-frame.lua"))
+  cleanupScripts(rec)
+end
+
+-- Glue that raises in snapshot and adopt: the session still opens.
+do
+  local rec, M = frameSetup()
+  M._frameGlue = {
+    snapshot = function() error("snapshot boom") end,
+    adopt = function() error("adopt boom") end,
+  }
+  local ok = pcall(M.begin)
+  check("frame: snapshot error does not raise", true, ok)
+  check("frame: snapshot error still opens the window", 1, #rec.osascripts)
+  check("frame: snapshot error logged", true, rec:hasLog("e", "snapshot boom"))
+  M._frameGlue.snapshot = function() return {} end
+  ok = pcall(M.begin)
+  check("frame: adopt error does not raise", true, ok)
+  check("frame: adopt error still opens the window", 2, #rec.osascripts)
+  check("frame: adopt error logged", true, rec:hasLog("e", "adopt boom"))
+  cleanupScripts(rec)
+end
+
 os.exit(fail)
 LUA
 

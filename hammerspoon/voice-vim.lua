@@ -29,6 +29,11 @@ M.config = {
   -- Seconds to wait for the target window to be confirmed frontmost before
   -- giving up on the paste (the text then stays on the clipboard).
   confirmTimeout = 1.0,
+  -- Open the Ghostty window where it was last left, at the size it was left
+  -- (hammerspoon/window-frame.lua). false leaves the frame to Ghostty.
+  rememberFrame = true,
+  -- First-open size, as a fraction of the main screen's width and height.
+  windowSize = 0.5,
 }
 
 local log = hs.logger.new("voice-vim", "info")
@@ -72,11 +77,60 @@ local function shjoin(argv)
   return table.concat(parts, " ")
 end
 
+local GHOSTTY = "com.mitchellh.ghostty"
+
+-- The window-frame glue, loaded once and kept in M._frameGlue so the
+-- watchers it holds on open windows stay referenced. Returns nil when
+-- rememberFrame is off or the glue cannot load (logged; tried again on the
+-- next session). Never raises.
+local function frameGlue()
+  if not M.config.rememberFrame then return nil end
+  local wf = M._frameGlue
+  if not wf then
+    local ok, res = pcall(function()
+      local root = repoRoot()
+      return dofile(root .. "/hammerspoon/window-frame.lua").new({
+        log = log, root = root, fraction = M.config.windowSize,
+      })
+    end)
+    if not (ok and type(res) == "table" and type(res.snapshot) == "function"
+        and type(res.adopt) == "function") then
+      log.e("frame: cannot load window-frame.lua, window frame not set: " .. tostring(res))
+      return nil
+    end
+    wf = res
+    M._frameGlue = wf
+  end
+  wf.fraction = M.config.windowSize
+  return wf
+end
+
+-- Before the window opens: the glue and the set of Ghostty window ids, or
+-- nil. Never raises.
+local function frameBefore()
+  local wf = frameGlue()
+  if not wf then return nil end
+  local ok, before = pcall(wf.snapshot, GHOSTTY)
+  if not ok then
+    log.e("frame: snapshot failed, window frame not set: " .. tostring(before))
+    return nil
+  end
+  return { wf = wf, before = before }
+end
+
+-- After the window opened: find it, set its frame, watch it. Never raises.
+local function frameAfter(snap)
+  if not snap then return end
+  local ok, err = pcall(snap.wf.adopt, GHOSTTY, snap.before)
+  if not ok then log.e("frame: adopt failed: " .. tostring(err)) end
+end
+
 -- Launch a terminal window running argv (a list of strings).
 local function openTerminal(argv)
   local term = M.config.terminal
   local cmdline = shjoin(argv)
   local script
+  local snap
   if term == "ghostty" then
     -- Ghostty 1.3+ exposes an AppleScript dictionary. `new window with
     -- configuration` runs our command in a fresh window of the already
@@ -91,7 +145,9 @@ local function openTerminal(argv)
         activate window w
       end tell
     ]], string.format("%q", cmdline))
+    snap = frameBefore()
   elseif term == "iTerm2" then
+    if M.config.rememberFrame then log.i("frame: not managed under iTerm2") end
     script = string.format([[
       tell application "iTerm2"
         activate
@@ -106,6 +162,8 @@ local function openTerminal(argv)
   if not ok then
     log.e(term .. " launch failed: " .. hs.inspect(err))
     hs.alert.show("voice-vim: could not open " .. term)
+  elseif snap then
+    frameAfter(snap)
   end
   return ok
 end

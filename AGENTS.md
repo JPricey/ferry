@@ -152,7 +152,7 @@ the personal dictionary, or by mirroring edits into Flow's `History` rows.
 2. It writes the selection to a temp file and opens a Ghostty window running
    `bin/voice-vim-session <file> <bundle-id> [window-id]`, via Ghostty's AppleScript
    `new window with configuration {command:...}`. Ghostty closes the window
-   when the command exits. iTerm2 remains available with
+   when the command exits. `hammerspoon/window-frame.lua` then finds the new window (by id diff), sets its saved or default frame, and saves moves. iTerm2 remains available with
    `terminal = "iTerm2"`. Do not use `open -na Ghostty.app --args -e`: it
    starts a second Ghostty instance per session that never quits.
 3. The session script prepends Homebrew and `~/.local/bin` to PATH (the

@@ -9,6 +9,14 @@ Press **Ctrl+Option+V** in any app. A Ghostty window opens with Neovim in insert
 mode, ready for dictation. The window you were in (not just its app) becomes
 the paste target.
 
+## Window size and position
+
+The first Ghostty window opens centred on the main screen at half its width
+and height. Move or resize it and the next session opens in the same place
+at the same size; if that spot is on a screen that is gone, it moves onto the
+main screen. `rememberFrame = false` leaves the window to Ghostty (and iTerm2
+is never managed).
+
 ## Start without the hotkey
 
 Opening `hammerspoon://voicevim-start` starts a session the same way, for
@@ -89,6 +97,8 @@ require("voice-vim").start({
   autoStartFlow = false,        -- start Flow hands-free on open
   terminal = "ghostty",         -- or "iTerm2"
   confirmTimeout = 1.0,         -- seconds to wait for the target before giving up
+  rememberFrame = true,         -- reopen the window where you last left it
+  windowSize = 0.5,             -- first-open size, fraction of the main screen
 })
 ```
 

@@ -3,8 +3,8 @@
 --
 -- The frame logic (default, restore, clamping) is pure and lives in
 -- lua/voice-vim/frame.lua; this file only reads screens and windows, sets
--- the frame, and saves moves. Not loaded by hammerspoon/voice-vim.lua yet
--- (task W3 does that). The one-instance host adapter (B1) reuses it.
+-- the frame, and saves moves. hammerspoon/voice-vim.lua uses it for the
+-- Ghostty session window. The one-instance host adapter (B1) reuses it.
 --
 --   local wf = dofile(root .. "/hammerspoon/window-frame.lua").new({
 --     log = log,            -- hs.logger (default: a "voice-vim" logger)
