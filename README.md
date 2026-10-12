@@ -35,7 +35,9 @@ press, and does nothing else.
 command to install it if missing), installs Hammerspoon, Neovide and Neovim
 if missing, checks for Wispr Flow, `python3` and `sqlite3`, notes whether
 Ghostty is there (optional: Neovide copies its font and colour), symlinks
-the module into `~/.hammerspoon/`, appends a `require("ferry")` block to
+the module into `~/.hammerspoon/`, builds `~/Applications/ferry.app` (a
+wrapper whose executable is a symlink to Neovide's binary, with the icon
+from `assets/ferry.png`), appends a `require("ferry")` block to
 `~/.hammerspoon/init.lua` once, runs `bin/ferry-migrate-init`, and starts
 Hammerspoon or reloads it with `hs -c 'hs.reload()'`. Each step prints `ok`,
 `installed`, `skipped` or `missing: <what to do>`. New setup steps go here.
@@ -96,6 +98,8 @@ commands live in `lua/ferry/note.lua`.
 - `tests/` — one `test-*.sh` per area (see `AGENTS.md` for which to run);
   `tests/hs_stub.lua` stubs `hs` so the Hammerspoon code runs under
   `nvim -l`, and `test-install.sh` runs `install.sh` against a temp `HOME`.
+- `assets/ferry.png` — the app icon `install.sh` copies into ferry.app;
+  `assets/make-icon.py` drew it once (stdlib Python; rerun only to change it).
 - `karabiner/` — optional Karabiner-Elements rules (Right Command as Hyper,
   Hyper+V acts like the hotkey); not installed by `install.sh`.
 

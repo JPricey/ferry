@@ -25,7 +25,10 @@ cat > "$fakes/brew" <<'SH'
 echo "brew $*" >> "$FAKE_CALLS"
 case "$*" in
   "install --cask hammerspoon") mkdir -p "$FERRY_APPS_DIR/Hammerspoon.app" ;;
-  "install --cask neovide-app") mkdir -p "$FERRY_APPS_DIR/Neovide.app" ;;
+  "install --cask neovide-app")
+    mkdir -p "$FERRY_APPS_DIR/Neovide.app/Contents/MacOS"
+    printf '#!/bin/sh\nexit 0\n' > "$FERRY_APPS_DIR/Neovide.app/Contents/MacOS/neovide"
+    chmod +x "$FERRY_APPS_DIR/Neovide.app/Contents/MacOS/neovide" ;;
   "install neovim") printf '#!/bin/sh\nexit 0\n' > "$FAKE_BIN/nvim"; chmod +x "$FAKE_BIN/nvim" ;;
 esac
 SH
@@ -77,6 +80,7 @@ snapshot() {
   done)
 }
 init_lua() { echo "$s/home/.hammerspoon/init.lua"; }
+say_line() { printf '%-10s %s' "$1" "$2"; } # one install.sh status line
 
 check "bash -n install.sh" 0 "$(bash -n "$install" >/dev/null 2>&1; echo $?)"
 
@@ -106,6 +110,16 @@ check "fresh: no missing lines" 0 "$(grep -c '^missing:' <<<"$out")"
 check "fresh: manual checklist printed" 1 "$(grep -c 'Accessibility for Hammerspoon' <<<"$out")"
 check "fresh: no Ghostty Automation step" 0 "$(grep -c 'Automation for Ghostty' <<<"$out")"
 check "fresh: Ghostty ok as optional" 1 "$(grep -c '^ok  *Ghostty (optional' <<<"$out")"
+# ferry.app: Info.plist keys, executable symlinked to Neovide's binary, icon.
+fapp="$s/home/Applications/ferry.app"
+plist_key() { plutil -extract "$2" raw -o - "$1/Contents/Info.plist" 2>&1; }
+check "fresh: ferry.app Info.plist keys" "ferry ferry local.ferry ferry APPL" \
+  "$(for k in CFBundleName CFBundleDisplayName CFBundleIdentifier CFBundleExecutable CFBundlePackageType; do plist_key "$fapp" $k; done | tr '\n' ' ' | sed 's/ $//')"
+check "fresh: ferry.app Info.plist is valid" 0 "$(plutil -lint -s "$fapp/Contents/Info.plist" >/dev/null 2>&1; echo $?)"
+check "fresh: ferry.app executable links to Neovide's binary" "$s/apps/Neovide.app/Contents/MacOS/neovide" \
+  "$(readlink "$fapp/Contents/MacOS/ferry")"
+check "fresh: ferry.app icon is the repo's" same "$(cmp -s "$root/assets/ferry.png" "$fapp/Contents/Resources/ferry.png" && echo same)"
+check "fresh: ferry.app reported installed" 1 "$(grep -c "^installed  *ferry.app $fapp " <<<"$out")"
 # The block is valid Lua and passes no settings, so the module defaults apply.
 if [ -n "$real_nvim" ]; then
   cat > "$tmp/load-init.lua" <<'LUA'
@@ -127,6 +141,7 @@ check "second: exits 0" 0 $st
 check "second: no brew calls" 0 "$(grep -c '^brew' "$s/calls")"
 check "second: no installed lines" 0 "$(grep -c '^installed' <<<"$out")"
 check "second: still one init.lua block" 1 "$(grep -cF 'require("ferry")' "$(init_lua)")"
+check "second: ferry.app ok" 1 "$(grep -cxF "$(say_line ok "ferry.app $fapp")" <<<"$out")"
 check "second: files, symlink and inodes unchanged" "$before" "$(snapshot)"
 
 # --check after install: all ok, no fake calls, nothing changed.
@@ -144,7 +159,7 @@ check "check fresh: exits 0" 0 $st
 check "check fresh: no fake calls" "" "$(cat "$s/calls")"
 check "check fresh: home untouched" "." "$(snapshot | cut -d' ' -f1 | tr '\n' ' ' | sed 's/ $//')"
 check "check fresh: apps untouched" "" "$(ls "$s/apps")"
-for item in Hammerspoon Neovide Neovim "Wispr Flow" "module link" "ferry block"; do
+for item in Hammerspoon Neovide Neovim "Wispr Flow" "ferry.app" "module link" "ferry block"; do
   check "check fresh: lists $item as missing" 1 "$(grep -c "^missing: *$item" <<<"$out")"
 done
 check "check fresh: Ghostty is optional, not missing" "0 1" \
@@ -209,6 +224,51 @@ check "dry run: prints brew install" 1 "$(grep -cx '+ brew install --cask hammer
 check "dry run: prints open" 1 "$(grep -cx '+ open -g -a Hammerspoon' <<<"$out")"
 check "dry run: no brew or open calls" 0 "$(grep -cE '^(brew|open|hs) ' "$s/calls")"
 check "dry run: home untouched" "." "$(snapshot | cut -d' ' -f1 | tr '\n' ' ' | sed 's/ $//')"
+check "dry run: ferry.app skipped (Neovide not installed yet)" 1 "$(grep -c '^skipped *ferry.app: Neovide is not installed yet' <<<"$out")"
+
+# ferry.app is rebuilt when a part is wrong: a neovide earlier on PATH, a
+# link to a binary that is gone, an edited Info.plist, a changed icon. Only
+# the wrong part is rewritten; --check reports it and changes nothing.
+setup bundle; apps_ghostty_flow
+bash "$install" >/dev/null 2>&1
+fapp="$s/home/Applications/ferry.app" nbin="$s/apps/Neovide.app/Contents/MacOS/neovide"
+inode() { stat -f %i "$1"; }
+plist_inode=$(inode "$fapp/Contents/Info.plist") icon_inode=$(inode "$fapp/Contents/Resources/ferry.png")
+printf '#!/bin/sh\nexit 0\n' > "$s/bin/neovide"; chmod +x "$s/bin/neovide"
+before=$(snapshot); : > "$s/calls"
+out=$(bash "$install" --check 2>&1)
+check "bundle --check: new binary reported" 1 \
+  "$(grep -cxF "$(say_line missing: "ferry.app $fapp (wrong or missing: executable): run ./install.sh")" <<<"$out")"
+check "bundle --check: nothing changed, no calls" "$before" "$(snapshot)$(cat "$s/calls")"
+out=$(bash "$install" 2>&1)
+check "bundle: relinked to the neovide on PATH" "$s/bin/neovide" "$(readlink "$fapp/Contents/MacOS/ferry")"
+check "bundle: only the executable rewritten" "1 $plist_inode $icon_inode" \
+  "$(grep -c "^installed  *ferry.app $fapp (wrote executable; runs $s/bin/neovide)" <<<"$out") \
+$(inode "$fapp/Contents/Info.plist") $(inode "$fapp/Contents/Resources/ferry.png")"
+rm "$s/bin/neovide"
+out=$(bash "$install" 2>&1)
+check "bundle: link to a gone binary rebuilt" "$nbin 1" \
+  "$(readlink "$fapp/Contents/MacOS/ferry") $(grep -c '^installed  *ferry.app .*(wrote executable;' <<<"$out")"
+mv "$nbin" "$s/neovide.away" # Neovide.app stays, so brew is not asked
+out=$(bash "$install" 2>&1)
+check "bundle: no Neovide binary anywhere is a missing: line" 1 \
+  "$(grep -c "^missing:  *ferry.app: Neovide's binary not found" <<<"$out")"
+mv "$s/neovide.away" "$nbin"
+sed -i '' 's/local.ferry/com.neovide.neovide/' "$fapp/Contents/Info.plist"
+echo "not a png" > "$fapp/Contents/Resources/ferry.png"
+out=$(bash "$install" 2>&1)
+check "bundle: edited Info.plist and icon rewritten" "local.ferry same 1" \
+  "$(plist_key "$fapp" CFBundleIdentifier) $(cmp -s "$root/assets/ferry.png" "$fapp/Contents/Resources/ferry.png" && echo same) \
+$(grep -c '^installed  *ferry.app .*(wrote Info.plist icon;' <<<"$out")"
+before=$(snapshot)
+out=$(bash "$install" 2>&1)
+check "bundle: then a run changes nothing" "$before 1" "$(snapshot) $(grep -cxF "$(say_line ok "ferry.app $fapp")" <<<"$out")"
+
+# FERRY_BUNDLE_DIR builds ferry.app there instead of ~/Applications.
+setup bundledir; apps_ghostty_flow
+out=$(FERRY_BUNDLE_DIR="$s/elsewhere" bash "$install" 2>&1)
+check "bundle dir: built in FERRY_BUNDLE_DIR, not ~/Applications" "local.ferry no" \
+  "$(plist_key "$s/elsewhere/ferry.app" CFBundleIdentifier) $([ -e "$s/home/Applications/ferry.app" ] && echo yes || echo no)"
 
 # >>> BEGIN one-time migration from voice-vim (R2 removes this section) >>>
 # A fake old install in a temp HOME and a short temp TMPDIR (socket paths

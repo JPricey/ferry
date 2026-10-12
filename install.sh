@@ -8,6 +8,7 @@
 # Each step prints one line: ok, installed, skipped, or missing: <what to do>.
 # Overrides (used by tests/test-install.sh):
 #   FERRY_APPS_DIR         where .app bundles are looked for (/Applications)
+#   FERRY_BUNDLE_DIR       where ferry.app is built (~/Applications)
 #   FERRY_INSTALL_DRY_RUN  1 prints each command instead of running it
 #   HOME, PATH                 where ~/.hammerspoon and the tools are found
 #
@@ -21,12 +22,14 @@ hsdir="$HOME/.hammerspoon"
 init="$hsdir/init.lua"
 module="$root/hammerspoon/ferry.lua"
 link="$hsdir/ferry.lua"
+bundle="${FERRY_BUNDLE_DIR:-$HOME/Applications}/ferry.app"
+icon="$root/assets/ferry.png"
 
 check=0
 case "${1:-}" in
   "") ;;
   --check) check=1 ;;
-  -h | --help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h | --help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) echo "install.sh: unknown argument: $1 (try --help)" >&2; exit 2 ;;
 esac
 
@@ -265,7 +268,82 @@ else
   say installed "module link $link -> $module"
 fi
 
-# 7. Add the ferry block to init.lua once. It sets nothing, so the
+# 7. ferry.app in the user's Applications: a wrapper bundle whose
+# executable is a symlink to Neovide's binary, so our window shows up as
+# "ferry" with its own icon (the host launches it by direct exec). The
+# binary is found like hammerspoon/hosts/neovide.lua finds it: PATH, the
+# usual bin dirs, then Neovide.app. A right bundle is left alone; a missing
+# or wrong part (Info.plist, symlink, icon) is rewritten.
+find_neovide() {
+  local d dirs="$PATH"
+  # Tests (FERRY_APPS_DIR set) never look in the real Homebrew dirs.
+  [ -n "${FERRY_APPS_DIR:-}" ] || dirs="$dirs:/opt/homebrew/bin:/usr/local/bin"
+  dirs="$dirs:$HOME/.local/bin:$HOME/.cargo/bin"
+  local IFS=:
+  for d in $dirs; do
+    if [ -n "$d" ] && [ -f "$d/neovide" ] && [ -x "$d/neovide" ]; then echo "$d/neovide"; return 0; fi
+  done
+  for d in "$apps/Neovide.app" "$HOME/Applications/Neovide.app"; do
+    if [ -f "$d/Contents/MacOS/neovide" ] && [ -x "$d/Contents/MacOS/neovide" ]; then
+      echo "$d/Contents/MacOS/neovide"; return 0
+    fi
+  done
+  return 1
+}
+bundle_plist() {
+  cat <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>ferry</string>
+	<key>CFBundleExecutable</key>
+	<string>ferry</string>
+	<key>CFBundleIconFile</key>
+	<string>ferry.png</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.ferry</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>ferry</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+</dict>
+</plist>
+PLIST
+}
+plist="$bundle/Contents/Info.plist" exe="$bundle/Contents/MacOS/ferry" bicon="$bundle/Contents/Resources/ferry.png"
+nbin=$(find_neovide || true)
+wrong=""
+{ [ -f "$plist" ] && [ "$(cat "$plist")" = "$(bundle_plist)" ]; } || wrong+=" Info.plist"
+{ [ -n "$nbin" ] && [ -L "$exe" ] && [ "$(readlink "$exe")" = "$nbin" ]; } || wrong+=" executable"
+cmp -s "$icon" "$bicon" || wrong+=" icon"
+if [ -z "$wrong" ]; then
+  say ok "ferry.app $bundle"
+elif [ -z "$nbin" ]; then
+  if [ "$dry" = 1 ] && [ $check = 0 ]; then
+    say skipped "ferry.app: Neovide is not installed yet (dry run)"
+  else
+    say missing: "ferry.app: Neovide's binary not found; install Neovide, then re-run ./install.sh"
+  fi
+elif [ $check = 1 ]; then
+  say missing: "ferry.app $bundle (wrong or missing:$wrong): run ./install.sh"
+else
+  run mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
+  case "$wrong" in *Info.plist*)
+    if [ "$dry" = 1 ]; then echo "+ write $plist"
+    else bundle_plist > "$plist.tmp" && mv -f "$plist.tmp" "$plist"; fi ;;
+  esac
+  case "$wrong" in *executable*) run rm -rf "$exe"; run ln -s "$nbin" "$exe" ;; esac
+  case "$wrong" in *icon*) run cp "$icon" "$bicon" ;; esac
+  say installed "ferry.app $bundle (wrote$wrong; runs $nbin)"
+fi
+
+# 8. Add the ferry block to init.lua once. It sets nothing, so the
 # module's defaults apply; settings go inside start({ ... }).
 if [ -f "$init" ] && grep -qF 'require("ferry")' "$init"; then
   say ok "ferry block in $init"
@@ -287,7 +365,7 @@ LUA
   say installed "ferry block in $init"
 fi
 
-# 8. Remove the old Option+V hotkey line (bin/ferry-migrate-init keeps
+# 9. Remove the old Option+V hotkey line (bin/ferry-migrate-init keeps
 # a .bak and changes nothing on a second run).
 oldkey='^[[:space:]]*hotkey[[:space:]]*=[[:space:]]*\{[[:space:]]*\{[[:space:]]*"alt"[[:space:]]*\}[[:space:]]*,[[:space:]]*"v"[[:space:]]*\}'
 if [ $check = 1 ]; then
@@ -307,7 +385,7 @@ else
   esac
 fi
 
-# 9. Start Hammerspoon, or reload it so it picks up the module and block.
+# 10. Start Hammerspoon, or reload it so it picks up the module and block.
 if [ $check = 1 ]; then
   say skipped "start or reload Hammerspoon (--check changes nothing)"
 elif ! pgrep -xq Hammerspoon; then
@@ -324,7 +402,7 @@ else
   say missing: "reload Hammerspoon: choose Reload Config from its menu bar icon"
 fi
 
-# 10. The steps no script can do.
+# 11. The steps no script can do.
 cat <<MSG
 
 Once, by hand (macOS allows no script to do these):
