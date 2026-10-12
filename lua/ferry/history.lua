@@ -1,17 +1,23 @@
 -- ferry notes browser: the history sidebar.
 --
 -- A left split listing the note files (lua/ferry/store.lua) from the
--- index (`bin/ferry-notes list`): every note but the current one, drafts
--- included, pinned first, then newest first. Each row: ★ pinned, then
--- ● draft or ~ cancelled (blank: sent), the time, the target app and the
--- first line. Opening the sidebar runs `ferry-notes sync` first, so files
--- changed outside ferry show as they are now. Keys:
+-- index (`bin/ferry-notes list`): every note, drafts included, pinned
+-- first, then newest first. Each row: ▶ the open (current) note, ★ pinned,
+-- then ● draft or ~ cancelled (blank: sent), the time, the target app and
+-- the first line. The open note's row shows its buffer's first line
+-- whenever the sidebar lists, and is updated when a note is saved
+-- (note_saved); a blank note with no file yet is not listed. Opening the
+-- sidebar runs `ferry-notes sync` first, so files changed outside ferry
+-- show as they are now. Keys:
 --   <CR>  open the note for editing (note.open: the current note is saved
 --         as a draft; the opened one takes the target of the latest show)
 --   s     open it and send it again (same file, state sent)
 --   y     copy it to the clipboard      P  pin or unpin it
 --   d     delete it (after a confirm; the file moves to <notes>/.trash)
 --   K     preview it in a float         i  insert it into the current note
+--   On the open note's row: <CR> focuses the note (nothing written), s
+--   sends it (as <C-x>), y and K use its buffer, P saves it and pins it,
+--   d and i refuse with a notice.
 --   /     search: list only notes with every word (`list --query`); an
 --         empty search lists all again
 --   R     sync and refresh, clearing the search
@@ -31,7 +37,9 @@ local M = {}
 -- 4: / searches (state.query), open and R sync the index first; the old
 -- history database is no longer written or read.
 -- 5: one-line notices (ferry.notice).
-M.api = 5
+-- 6: the open note is listed, marked ▶, and its keys act on the note;
+-- note_saved (called by note api 18) updates a saved note's row.
+M.api = 6
 
 M.width = 38
 -- query: the active search ("" or nil: none).
@@ -71,19 +79,50 @@ end
 
 local function key(path) return vim.fn.resolve(vim.fn.fnamemodify(path, ":p")) end
 
--- Paths left out of the list: the current note's file, and the note in the
--- sidebar's main window.
-local function excluded()
-  local set = {}
-  local function add(p) if p and p ~= "" then set[key(p)] = true end end
+-- The open (current) note's file, spelled as key() spells it, or nil.
+local function open_path()
   local ok, n = pcall(note)
   local cur = ok and n.current and n.current()
-  if cur then add(cur.path) end
-  local win = M.state.main_win
-  if not (win and vim.api.nvim_win_is_valid(win)) then win = vim.api.nvim_get_current_win() end
-  local buf = vim.api.nvim_win_get_buf(win)
-  if type(vim.b[buf].ferry) == "table" then add(vim.api.nvim_buf_get_name(buf)) end
-  return set
+  return cur and cur.path and cur.path ~= "" and key(cur.path) or nil
+end
+
+-- The open note's buffer, or nil (no note, or its buffer was wiped).
+local function open_buf()
+  local cur = note().current()
+  local b = cur and cur.buf
+  return b and vim.api.nvim_buf_is_valid(b) and b or nil
+end
+
+-- True when row r is the open note's, checked now (not when it was listed:
+-- a send from the note makes another note current).
+local function is_open_row(r)
+  local p = open_path()
+  return p ~= nil and key(r.path) == p
+end
+
+-- The first non-blank line, trimmed, as ferry-notes makes a preview.
+local function first_line(lines)
+  for _, l in ipairs(lines) do
+    local t = vim.trim(l)
+    if t ~= "" then return t end
+  end
+  return ""
+end
+
+local function count_words(text) return select(2, text:gsub("%S+", "")) end
+
+-- Mark the open note's row (r.open), showing its buffer's first line.
+local function mark_open(rows)
+  local open = open_path()
+  for _, r in ipairs(rows) do
+    r.open = (open ~= nil and r.path ~= nil and key(r.path) == open) or nil
+    local b = r.open and open_buf()
+    if b then
+      local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+      r.preview, r.words = first_line(lines), count_words(table.concat(lines, "\n"))
+    end
+  end
+  return rows
 end
 
 local function query()
@@ -91,20 +130,23 @@ local function query()
   return type(q) == "string" and q:find("%S") and q or nil
 end
 
-function M.load()
-  -- Note files written a moment ago are indexed in the background.
-  pcall(function() note().wait_index(3000) end)
+local function list_args()
   local args = { "list", "--limit", "200" }
   if query() then vim.list_extend(args, { "--query", query() }) end
-  local out = notes_cmd(args)
+  return args
+end
+
+local function decode(out)
   if not out or out == "" then return {} end
   local ok, rows = pcall(vim.json.decode, out)
   if not ok or type(rows) ~= "table" then return {} end
-  local skip, kept = excluded(), {}
-  for _, r in ipairs(rows) do
-    if not skip[key(r.path)] then kept[#kept + 1] = r end
-  end
-  return kept
+  return mark_open(rows)
+end
+
+function M.load()
+  -- Note files written a moment ago are indexed in the background.
+  pcall(function() note().wait_index(3000) end)
+  return decode(notes_cmd(list_args()))
 end
 
 local function truncate(s, width)
@@ -117,7 +159,7 @@ local function truncate(s, width)
   return out .. "…"
 end
 
-M.marks = { pinned = "★", draft = "●", cancelled = "~" }
+M.marks = { open = "▶", pinned = "★", draft = "●", cancelled = "~" }
 
 -- Build display lines, a line -> row index map and highlights. Pinned
 -- notes go under "── Pinned", the rest under their date. With a search
@@ -142,15 +184,18 @@ function M.render(rows, width, q)
       hl[#hl + 1] = { #lines - 1, "Title", 0, -1 }
       last_label = label
     end
+    local open = r.open and M.marks.open or " "
     local pin = r.pinned and M.marks.pinned or " "
     local mark = M.marks[r.state] or " "
     local app = truncate(r.app or "", 7)
-    local head = pin .. mark .. r.time .. " " .. app .. string.rep(" ", 7 - vim.fn.strdisplaywidth(app)) .. " "
+    local head = open .. pin .. mark .. r.time .. " " .. app .. string.rep(" ", 7 - vim.fn.strdisplaywidth(app)) .. " "
     local preview = (r.preview or "") ~= "" and r.preview or "(empty)"
     lines[#lines + 1] = head .. truncate(preview, width - vim.fn.strdisplaywidth(head) - 1)
     local ln = #lines - 1
-    local p, m = #pin, #pin + #mark
-    if r.pinned then hl[#hl + 1] = { ln, "Special", 0, p } end
+    local o = #open
+    local p, m = o + #pin, o + #pin + #mark
+    if r.open then hl[#hl + 1] = { ln, "Function", 0, o } end
+    if r.pinned then hl[#hl + 1] = { ln, "Special", o, p } end
     if r.state == "draft" then hl[#hl + 1] = { ln, "Constant", p, m } end
     if r.state == "cancelled" then hl[#hl + 1] = { ln, "Comment", p, m } end
     hl[#hl + 1] = { ln, "Number", m, m + #r.time }
@@ -180,10 +225,17 @@ local function main_win()
   return nil
 end
 
--- The note's body lines, read from its file (the file is the truth), with
--- trailing blank lines dropped. nil after a notice.
+-- The note's body lines, read from its file (the file is the truth; the
+-- open note's from its buffer, unsaved typing included), with trailing
+-- blank lines dropped. nil after a notice.
 local function body_of(r)
-  local meta, lines = require("ferry.store").read(r.path)
+  local b = is_open_row(r) and open_buf()
+  local meta, lines
+  if b then
+    meta, lines = true, vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  else
+    meta, lines = require("ferry.store").read(r.path)
+  end
   if not meta then
     require("ferry.notice").notify("ferry: cannot read " .. r.path .. ": " .. tostring(lines), vim.log.levels.WARN)
     return nil
@@ -193,10 +245,26 @@ local function body_of(r)
   return lines
 end
 
+local function refuse(msg) require("ferry.notice").notify(msg, vim.log.levels.WARN) end
+
+-- Focus the open note in the note window: the window showing it, else
+-- through note.open (the same file: shown, nothing written). Returns its
+-- buffer, or nil after a notice.
+local function focus_open()
+  local b = open_buf()
+  local win = b and vim.fn.bufwinid(b) or -1
+  if win ~= -1 then
+    vim.api.nvim_set_current_win(win)
+    return b
+  end
+  return note().open(note().current().path)
+end
+
 -- i: put the note's text into the current note, below the cursor line (an
--- empty note is replaced).
+-- empty note is replaced). Never the open note into itself.
 function M.insert()
   local r = current_row(); if not r then return end
+  if is_open_row(r) then return refuse("ferry: this is the open note — i inserts another note into it") end
   local win = main_win(); if not win then return end
   local lines = body_of(r); if not lines then return end
   local buf = vim.api.nvim_win_get_buf(win)
@@ -210,18 +278,28 @@ function M.insert()
   end
 end
 
--- <CR>: make the note the current one, in the note window.
+-- <CR>: make the note the current one, in the note window. On the open
+-- note's row: focus the note (no reopen, nothing written).
 function M.open_note()
   local r = current_row(); if not r then return end
+  if is_open_row(r) then return focus_open() end
   local buf = note().open(r.path)
   if buf then M.refresh() end
   return buf
 end
 
--- s: open the note and send it again to the latest show's target.
+-- s: open the note and send it again to the latest show's target. On the
+-- open note's row: send it, as <C-x> in the note does.
 function M.send()
   local r = current_row(); if not r then return end
   local n = note()
+  if is_open_row(r) then
+    local b = focus_open()
+    if not b then return end
+    n.submit(b)
+    M.refresh()
+    return
+  end
   local buf = n.open(r.path)
   if not buf then return end
   n.submit(buf)
@@ -240,12 +318,20 @@ function M.yank()
     return
   end
   pcall(vim.fn.setreg, '"', text)
-  require("ferry.notice").notify(string.format("ferry: copied %d words", r.words or 0))
+  require("ferry.notice").notify(string.format("ferry: copied %d words", count_words(text)))
 end
 
--- P: pin or unpin the note (frontmatter `pinned`).
+-- P: pin or unpin the note (frontmatter `pinned`). The open note's file
+-- goes through note.pin_open, which saves it first and writes the pin as
+-- ferry's own write (ferry-notes changing it would look like an outside
+-- edit to the note's next save).
 function M.pin()
   local r = current_row(); if not r then return end
+  local n = note()
+  if is_open_row(r) and type(n.pin_open) == "function" then
+    if n.pin_open(not r.pinned) then M.refresh(r.path) end
+    return
+  end
   if notes_cmd({ "pin", r.id, r.pinned and "off" or "on" }) then M.refresh(r.path) end
 end
 
@@ -257,6 +343,7 @@ end
 -- d: after a confirm, move the note's file to <notes>/.trash.
 function M.delete()
   local r = current_row(); if not r then return end
+  if is_open_row(r) then return refuse("ferry: this is the open note — Ctrl-Q cancels it") end
   local preview = (r.preview or "") ~= "" and r.preview or "(empty)"
   if not M.confirm("Delete \"" .. truncate(preview, 40) .. "\"?") then return end
   if not notes_cmd({ "delete", r.id }) then return end
@@ -308,12 +395,10 @@ function M.focus_main()
   if win then vim.api.nvim_set_current_win(win) end
 end
 
--- Reload the rows. The cursor goes to the row of keep_path when it is
--- listed, else to the first row.
-function M.refresh(keep_path)
+-- Draw st.rows. The cursor goes to the row of keep_path when it is listed,
+-- else to the first row (keep_line: else it stays on its line).
+local function draw(keep_path, keep_line)
   local st = M.state
-  if not (st.buf and vim.api.nvim_buf_is_valid(st.buf)) then return end
-  st.rows = M.load()
   local lines, map, hl = M.render(st.rows, M.width, query())
   st.map = map
   vim.bo[st.buf].modifiable = true
@@ -332,8 +417,71 @@ function M.refresh(keep_path)
         if keep_path and key(st.rows[map[ln]].path) == key(keep_path) then want = ln end
       end
     end
-    if want or first then vim.api.nvim_win_set_cursor(st.win, { want or first, 0 }) end
+    if keep_line and not want then
+      local ln = vim.api.nvim_win_get_cursor(st.win)[1]
+      vim.api.nvim_win_set_cursor(st.win, { math.min(ln, #lines), 0 })
+    elseif want or first then
+      vim.api.nvim_win_set_cursor(st.win, { want or first, 0 })
+    end
   end
+end
+
+-- Reload the rows. The cursor goes to the row of keep_path when it is
+-- listed, else to the first row.
+function M.refresh(keep_path)
+  local st = M.state
+  if not (st.buf and vim.api.nvim_buf_is_valid(st.buf)) then return end
+  st.rows = M.load()
+  draw(keep_path)
+end
+
+-- List again without blocking: `ferry-notes list` runs in the background
+-- and the rows are drawn when it is done (unless the sidebar closed or the
+-- search changed meanwhile), the cursor kept on its row. Never a wait: a
+-- wait runs the event loop, which would take ferry-host requests (draft,
+-- talk) in the middle of whatever the editor was doing.
+local function refresh_async()
+  local q = query()
+  local cmd = { root() .. "/bin/ferry-notes" }
+  vim.list_extend(cmd, list_args())
+  pcall(vim.system, cmd, { text = true, env = { FERRY_NOTES_DIR = notes_dir() } }, function(r)
+    vim.schedule(function()
+      local st = M.state
+      if r.code ~= 0 or not M.is_open() or not (st.buf and vim.api.nvim_buf_is_valid(st.buf)) or query() ~= q then
+        return
+      end
+      local cur = current_row()
+      st.rows = decode(r.stdout)
+      draw(cur and cur.path, true)
+    end)
+  end)
+end
+
+-- A note file was written and indexed (note api 18 calls this then, on the
+-- main loop). Its row, when listed, shows the file's state and first line
+-- now, without listing again (its place and time wait for the next list),
+-- and the ▶ mark follows the current note; the cursor stays. The open
+-- note's file not listed yet (its first save) lists the sidebar again, in
+-- the background.
+function M.note_saved(path)
+  local st = M.state
+  if not path or not (M.is_open() and st.buf and vim.api.nvim_buf_is_valid(st.buf)) then return end
+  local k, found = key(path), nil
+  for _, r in ipairs(st.rows or {}) do
+    if r.path and key(r.path) == k then found = r end
+  end
+  local cur = current_row()
+  if not found then
+    if open_path() == k then refresh_async() end
+    return
+  end
+  local meta, body = require("ferry.store").read(path)
+  if meta then
+    found.state = rawget(meta, "state") or found.state
+    found.preview, found.words = first_line(body), count_words(table.concat(body, "\n"))
+  end
+  mark_open(st.rows)
+  draw(cur and cur.path, true)
 end
 
 -- Bring the index up to date with the folder (files edited, added or

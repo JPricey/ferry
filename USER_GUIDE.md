@@ -205,11 +205,12 @@ or cancel instead of hide; it never skips the wait.
 
 Every note is saved as a file. Press `<leader>h` to show or hide a sidebar
 on the left that lists your notes (it opens by itself each time the note
-appears): every note except the one you are writing, drafts included.
-Pinned notes come first, then the rest newest first, grouped by day. Each
-row shows a mark (`★` pinned, `●` draft, `~` cancelled, nothing for sent),
-the time, the app it went to and its first line. `<Tab>` jumps back to your
-text.
+appears): every note, drafts included. Pinned notes come first, then the
+rest newest first, grouped by day. Each row shows marks (`★` pinned, `●`
+draft, `~` cancelled, nothing for sent), the time, the app it went to and
+its first line. The note you are writing is listed too, marked `▶` in
+front, once it has been saved (a second or so after you start typing);
+its first line follows your saves. `<Tab>` jumps back to your text.
 
 To go straight to your notes from any app, press **Ctrl+Option+N**. The
 ferry window appears aimed at the window you were in (as with
@@ -233,6 +234,14 @@ On a note in the sidebar:
 | `R` | Clear the search and refresh the list, picking up files changed outside ferry |
 | `q` | Close the sidebar (`:q` hides the whole window) |
 | `Esc` | Close the preview |
+
+On the `▶` row (the note you are writing), the keys act on that note:
+`Enter` jumps to it (nothing is reopened or saved), `s` sends it as
+Ctrl-X does, `y` copies it and `K` previews it as it stands now, `P` saves
+it and pins or unpins it, `d` does nothing and says "this is the open note
+— Ctrl-Q cancels it", and `i` does nothing (it would insert the note into
+itself). Opening another note moves the `▶` there; the one you were
+writing stays in the list as a draft.
 
 A sent note you open and change becomes a draft again until you send it;
 cancel one you have not changed and it stays as it was. If the note you

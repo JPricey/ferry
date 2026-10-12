@@ -102,14 +102,73 @@ local function fmeta(path, k) local m = store.read(path); return m and tostring(
 local function fbody(path) local _, b = store.read(path); return b and table.concat(b, "|") or "none" end
 local function buflines(b) return table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false), "|") end
 
--- The current note, with a file: never listed.
+-- The sidebar line holding text (a row), or "".
+local function line_of(text)
+  for _, l in ipairs(vim.api.nvim_buf_get_lines(h.state.buf, 0, -1, false)) do
+    if l:find(text, 1, true) then return l end
+  end
+  return ""
+end
+local function n_open() return select(2, rows():gsub("▶", "")) end
+local function stat(path) local s = vim.uv.fs_stat(path); return s and (s.mtime.sec .. "." .. s.mtime.nsec) or "none" end
+local function bytes(path) return table.concat(vim.fn.readfile(path, "b"), "\n") end
+
+-- The current note, with a file: listed in its place (newest first: its
+-- time is now), marked ▶ before the other marks.
 local cur = show("com.example.app", "4242")
 vim.api.nvim_buf_set_lines(0, 0, -1, false, { "current text" })
 vim.cmd("silent write")
 h.refresh()
-check("rows: pinned first, then newest first; marks ★ pinned, ● draft, ~ cancelled; the app; current note left out",
-  "── Pinned|★ 07:00 app     delta pinned||── Today| ●10:00 app     bravo draft|  09:00 app     alpha sent| ~08:00 app     charlie cancelled",
-  rows())
+check("rows: pinned first, then newest first; marks ★ pinned, ● draft, ~ cancelled; the app",
+  "── Pinned| ★ 07:00 app     delta pinned||── Today|  ●10:00 app     bravo draft|   09:00 app     alpha sent|  ~08:00 app     charlie cancelled",
+  (rows():gsub("|[^|]*current text", "")))
+check("the current note's row is listed, marked ▶ first", true,
+  line_of("current text"):find("^▶ ●%d%d:%d%d app     current text$") ~= nil)
+check("one row marked ▶", 1, n_open())
+
+-- Unsaved typing: listing shows the open note's first line from its buffer.
+local cur_buf = vim.api.nvim_win_get_buf(h.state.main_win)
+vim.api.nvim_buf_set_lines(cur_buf, 0, -1, false, { "current text edited" })
+h.refresh()
+check("a list shows the open note's unsaved first line", true,
+  line_of("current text edited"):find("^▶ ●") ~= nil)
+
+-- Keys on the open note's row.
+local cur_bytes, cur_stat = bytes(cur), stat(cur)
+check("<CR> on the open note's row runs without error", "", press("current text edited", "<CR>"))
+check("<CR> on the open note's row: the same note current, the note window focused, nothing written",
+  "true true current text edited true true", tostring(note.current().buf == cur_buf) .. " "
+  .. tostring(vim.api.nvim_get_current_win() == h.state.main_win) .. " " .. buflines(cur_buf) .. " "
+  .. tostring(bytes(cur) == cur_bytes and stat(cur) == cur_stat) .. " " .. tostring(vim.bo[cur_buf].modified))
+notices = {}
+check("d on the open note's row runs without error", "", press("current text edited", "d"))
+check("d on the open note's row: refused with one notice, the file and the row kept",
+  "ferry: this is the open note — Ctrl-Q cancels it 1 true current text edited",
+  tostring(notices[#notices]) .. " " .. vim.fn.filereadable(cur) .. " "
+  .. tostring(line_of("current text edited") ~= "") .. " " .. buflines(cur_buf))
+notices = {}
+check("i on the open note's row runs without error", "", press("current text edited", "i"))
+check("i on the open note's row: refused with a notice, the note unchanged",
+  "true current text edited", tostring(tostring(notices[#notices]):find("this is the open note", 1, true) ~= nil)
+  .. " " .. buflines(cur_buf))
+press("current text edited", "y")
+check("y on the open note's row copies its buffer", "current text edited", table.concat(clip["+"] or {}, "|"))
+press("current text edited", "K")
+check("K on the open note's row previews its buffer", "current text edited",
+  h.state.preview_win and vim.api.nvim_win_is_valid(h.state.preview_win)
+  and buflines(vim.api.nvim_win_get_buf(h.state.preview_win)) or "none")
+h.close_preview()
+press("current text edited", "P")
+check("P on the open note's row: saved, then pinned in the file; the row under Pinned, ▶★",
+  "true current text edited true", fmeta(cur, "pinned") .. " " .. fbody(cur) .. " "
+  .. tostring(rows():find("── Pinned|▶★●", 1, true) == 1))
+press("current text edited", "P")
+check("P again unpins it", "nil", fmeta(cur, "pinned"))
+-- The pin was ferry's own write: the next save is not an outside edit.
+vim.api.nvim_buf_set_lines(cur_buf, 0, -1, false, { "current text edited" })
+vim.api.nvim_buf_call(cur_buf, function() vim.cmd("silent write") end)
+check("after P, the next save writes the same file (no conflict file)", "0 current text edited",
+  #vim.fn.glob(dir .. "/*.conflict-*", false, true) .. " " .. fbody(cur))
 
 -- <CR>: bravo becomes the current note; the old one (unsaved typing) is
 -- kept as a draft file and listed.
@@ -125,8 +184,9 @@ check("<CR>: the opened note takes the target of the latest show", "com.example.
 check("<CR>: the old note is a draft file with its unsaved typing, its buffer let go",
   "draft current text edited false", fmeta(cur, "state") .. " " .. fbody(cur) .. " "
   .. tostring(vim.api.nvim_buf_is_valid(old_buf)))
-check("<CR>: the old note is listed, the opened one is not", "true false",
-  tostring(rows():find("current text edited", 1, true) ~= nil) .. " " .. tostring(rows():find("bravo", 1, true) ~= nil))
+check("<CR>: the marker moves to the opened note; the old one is listed as a draft, unmarked",
+  "true true 1", tostring(line_of("bravo draft"):find("^▶ ●") ~= nil) .. " "
+  .. tostring(line_of("current text edited"):find("^  ●") ~= nil) .. " " .. n_open())
 -- Edited, the opened note saves into the same file as a draft.
 vim.api.nvim_buf_set_lines(nb, 0, -1, false, { "bravo draft", "more" })
 vim.cmd("silent write")
@@ -162,7 +222,7 @@ clip_mode = nil
 press("charlie cancelled", "P")
 check("P pins: pinned: true in the file, the row under Pinned with ★", "true true",
   fmeta(paths.charlie, "pinned") .. " " .. tostring(rows():find(
-    "── Pinned|★~08:00 app     charlie cancelled|★ 07:00 app     delta pinned||── Today|", 1, true) == 1))
+    "── Pinned| ★~08:00 app     charlie cancelled| ★ 07:00 app     delta pinned||── Today|", 1, true) == 1))
 press("charlie cancelled", "P")
 check("P again unpins: no pinned key", "nil", fmeta(paths.charlie, "pinned"))
 
@@ -229,6 +289,34 @@ press("first line", "/kubernetes<CR>")
 check("... and searched: only the note that still says kubernetes", "1 true", n_rows() .. " " .. tostring(listed("first line")))
 h.close(); h.open()
 check("reopening clears the search", all .. " nil", n_rows() .. " " .. tostring(h.state.query))
+
+-- The open note's row follows its saves; s on it sends it as <C-x> does.
+note.cancel(note.current().buf)
+show("com.example.app", "4242")
+local sb, sp = note.current().buf, note.current().path
+check("a blank note with no file is not listed: no row marked ▶", "0 0", vim.fn.filereadable(sp) .. " " .. n_open())
+vim.api.nvim_buf_set_lines(sb, 0, -1, false, { "first save" })
+vim.api.nvim_buf_call(sb, function() vim.cmd("silent write") end)
+vim.wait(2000, function() return listed("first save") end)
+check("its first save lists it, marked ▶", true, line_of("first save"):find("^▶ ●") ~= nil)
+local loads, load = 0, h.load
+h.load = function() loads = loads + 1; return load() end
+vim.api.nvim_buf_set_lines(sb, 0, -1, false, { "second save", "body" })
+vim.api.nvim_buf_call(sb, function() vim.cmd("silent write") end)
+vim.wait(2000, function() return listed("second save") end)
+h.load = load
+check("a later save updates its row's first line in place (no list)", "true false 0 1",
+  tostring(line_of("second save"):find("^▶ ●") ~= nil) .. " " .. tostring(listed("first save")) .. " " .. loads
+  .. " " .. n_open())
+calls = {}
+check("s on the open note's row runs without error", "", press("second save", "s"))
+check("s on the open note's row submits it once, its text to the latest target",
+  "1 com.example.app 4242 second save|body", #calls .. " " .. (calls[1] and (calls[1].p.target .. " "
+  .. calls[1].p.window .. " " .. calls[1].text) or ""))
+vim.wait(100)
+check("s on the open note's row: its file says sent, listed unmarked; a blank note is current, unlisted",
+  "sent true false 0", fmeta(sp, "state") .. " " .. tostring(line_of("second save"):find("^   ") ~= nil) .. " "
+  .. tostring(vim.fn.resolve(note.current().path) == vim.fn.resolve(sp)) .. " " .. n_open())
 
 -- Cancel on a note opened unchanged: its file (state sent) is left as is.
 local alpha_bytes = table.concat(vim.fn.readfile(paths.alpha, "b"), "\n")

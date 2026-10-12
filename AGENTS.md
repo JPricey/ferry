@@ -300,9 +300,14 @@ each note is a file in the notes folder (`lua/ferry/store.lua`) and
 cache, rebuilt from the files). The old history database
 (`~/Library/Application Support/ferry/history.sqlite`) is no longer
 written or read by ferry; only `bin/ferry-migrate-history` reads it, and
-the file stays on disk. `lua/ferry/history.lua` (api 4) renders the notes
+the file stays on disk. `lua/ferry/history.lua` (api 6) renders the notes
 browser from `bin/ferry-notes list` (JSON over the notes index), every
-note but the current one; the note layout opens it on the left. Opening
+note, the current one marked `▶` (its keys act on the note: `<CR>`
+focuses, `s` submits, `P` goes through `note.pin_open` so the pin is
+ferry's own write, `d`/`i` refuse); each note write calls
+`history.note_saved` after its index run, which updates that row in place
+(a first save lists again in the background, never with a wait); the note
+layout opens it on the left. Opening
 the sidebar runs `ferry-notes sync` first (and `R` syncs, clears the
 search and refreshes); `/` prompts with `vim.ui.input` and filters with
 `list --query` (an empty answer clears, a cancelled prompt keeps it). `<CR>` and `s` go

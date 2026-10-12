@@ -16,6 +16,8 @@ fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: want '$2' got '$3'"; fail=1; fi; }
 # The note api ferry-host reloads an older server's module to.
 napi=$(sed -n 's/^note_api=//p' "$host")
+# The history api the note module reloads an older history module to.
+hapi=$(sed -n 's/^M.api = //p' "$root/lua/ferry/history.lua")
 ask() { nvim --server "$FERRY_SOCK" --remote-expr "$1" 2>&1; }
 servers() { pgrep -f -- "--listen $FERRY_SOCK" | wc -l | tr -d ' '; }
 gone() { test -e "$FERRY_SOCK" && echo present || echo gone; }
@@ -209,7 +211,7 @@ check "browse after a new note, pinned note listed: after the loop ran, cursor s
 ask "luaeval('(function() require\"ferry.history\".api = 4; return 1 end)()')" >/dev/null
 "$host" browse com.example.app 4242 >/dev/null
 ask 1 >/dev/null; sleep 0.2; ask 1 >/dev/null
-check "browse with an api-4 history module: reloaded, after the loop ran, cursor still on the newest note" "5 history 2 zz-outside.md" \
+check "browse with an api-4 history module: reloaded, after the loop ran, cursor still on the newest note" "$hapi history 2 zz-outside.md" \
   "$(ask 'luaeval("require\"ferry.history\".api")') $(ask 'expand("%:t")') $(hrow)"
 # Flow recording (or a finish waiting for its paste): browse keeps the note
 # focused in insert mode so Flow's paste lands there; the sidebar is synced.
@@ -534,7 +536,7 @@ check "upgrade from api 12: show reloads note to the current api and flow to 6, 
 
 # Live upgrade from 57e7b8c (main at H5: note api 14, flow api 5, history
 # api 4): the next show reloads note to the current api, flow to 6 and
-# history to 5, keeping the draft.
+# history to the current api, keeping the draft.
 live=$work/live-api14; old_tree 57e7b8c "$live"
 "$live/bin/ferry-host" ensure >/dev/null
 p14=$("$live/bin/ferry-host" show com.example.app 4242)
@@ -542,8 +544,8 @@ ask "nvim_buf_set_lines(0, 0, -1, v:false, ['api 14 draft'])" >/dev/null
 "$live/bin/ferry-host" draft >/dev/null
 check "57e7b8c server: note api 14, flow api 5, history api 4" "14 5 4" "$(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api') $(lua 'require"ferry.history".api')"
 upgrade "$live"
-check "upgrade from api 14: show reloads note to the current api, flow to 6 and history to 5, keeps the draft and its target" \
-  "$p14 $napi 6 5 api 14 draft com.example.app 4242" \
+check "upgrade from api 14: show reloads note to the current api, flow to 6 and history to the current api, keeps the draft and its target" \
+  "$p14 $napi 6 $hapi api 14 draft com.example.app 4242" \
   "$("$live/bin/ferry-host" show com.example.app 4242) $(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api') $(lua 'require"ferry.history".api') $(body) $(ask 'b:ferry.target." ".b:ferry.window')"
 "$live/bin/ferry-host" stop
 
@@ -600,7 +602,7 @@ check "af9efd3 server: the sidebar is open under history api 2, listing the old 
 upgrade "$live"
 "$live/bin/ferry-host" show com.example.app 4242 >/dev/null
 ask "nvim_input('<Esc>')" >/dev/null; sleep 0.3
-check "upgrade from history api 2: the open sidebar's 12 keys call history api 5, no p" "5 12 p=0" \
+check "upgrade from history api 2: the open sidebar's 12 keys call the current history api, no p" "$hapi 12 p=0" \
   "$(lua 'require"ferry.history".api') $(ask "luaeval('dofile(\"$work/hkeys.lua\")')")"
 check "upgrade from history api 2: the open sidebar lists the notes index" "true false" \
   "$(lua 'vim.fn.join(vim.api.nvim_buf_get_lines(require"ferry.history".state.buf, 0, -1, false)):find("hist file", 1, true) ~= nil') $(lua 'vim.fn.join(vim.api.nvim_buf_get_lines(require"ferry.history".state.buf, 0, -1, false)):find("hist one", 1, true) ~= nil')"
@@ -628,10 +630,10 @@ check "20f9461 server: note api 13, history api 3, the sidebar open, the typing 
 dbsum=$(shasum "$FERRY_DB" | cut -d' ' -f1)
 upgrade "$live"
 check "upgrade from note api 13: show reloads note and history, same note, the typing kept" \
-  "$p13 $napi 5 typed under api 13" \
+  "$p13 $napi $hapi typed under api 13" \
   "$("$live/bin/ferry-host" show com.example.app 4242) $(lua 'require"ferry.note".api') $(lua 'require"ferry.history".api') $(body)"
 ask "nvim_input('<Esc>')" >/dev/null; sleep 0.3
-check "upgrade from history api 3: the open sidebar's 12 keys call history api 5, no error" "12 p=0 " \
+check "upgrade from history api 3: the open sidebar's 12 keys call the current history api, no error" "12 p=0 " \
   "$(ask "luaeval('dofile(\"$work/hkeys.lua\")')") $(ask 'v:errmsg')"
 ask "nvim_input('<Cmd>lua vim.api.nvim_set_current_win(require\"ferry.history\".state.win)<CR>/kubernetes<CR>')" >/dev/null
 sleep 0.3
@@ -646,6 +648,36 @@ check "upgrade from note api 13: Submit sends the typing, the file says sent, th
   "$(ask 'get(g:, "ferry_sub", "")') $(fkey "$p13" state) $(fbody "$p13") $(shasum "$FERRY_DB" | cut -d' ' -f1)"
 "$live/bin/ferry-host" stop
 rm -f "$kfile"; "$root/bin/ferry-notes" index "$kfile"
+
+# Live upgrade from e2d0ac0 (H8 on main: note api 17, history api 5, the
+# open note left out of the sidebar) with the sidebar open and a saved
+# draft, as Joe's server runs: the next show reloads note and history, and
+# the open sidebar lists the open note marked ▶, with its keys rebound; a
+# later save updates that row.
+# The sidebar's line holding $1, cut to its first character (the ▶ column),
+# and how many lines are marked ▶.
+hmark() { lua "(function() local n = 0; local m = \"none\"; for _, l in ipairs(vim.api.nvim_buf_get_lines(require\"ferry.history\".state.buf, 0, -1, false)) do if vim.startswith(l, \"▶\") then n = n + 1 end; if l:find(\"$1\", 1, true) then m = vim.fn.strcharpart(l, 0, 1) end end; return m .. \" \" .. n end)()"; }
+live=$work/live-h8; old_tree e2d0ac0 "$live"
+"$live/bin/ferry-host" ensure >/dev/null
+p17=$("$live/bin/ferry-host" show com.example.app 4242)
+ask "nvim_buf_set_lines(0, 0, -1, v:false, ['api 17 draft'])" >/dev/null
+"$live/bin/ferry-host" draft >/dev/null
+ask "luaeval('require\"ferry.history\".refresh()')" >/dev/null
+check "e2d0ac0 server: note api 17, history api 5, the sidebar open, the draft's file written, its row left out" \
+  "17 5 true draft none 0" \
+  "$(lua 'require"ferry.note".api') $(lua 'require"ferry.history".api') $(lua 'require"ferry.history".is_open()') $(fkey "$p17" state) $(hmark 'api 17 draft')"
+upgrade "$live"
+check "upgrade from note api 17: show reloads note and history, same note" "$p17 $napi $hapi" \
+  "$("$live/bin/ferry-host" show com.example.app 4242) $(lua 'require"ferry.note".api') $(lua 'require"ferry.history".api')"
+ask 1 >/dev/null; sleep 0.3; ask 1 >/dev/null
+check "upgrade from history api 5: the open sidebar lists the open note marked ▶, its 12 keys rebound" \
+  "▶ 1 12 p=0" "$(hmark 'api 17 draft') $(ask "luaeval('dofile(\"$work/hkeys.lua\")')")"
+ask "nvim_buf_set_lines(0, 0, -1, v:false, ['api 17 edited'])" >/dev/null
+"$live/bin/ferry-host" draft >/dev/null
+for _ in $(seq 40); do [ "$(hmark 'api 17 edited')" = "▶ 1" ] && break; sleep 0.05; done
+check "upgrade from note api 17: a save updates the open note's row" "▶ 1 none 1" \
+  "$(hmark 'api 17 edited') $(hmark 'api 17 draft')"
+"$live/bin/ferry-host" stop
 
 # --- overrides and a missing or hung ghostty ------------------------------------
 FERRY_GUI_FONT='Other Font:h15' FERRY_GUI_BG='#112233' "$host" ensure >/dev/null

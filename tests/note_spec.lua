@@ -186,16 +186,16 @@ local p6, id6 = show()
 check("next show resumes the draft", p5 .. " " .. id5 .. " keep me",
   p6 .. " " .. id6 .. " " .. table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|"))
 
--- --- history sidebar excludes the current note -----------------------------
+-- --- history sidebar lists the current note, marked open (H9) -------------
 local _, id9 = show()
 set({ "listed elsewhere" })
 vim.cmd("silent write")
 local hist = require("ferry.history")
 local function listed(id)
-  for _, r in ipairs(hist.load()) do if r.id == id then return true end end
+  for _, r in ipairs(hist.load()) do if r.id == id then return r.open and "open" or true end end
   return false
 end
-check("history excludes the current note, file and all", false, listed(id9))
+check("history lists the current note, marked open", "open", listed(id9))
 check("history lists other notes", true, listed(id1))
 show()
 set({})

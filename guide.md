@@ -161,9 +161,10 @@ empty note, or one unchanged from its starting text, also cancels.
 ## Browse history
 
 `:History` or `<leader>h` toggles a sidebar on the left (it opens with the
-note) listing every note file but the current one, drafts included: pinned
-first, then newest first by day, marked `★` pinned, `●` draft, `~`
-cancelled, with the target app and first line; `<Tab>` jumps back. Opening
+note) listing every note file, drafts included: pinned first, then newest
+first by day, marked `▶` the open note (once it has a file), `★` pinned,
+`●` draft, `~` cancelled, with the target app and first line (the open
+note's row follows its saves); `<Tab>` jumps back. Opening
 it first catches up with files changed outside ferry. The note
 keys work there too and act on the note: `<C-x>`, `ZZ`, `:wq` and `:x` send
 it, `<C-q>` and `ZQ` cancel, `:q` hides and `<C-s>` toggles Flow.
@@ -182,7 +183,9 @@ edited is a draft until sent again), `s` opens
 it and sends it again, `y` copies it, `P` pins or unpins it, `d` deletes it
 after a confirm (to `.trash`), `K` previews it (`Esc` closes), `i` inserts
 it into the current note, `R` catches up with the folder and refreshes,
-and `q` closes the sidebar.
+and `q` closes the sidebar. On the open note's `▶` row, `<CR>` focuses the
+note, `s` sends it like `<C-x>`, `y`, `K` and `P` act on it, and `d` and
+`i` refuse with a notice (`<C-q>` cancels it).
 
 ## Notes are files
 

@@ -94,10 +94,13 @@ local function say(msg, level) require("ferry.notice").notify(msg, level) end
 -- 15: one-line notices; a wiped buffer's note keeps its fork's file id.
 -- 16: a pending $EDITOR edit wins show, talk, release and draft.
 -- 17: browse (the history sidebar focused after show; a pending edit wins it too).
-M.api = 17
+-- 18: history api 6 (the open note listed, marked ▶); every note write
+-- tells the sidebar (history.note_saved); pin_open.
+M.api = 18
 
 -- history api 4: the browser on the notes index (open, send, pin, ...,
--- / search; opening syncs); 5: one-line notices. A sidebar the old
+-- / search; opening syncs); 5: one-line notices; 6: the open note listed,
+-- marked ▶ (note_saved updates a saved note's row). A sidebar the old
 -- module opened keeps its keys bound to the old functions (and, before
 -- api 3, lists rows of the old database), so rebind its keys to the new
 -- ones and list it again.
@@ -116,7 +119,7 @@ local function refresh_later(hist)
 end
 
 local function history()
-  return current("ferry.history", 5, function(_, new)
+  return current("ferry.history", 6, function(_, new)
     if new.is_open() then
       new.bind_keys(new.state.buf)
       refresh_later(new)
@@ -222,7 +225,9 @@ end
 -- otherwise); the notes folder is the file's own. Jobs still running are
 -- kept in `indexing` until they exit, for M.wait_index.
 local indexing, index_n = {}, 0
-local function index(path)
+-- done (optional) runs once the job has exited (from a libuv callback:
+-- it may only schedule).
+local function index(path, done)
   -- Spelled the way the notes folder is (nvim resolves /tmp to
   -- /private/tmp in buffer names), so the index keeps one path per file.
   local dir = vim.fn.fnamemodify(path, ":h")
@@ -233,8 +238,22 @@ local function index(path)
   index_n = index_n + 1
   local n = index_n
   local ok, obj = pcall(vim.system, { repo_root() .. "/bin/ferry-notes", "index", path },
-    { text = true, env = { FERRY_NOTES_DIR = dir } }, function() indexing[n] = nil end)
-  if ok then indexing[n] = obj end
+    { text = true, env = { FERRY_NOTES_DIR = dir } }, function()
+      indexing[n] = nil
+      if done then done() end
+    end)
+  if ok then indexing[n] = obj elseif done then done() end
+end
+
+-- Tell an open history sidebar that a note file was written, once its
+-- index run has ended, on the main loop (never inside the :write that
+-- wrote it), so its row shows the new text (history api 6: note_saved; an
+-- older module has none).
+local function saved(path)
+  vim.schedule(function()
+    local hist = package.loaded["ferry.history"]
+    if hist and type(hist.note_saved) == "function" then pcall(hist.note_saved, path) end
+  end)
 end
 
 -- Wait (up to ms each) for the background index jobs, so a list that
@@ -369,7 +388,7 @@ local function write_note(buf, opts)
   end
   remember(buf, vim.fn.sha256(text))
   vim.bo[buf].modified = false
-  index(path)
+  index(path, function() saved(path) end)
   return true
 end
 
@@ -944,6 +963,42 @@ end
 -- Cancel, Hide) that finish or hide it.
 function M.current()
   return M.state.note
+end
+
+-- Pin (on) or unpin the current note's file, for the browser's P on its
+-- row: its unsaved text is saved first, then only `pinned` changes (not
+-- `updated`), and the bytes are remembered as ferry's own write, so the
+-- next save never takes the pin for an outside edit. A file changed outside
+-- ferry is left alone. Returns true, or false after a notice.
+function M.pin_open(on)
+  local note = M.state.note
+  if not note then return false end
+  local buf = note_buf(note)
+  if not save(buf) then return false end
+  local path = vim.api.nvim_buf_get_name(buf)
+  if not readable(path) then
+    say("ferry: the note has no file yet; type something first", vim.log.levels.WARN)
+    return false
+  end
+  if not ours(buf, path) then
+    say("ferry: the note's file changed outside ferry, so it was not pinned", vim.log.levels.WARN)
+    return false
+  end
+  local meta, body = store.read(path)
+  if not meta then
+    say("ferry: cannot read " .. path, vim.log.levels.WARN)
+    return false
+  end
+  store.set(meta, "pinned", on and "true" or nil)
+  local text = store.format(meta, body)
+  local ok, err = store.write(path, meta, body)
+  if not ok then
+    say("ferry: could not pin " .. path .. ": " .. tostring(err), vim.log.levels.ERROR)
+    return false
+  end
+  remember(buf, vim.fn.sha256(text))
+  index(path)
+  return true
 end
 
 -- Forget the current note so the next show() opens a fresh one.
