@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Draw ferry's app icon once: a white ferry on blue water in a rounded
-square, 512x512 RGBA. Standard library only; the output is deterministic.
-Then build the macOS icon from it: an .iconset with every standard size
-made by sips, packed by iconutil into a .icns next to the PNG.
+square, 1024x1024 RGBA (the largest .iconset size, so nothing is upscaled).
+Standard library only; the output is deterministic. The drawing is in
+units of the icon's side, so SIZE alone sets the resolution. Then build the
+macOS icon from it: an .iconset whose 1024 entry is the PNG itself and
+whose smaller sizes sips downsizes from it, packed by iconutil into a .icns
+next to the PNG.
 
     python3 assets/make-icon.py             # writes assets/ferry.png and ferry.icns
     python3 assets/make-icon.py out.png     # writes out.png and out.icns
@@ -19,7 +22,7 @@ import sys
 import tempfile
 import zlib
 
-SIZE = 512
+SIZE = 1024
 SS = 3  # supersamples per axis, for anti-aliased edges
 
 
@@ -126,8 +129,16 @@ def png(raw):
 ICONSET = [(n, scale) for n in (16, 32, 128, 256, 512) for scale in (1, 2)]
 
 
+def png_width(path):
+    with open(path, "rb") as f:
+        head = f.read(24)
+    return struct.unpack(">I", head[16:20])[0]
+
+
 def icns(src, out):
-    """Pack src (a square PNG) into out (.icns) with sips and iconutil."""
+    """Pack src (a SIZE x SIZE PNG) into out (.icns) with sips and iconutil."""
+    if png_width(src) != SIZE:
+        sys.exit("%s is not %dx%d; run without --icns to redraw it" % (src, SIZE, SIZE))
     work = tempfile.mkdtemp(prefix="ferry-icon.")
     try:
         iconset = os.path.join(work, "ferry.iconset")
@@ -135,8 +146,12 @@ def icns(src, out):
         for n, scale in ICONSET:
             px = n * scale
             name = "icon_%dx%d%s.png" % (n, n, "@2x" if scale == 2 else "")
-            subprocess.run(["sips", "-z", str(px), str(px), src, "--out", os.path.join(iconset, name)],
-                           check=True, stdout=subprocess.DEVNULL)
+            dest = os.path.join(iconset, name)
+            if px == SIZE:
+                shutil.copyfile(src, dest)
+            else:
+                subprocess.run(["sips", "-z", str(px), str(px), src, "--out", dest],
+                               check=True, stdout=subprocess.DEVNULL)
         subprocess.run(["iconutil", "-c", "icns", iconset, "-o", out], check=True)
     finally:
         shutil.rmtree(work)
