@@ -5,7 +5,15 @@ it needs to go. Today that is the text field that was focused when you
 started. The next direction is one always-running instance, targets chosen
 after writing, and a browsable notes history.
 
-Read `motivations.md` first for the why and the goal list. This file is the
+**Ground truths:** `GROUND_TRUTHS.md` holds the requirements, decisions
+and non-obvious implementation details Joe has settled. Read it before
+`motivations.md`. If code, tests or any other note conflicts with it, the
+ground truth is right: fix the other side, or raise the conflict with Joe.
+Never edit `GROUND_TRUTHS.md` without Joe's explicit go-ahead; propose a
+change under "Waiting on Joe" in `milestones.md`. When Joe settles a new
+requirement or decision, propose adding it there.
+
+Then read `motivations.md` for the why and the goal list. This file is the
 practical context an agent needs to work on the code.
 
 ## Status
