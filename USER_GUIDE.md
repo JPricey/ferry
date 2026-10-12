@@ -227,6 +227,17 @@ insert mode at the end of the text).
 Cancelled notes that had text are marked with `~`. The history lives in
 `~/Library/Application Support/ferry/history.sqlite`.
 
+## Teach Flow the words you keep fixing
+
+Wispr Flow cannot see the edits you make in ferry, so it keeps getting the
+same words wrong. Run `~/Code/ferry/bin/ferry-corrections` to see them: it
+matches each Flow dictation into ferry with the note you sent and prints
+the fixes you made in at least two notes, most common first, like
+`2× cube control → kubectl`. `--min 1` shows one-off fixes too, and words
+already in Flow's Dictionary are left out. It only reads Flow's database
+and never changes it. Add the words you want in Flow's own Dictionary (in
+the Wispr Flow app).
+
 ## The window
 
 The first time, the window opens centred on your main screen at half its

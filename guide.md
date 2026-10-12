@@ -184,6 +184,14 @@ open and a copy waits in the outbox.
 a note file (`--dry-run` first lists what it would write). It only reads
 the database, and a second run writes nothing new.
 
+## Words you keep correcting
+
+`bin/ferry-corrections` compares what Wispr Flow typed into ferry with the
+notes you sent and prints the fixes you made in at least two notes, like
+`2× cube control → kubectl` (`--min N`, `--json`). It only reads Flow's
+database and never changes it; add the words you want in Flow's own
+Dictionary.
+
 ## Edit the buffer
 
 It is a normal Neovim buffer with your config, plus markdown filetype, soft
