@@ -555,8 +555,9 @@ check("the conflict file is <name>.conflict-<time>.md, fresh id, conflict_of, sa
 check("outside edit + typing: one notice naming both files", true,
   #notices == 1 and notices[1]:find(vim.fs.basename(po), 1, true) ~= nil
   and notices[1]:find(vim.fs.basename(cf), 1, true) ~= nil)
-check("the buffer and the current note move to the conflict file", true,
-  same(vim.api.nvim_buf_get_name(bo), cf) and same(note.current().path, cf) and note.current().id == rawget(cm, "id"))
+check("the buffer and the current note move to the conflict file; the note keeps its id", true,
+  same(vim.api.nvim_buf_get_name(bo), cf) and same(note.current().path, cf) and note.current().id == ido
+  and note.current().file_id == rawget(cm, "id"))
 -- Later saves go to the conflict file, with no further notice.
 body({ "ferry typing more" })
 changed(bo)
@@ -620,7 +621,10 @@ local fstem = vim.fs.basename(pf):gsub("%.md$", "")
 local function fconf()
   return vim.tbl_filter(function(x) return x:find(fstem, 1, true) ~= nil end, conflicts())
 end
-local fid = note.current() and note.current().id
+local fid = (vim.b[bf].ferry or {}).file_id
+check("fork keeps the note's id (the history key); the fork's id is file_id", "true true",
+  tostring(note.current() ~= nil and note.current().id == idf and vim.b[bf].ferry.id == idf) .. " "
+  .. tostring(fid ~= nil and fid ~= idf))
 check("fork's first write fails: no conflict file yet, original kept, buffer on the conflict name", "0 "
   .. T .. "outside first true", #fconf() .. " " .. nfile(pf) .. " "
   .. tostring(vim.api.nvim_buf_get_name(bf):find(fstem .. ".conflict-", 1, true) ~= nil))
@@ -658,6 +662,31 @@ check("an outside write right after ferry's write: kept, ferry's next save forks
 check("the outside write after ferry's: the buffer moved to the conflict file", true,
   same(vim.api.nvim_buf_get_name(bg), gs[1] or ""))
 vim.cmd("Cancel")
+
+-- The blank note after a Submit, written, edited outside and forked, then
+-- shown and submitted: one history row, under the note's own id, submitted.
+reset(); notices = {}
+show()
+set({ "to: app:com.example.app#4242", "sent before" })
+vim.cmd("Submit")
+local bb = vim.api.nvim_get_current_buf()
+local bid = (vim.b.ferry or {}).id
+set({ "typed into blank" })
+vim.cmd("write")
+local bp = vim.api.nvim_buf_get_name(bb)
+store.write(bp, store.read(bp), { "blank edited elsewhere" })
+set({ "typed into blank", "more" })
+vim.cmd("write")
+local bfork = (vim.b[bb].ferry or {}).file_id
+show()
+vim.cmd("Submit")
+local function rows_for(ids)
+  local q = "SELECT id || ':' || outcome FROM sessions WHERE id IN ('" .. table.concat(ids, "','") .. "') ORDER BY id"
+  return vim.trim(vim.fn.system({ "sqlite3", vim.env.FERRY_DB, q }))
+end
+check("blank note forked then submitted: one history row, under the note's id, submitted",
+  "true " .. tostring(bid) .. ":submitted",
+  tostring(bfork ~= nil and bfork ~= bid) .. " " .. rows_for({ tostring(bid), tostring(bfork) }))
 
 -- Cancel when the note file cannot be written: nothing is lost.
 reset(); notices = {}

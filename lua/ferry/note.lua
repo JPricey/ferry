@@ -277,8 +277,8 @@ end
 -- fresh id, `conflict_of` and state draft) and its path. The buffer keeps
 -- the fork's id and conflict_of (b:ferry.file_id, .conflict_of), so a
 -- conflict file that is never written or is deleted later is recreated
--- as the fork, never under the original's id. b:ferry.id stays: it keys
--- the note's history row.
+-- as the fork, never under the original's id. b:ferry.id and note.id
+-- stay: they key the note's history row (note.file_id names the file).
 local function fork(buf, path)
   local meta = store.read(path) or {}
   local b = vim.b[buf].ferry or {}
@@ -295,7 +295,7 @@ local function fork(buf, path)
   rename(buf, new)
   vim.b[buf].ferry_disk = nil
   local note = M.state.note
-  if note and note.buf == buf then note.path, note.id = new, id end
+  if note and note.buf == buf then note.path, note.file_id = new, id end
   index(path)
   vim.notify(string.format("ferry: %s was changed outside ferry and is kept as it is; your text is in %s",
     vim.fn.fnamemodify(path, ":t"), vim.fn.fnamemodify(new, ":t")), vim.log.levels.WARN)
@@ -445,12 +445,13 @@ local function attach(buf)
   au("BufWipeout", function() stop_timer(buf) end)
 end
 
--- Stamp a note's file name with the time now: <dir>/<date>-<time>-<id8>.md.
+-- Stamp a note's file name with the time now: <dir>/<date>-<time>-<id8>.md,
+-- with the file's id (a fork's own, else the note's).
 -- A buffer already open is renamed (no file is moved).
 local function place(note, dir)
   note.created = os.time()
   local old = note.path
-  note.path = dir .. "/" .. store.name(note.created, note.id)
+  note.path = dir .. "/" .. store.name(note.created, note.file_id or note.id)
   local buf = note.buf
   if buf and vim.api.nvim_buf_is_valid(buf) then
     local m = vim.b[buf].ferry
@@ -789,7 +790,7 @@ local function resume(opts)
   vim.b[buf].ferry = meta
   if note.unstarted then
     note.unstarted = nil
-    history_start(note.id, spec, "")
+    history_start(meta.id or note.id, spec, "")
   end
   -- Put the cursor back where draft() found it. In insert mode it may sit
   -- just past the end of the line, which normal mode cannot hold.
