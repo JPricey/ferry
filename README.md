@@ -28,7 +28,7 @@ press, and does nothing else.
 
 ```sh
 ./install.sh --check   # what is installed and what is missing; changes nothing
-./install.sh           # install what is missing; safe to re-run
+./install.sh           # install what is missing, reload; rerun after any change
 ```
 
 `install.sh` is the one setup script. It needs Homebrew (and stops with the
@@ -38,8 +38,12 @@ Ghostty is there (optional: Neovide copies its font and colour), symlinks
 the module into `~/.hammerspoon/`, builds `~/Applications/ferry.app` (a
 wrapper whose executable is a symlink to Neovide's real binary, with the
 icons `assets/ferry.icns` and `assets/ferry.png`), appends a `require("ferry")` block to
-`~/.hammerspoon/init.lua` once, runs `bin/ferry-migrate-init`, and starts
-Hammerspoon or reloads it with `hs -c 'hs.reload()'`. Each step prints `ok`,
+`~/.hammerspoon/init.lua` once (adding `require("hs.ipc")` to a block
+without it), runs `bin/ferry-migrate-init`, and starts Hammerspoon or
+reloads it with `hs -c`. It then waits for Hammerspoon to answer and prints
+what ferry bound (`ferry.status()`): one `ok bound ctrl+alt+v` line per
+hotkey and URL, or `missing:` with the failure. It never restarts the nvim
+server (modules reload there when their api version changes). Each step prints `ok`,
 `installed`, `skipped` or `missing: <what to do>`. New setup steps go here.
 For now it also moves an install from before the project was called ferry
 (once; see `install.sh` for the steps).

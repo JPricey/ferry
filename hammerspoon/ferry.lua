@@ -25,6 +25,10 @@
 -- hammerspoon://ferry-browse) toggles like the hotkey but shows the notes
 -- browser (`ferry-host browse`): the sidebar focused on the newest note.
 --
+-- Status: M.status() lists what start() bound, one line per hotkey and URL
+-- (`ok bound ctrl+alt+v`, or `missing: ...` with the failure); install.sh
+-- asks for it with `hs -c` after reloading Hammerspoon.
+--
 -- Usage in ~/.hammerspoon/init.lua:
 --   local ferry = require("ferry")
 --   ferry.start()  -- Ctrl+Option+V; pass { hotkey = { mods, key } } to change
@@ -248,6 +252,11 @@ local function comboKey(mods, key)
   return table.concat(parts, "+")
 end
 
+-- What the last start() bound, for M.status(): one line each,
+-- "ok bound <what>", "skipped <what>" or "missing: <what>: <why>".
+local bound = nil
+local function report(line) bound[#bound + 1] = line end
+
 -- Bind one hotkey: pressed (and released, when given). suffix marks the
 -- log and alert lines (" (talk)"); url names the URL to use instead when
 -- the bind fails. Returns the hotkey object, or nil.
@@ -265,10 +274,12 @@ local function bindHotkey(spec, suffix, url, pressed, released)
   end
   if bok and obj then
     log.i("bound " .. combo .. suffix)
+    report("ok bound " .. combo .. suffix)
     return obj
   end
-  log.e("failed to bind " .. combo .. suffix .. ": "
-    .. (bok and "hs.hotkey.bind returned nil" or tostring(obj)))
+  local why = bok and "hs.hotkey.bind returned nil" or tostring(obj)
+  log.e("failed to bind " .. combo .. suffix .. ": " .. why)
+  report("missing: " .. combo .. suffix .. ": " .. why .. "; use hammerspoon://" .. url)
   hs.alert.show("ferry: could not bind " .. combo .. suffix .. "; use hammerspoon://" .. url)
   return nil
 end
@@ -417,6 +428,7 @@ function M.start(cfg)
   -- alerts again.
   if M._instance then pcall(M._instance.disable) end
   M._instance, M.mode, M._unavailable = nil, "unavailable", nil
+  bound = {}
   building = nil
   local ok, c, why = pcall(startInstance)
   if ok and c then
@@ -454,6 +466,7 @@ function M.start(cfg)
       if other and comboKey(spec[1], spec[2]) == comboKey(other[1], other[2]) then
         local combo = comboName(spec[1], spec[2])
         log.e(label .. " hotkey " .. combo .. " is the same as the " .. name .. "; not bound")
+        report("missing: " .. combo .. " (" .. label .. "): same keys as the " .. name .. "; not bound")
         hs.alert.show("ferry: " .. key .. " " .. combo .. " is the same as the " .. name .. "; not bound")
         return true
       end
@@ -463,6 +476,7 @@ function M.start(cfg)
   local talk = M.config.talkHotkey
   if not talk then
     log.i("talk hotkey off")
+    report("skipped talk hotkey (talkHotkey = false)")
   elseif not clashes("talk", "talkHotkey", talk, { { "hotkey", hk } }) then
     -- Pressed and released; no repeat function, so holding does nothing more.
     M.talkHotkeyObj = bindHotkey(talk, " (talk)", "ferry-talk?state=down|up", M.talkDown, M.talkUp)
@@ -470,10 +484,30 @@ function M.start(cfg)
   local browse = M.config.browseHotkey
   if not browse then
     log.i("browse hotkey off")
+    report("skipped browse hotkey (browseHotkey = false)")
   elseif not clashes("browse", "browseHotkey", browse, { { "hotkey", hk }, { "talkHotkey", talk } }) then
     M.browseHotkeyObj = bindHotkey(browse, " (browse)", "ferry-browse", M.browse)
   end
+  -- The URLs, after the hotkeys in M.status(). ferry-submit and ferry-hide
+  -- are the instance's (bindURLs); without them nothing is delivered.
+  for _, u in ipairs({ "ferry-start", "ferry-talk", "ferry-edit", "ferry-browse" }) do
+    report("ok bound hammerspoon://" .. u)
+  end
+  if M._instance and M._instance._boundURLs then
+    report("ok bound hammerspoon://ferry-submit")
+    report("ok bound hammerspoon://ferry-hide")
+  else
+    local why = (M._unavailable or "the instance did not bind them"):gsub("^ferry: ", "")
+    report("missing: hammerspoon://ferry-submit and ferry-hide: " .. why)
+  end
   return M
+end
+
+-- What the last start() bound, one line per hotkey and URL, for
+-- install.sh (`hs -c 'return package.loaded.ferry.status()'`). Read-only.
+function M.status()
+  if not bound then return "missing: ferry.start() has not run; see the Hammerspoon console" end
+  return table.concat(bound, "\n")
 end
 
 return M

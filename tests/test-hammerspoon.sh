@@ -50,6 +50,7 @@ local function check(name, want, got)
     fail = 1
   end
 end
+local function has(s, needle) return (s or ""):find(needle, 1, true) ~= nil end
 
 local swork = assert(os.getenv("FERRY_SWORK"))
 -- A fake neovide on the search path: host.available() finds it. start()
@@ -115,6 +116,24 @@ do
   check("browse: bound ctrl+alt+n (browse) logged", true, rec:hasLog("i", "bound ctrl+alt+n (browse)"))
   check("defaults: notesDir nil reaches the controller as nil", nil, M._instance.config.notesDir)
   check("defaults: no alert", 0, #rec.alerts)
+  -- M.status(): what install.sh prints after a reload, one line each.
+  local before = #rec.hotkeyBinds .. " " .. #rec.alerts .. " " .. #rec.tasks .. " " .. #rec.logs
+  check("status: one ok line per hotkey and URL", table.concat({
+    "ok bound ctrl+alt+v", "ok bound ctrl+alt+b (talk)", "ok bound ctrl+alt+n (browse)",
+    "ok bound hammerspoon://ferry-start", "ok bound hammerspoon://ferry-talk",
+    "ok bound hammerspoon://ferry-edit", "ok bound hammerspoon://ferry-browse",
+    "ok bound hammerspoon://ferry-submit", "ok bound hammerspoon://ferry-hide" }, "\n"), M.status())
+  check("status: read-only (no binds, alerts, tasks or logs)", before,
+    #rec.hotkeyBinds .. " " .. #rec.alerts .. " " .. #rec.tasks .. " " .. #rec.logs)
+  M.start(opts())
+  check("status: a second start() reports afresh", 9, select(2, M.status():gsub("\n", "")) + 1)
+end
+
+-- M.status() before start(): one missing line.
+do
+  local _, M = fresh()
+  check("status before start: missing line", "missing: ferry.start() has not run; see the Hammerspoon console",
+    M.status())
 end
 
 -- The browse hotkey and hammerspoon://ferry-browse reach the controller's
@@ -145,6 +164,8 @@ do
   check("browseHotkey=false: browse hotkey off logged", true, rec:hasLog("i", "browse hotkey off"))
   check("browseHotkey=false: no object, no alert", "nil 0", tostring(M.browseHotkeyObj) .. " " .. #rec.alerts)
   check("browseHotkey=false: ferry-browse still bound", "function", type(rec.urlBinds["ferry-browse"]))
+  check("browseHotkey=false: status skips it", true,
+    has(M.status(), "\nskipped browse hotkey (browseHotkey = false)\n") and not has(M.status(), "(browse)"))
 end
 
 -- The browse bind fails: error log and one alert marked (browse) naming
@@ -163,6 +184,9 @@ do
   check("failing browse bind: hotkey and talk still bound", "true true",
     tostring(rec:hasLog("i", "bound ctrl+alt+v")) .. " " .. tostring(rec:hasLog("i", "bound ctrl+alt+b (talk)")))
   check("failing browse bind: no object", nil, M.browseHotkeyObj)
+  check("failing browse bind: status has a missing line with the why and the URL", true,
+    has(M.status(), "\nmissing: ctrl+alt+n (browse): hs.hotkey.bind returned nil; use hammerspoon://ferry-browse\n")
+      and has(M.status(), "ok bound ctrl+alt+v\n"))
 end
 
 -- browseHotkey the same combo as the hotkey or the talk hotkey (other
@@ -177,6 +201,8 @@ for _, c in ipairs({ { "hotkey", { { "control", "option" }, "V" } }, { "talkHotk
     rec:hasLog("e", "is the same as the " .. c[1] .. "; not bound"))
   check("browse same as " .. c[1] .. ": one alert naming browseHotkey", true,
     #rec.alerts == 1 and rec.alerts[1]:find("browseHotkey", 1, true) ~= nil)
+  check("browse same as " .. c[1] .. ": status missing line", true,
+    has(M.status(), " (browse): same keys as the " .. c[1] .. "; not bound\n"))
 end
 
 -- talkHotkey = false: only the main hotkey, logged off.
@@ -275,6 +301,9 @@ do
   check("erroring bind does not raise", true, ok)
   check("erroring bind logs error", true, rec:hasLog("e", "refused by macOS"))
   check("erroring bind alerts", 1, #rec.alerts)
+  check("erroring bind: status starts with the missing line and its error", true,
+    has(M.status(), "missing: ctrl+alt+v: ") and has(M.status(), "refused by macOS; use hammerspoon://ferry-start\n")
+      and M.status():find("missing:", 1, true) == 1)
 end
 
 -- Re-running start() deletes the previous hotkey.
@@ -465,7 +494,6 @@ local function sh(cmd)
   p:close()
   return (out:gsub("%s+$", ""))
 end
-local function has(s, needle) return (s or ""):find(needle, 1, true) ~= nil end
 local function count(list, x)
   local k = 0
   for _, v in ipairs(list) do if v == x then k = k + 1 end end
@@ -500,6 +528,9 @@ do
   check("Neovide missing: no server pre-warm", 0, #rec.tasks)
   check("Neovide missing: ferry-submit and ferry-hide not bound", "nil nil",
     tostring(rec.urlBinds["ferry-submit"]) .. " " .. tostring(rec.urlBinds["ferry-hide"]))
+  check("Neovide missing: status ends with the missing line", true,
+    has(M.status(), "\nmissing: hammerspoon://ferry-submit and ferry-hide: Neovide is not installed — run ./install.sh")
+      and M.status():sub(-#"run ./install.sh") == "run ./install.sh")
   rec.hotkeyBinds[1].fn()
   rec:openURL("ferry-start", {})
   rec:runTimers()

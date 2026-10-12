@@ -33,9 +33,29 @@ case "$*" in
   "install neovim") printf '#!/bin/sh\nexit 0\n' > "$FAKE_BIN/nvim"; chmod +x "$FAKE_BIN/nvim" ;;
 esac
 SH
-for name in open hs; do
-  printf '#!/bin/bash\necho "%s $*" >> "$FAKE_CALLS"\n' "$name" > "$fakes/$name"
-done
+printf '#!/bin/bash\necho "open $*" >> "$FAKE_CALLS"\n' > "$fakes/open"
+# hs answers like Hammerspoon's CLI: the reload drops the connection
+# (non-zero); the "fresh state?" poll answers false FAKE_HS_STALE times
+# (the old state still answering), then true; ferry's status prints
+# $FAKE_HS_STATUS. FAKE_HS_ANSWER=0: nothing answers; FAKE_HS_DIES=1:
+# nothing answers once reloaded.
+cat > "$fakes/hs" <<'SH'
+#!/bin/bash
+echo "hs $*" >> "$FAKE_CALLS"
+cmd=${!#}
+[ "${FAKE_HS_ANSWER:-1}" = 1 ] || exit 69
+[ -e "$FAKE_CALLS.reloaded" ] && [ "${FAKE_HS_DIES:-0}" = 1 ] && exit 69
+ans=true
+case "$cmd" in
+  *"hs.reload()"*) : > "$FAKE_CALLS.reloaded"; exit 69 ;;
+  *ferryInstallReload*)
+    n=$(cat "$FAKE_CALLS.stale" 2>/dev/null || echo 0)
+    if [ "$n" -lt "${FAKE_HS_STALE:-0}" ]; then echo $((n + 1)) > "$FAKE_CALLS.stale"; ans=false; fi ;;
+  *status*) ans=$FAKE_HS_STATUS ;;
+esac
+# FAKE_HS_COLOR=1: wrapped in colour codes, as a CLI might print them.
+if [ "${FAKE_HS_COLOR:-0}" = 1 ]; then printf '\033[35m%s\033[0m\n' "$ans"; else printf '%s\n' "$ans"; fi
+SH
 cat > "$fakes/pgrep" <<'SH'
 #!/bin/bash
 echo "pgrep $*" >> "$FAKE_CALLS"
@@ -43,17 +63,29 @@ echo "pgrep $*" >> "$FAKE_CALLS"
 SH
 chmod +x "$fakes"/*
 
+# ferry.status() with the defaults (as tests/test-hammerspoon.sh checks).
+all_bound="ok bound ctrl+alt+v
+ok bound ctrl+alt+b (talk)
+ok bound ctrl+alt+n (browse)
+ok bound hammerspoon://ferry-start
+ok bound hammerspoon://ferry-talk
+ok bound hammerspoon://ferry-edit
+ok bound hammerspoon://ferry-browse
+ok bound hammerspoon://ferry-submit
+ok bound hammerspoon://ferry-hide"
+
 # setup <name> [fake...]: a scenario dir $s with home/, apps/, bin/ (the
 # given fakes, default all four) and an empty calls log; exports the env.
 setup() {
   s="$tmp/$1"; shift
   mkdir -p "$s/home" "$s/apps" "$s/bin" "$s/tmp"
-  : > "$s/calls"
+  : > "$s/calls"; rm -f "$s/calls.reloaded" "$s/calls.stale"
   local f
   for f in ${*:-brew open hs pgrep}; do cp "$fakes/$f" "$s/bin/"; done
   export HOME="$s/home" FERRY_APPS_DIR="$s/apps" FAKE_CALLS="$s/calls" \
-    FAKE_BIN="$s/bin" PATH="$s/bin:/usr/bin:/bin" FAKE_HS_RUNNING=0 TMPDIR="$s/tmp"
-  unset FERRY_INSTALL_DRY_RUN
+    FAKE_BIN="$s/bin" PATH="$s/bin:/usr/bin:/bin" FAKE_HS_RUNNING=0 TMPDIR="$s/tmp" \
+    FERRY_HS_WAIT=1 FAKE_HS_STATUS="$all_bound"
+  unset FERRY_INSTALL_DRY_RUN FAKE_HS_ANSWER FAKE_HS_DIES FAKE_HS_STALE FAKE_HS_COLOR
   # Guard: the system tools must resolve to the fakes, or not at all.
   for f in brew open hs pgrep nvim; do
     case "$(command -v "$f" || echo none)" in
@@ -72,6 +104,19 @@ snapshot() {
   done)
 }
 init_lua() { echo "$s/home/.hammerspoon/init.lua"; }
+# The hs calls in order, one word each.
+hs_order() {
+  local l
+  grep '^hs ' "$s/calls" | while IFS= read -r l; do
+    case "$l" in
+      "hs -t 1 -c return true") echo ask ;;
+      *"hs.reload()"*) echo reload ;;
+      "hs -t 1 -c return _G.ferryInstallReload == nil") echo poll ;;
+      *"package.loaded.ferry"*"f.status()"*) echo status ;;
+      *) echo "other($l)" ;;
+    esac
+  done | tr '\n' ' ' | sed 's/ $//'
+}
 say_line() { printf '%-10s %s' "$1" "$2"; } # one install.sh status line
 
 check "bash -n install.sh" 0 "$(bash -n "$install" >/dev/null 2>&1; echo $?)"
@@ -98,6 +143,8 @@ check "fresh: module symlinked" "$root/hammerspoon/ferry.lua" "$(readlink "$s/ho
 check "fresh: one init.lua block" 1 "$(grep -cF 'require("ferry")' "$(init_lua)")"
 check "fresh: migration ran" 1 "$(grep -c '^ok  *no old Option+V hotkey' <<<"$out")"
 check "fresh: Hammerspoon started" 1 "$(grep -cx 'open -g -a Hammerspoon' "$s/calls")"
+check "fresh: waits for it, then asks ferry's status (no reload)" "poll status" "$(hs_order)"
+check "fresh: one ok bound line per hotkey and URL" 9 "$(grep -c '^ok  *bound ' <<<"$out")"
 check "fresh: no missing lines" 0 "$(grep -c '^missing:' <<<"$out")"
 check "fresh: manual checklist printed" 1 "$(grep -c 'Accessibility for Hammerspoon' <<<"$out")"
 check "fresh: no Ghostty Automation step" 0 "$(grep -c 'Automation for Ghostty' <<<"$out")"
@@ -203,20 +250,85 @@ check "old key: reports the removal" 1 "$(grep -c '^installed *removed the old O
 check "old key: still one block" 1 "$(grep -cF 'require("ferry")' "$(init_lua)")"
 check "old key: other lines kept" 1 "$(grep -c 'autoStartFlow = false' "$(init_lua)")"
 
-# Hammerspoon already running with a working hs: reloads with hs -c.
+# Hammerspoon already running with a working hs: reloads with hs -c, waits
+# until the new state answers (the old one answers twice first), then asks
+# ferry what it bound and prints one ok line each.
 setup running; apps_ghostty_flow
-export FAKE_HS_RUNNING=1
+export FAKE_HS_RUNNING=1 FAKE_HS_STALE=2
 out=$(bash "$install" 2>&1); st=$?
-check "running: exits 0" 0 $st
-check "running: hs -c reload called" 1 "$(grep -cx 'hs -t 5 -c hs.reload()' "$s/calls")"
+reload='hs -t 5 -c _G.ferryInstallReload = true; hs.reload()'
+check "running: exits 0, everything installed" "0 1" "$st $(grep -cx 'Everything is installed.' <<<"$out")"
+check "running: hs -c reload called once" 1 "$(grep -cxF "$reload" "$s/calls")"
 check "running: not opened again" 0 "$(grep -c '^open' "$s/calls")"
-check "running: reports reload" 1 "$(grep -c '^ok  *Hammerspoon reloaded' <<<"$out")"
+check "running: reports reload" 1 "$(grep -cx 'ok  *Hammerspoon reloaded' <<<"$out")"
+check "running: answers?, reload, 3 polls (2 stale), then status, in order" "ask reload poll poll poll status" \
+  "$(hs_order)"
+for b in "ctrl+alt+v" "ctrl+alt+b (talk)" "ctrl+alt+n (browse)" "hammerspoon://ferry-edit" "hammerspoon://ferry-submit"; do
+  check "running: prints ok bound $b" 1 "$(grep -cxF "$(say_line ok "bound $b")" <<<"$out")"
+done
+check "running: one ok bound line per hotkey and URL" 9 "$(grep -c '^ok  *bound ' <<<"$out")"
+check "running: no missing lines" 0 "$(grep -c '^missing:' <<<"$out")"
+: > "$s/calls"
+out=$(bash "$install" --check 2>&1)
+check "running --check: never reloads or asks hs" "" "$(cat "$s/calls")"
 
-# Running but no hs CLI: tells Joe to Reload Config.
+# A failed bind in ferry's status: a missing: line with the failure, counted.
+# The answers come in colour codes, which are dropped.
+setup running-failbind; apps_ghostty_flow
+export FAKE_HS_RUNNING=1 FAKE_HS_COLOR=1 \
+  FAKE_HS_STATUS="${all_bound/ok bound ctrl+alt+n (browse)/missing: ctrl+alt+n (browse): hs.hotkey.bind returned nil; use hammerspoon://ferry-browse}"
+out=$(bash "$install" 2>&1)
+check "failed bind: missing: line with the failure" 1 \
+  "$(grep -cxF "$(say_line missing: "ctrl+alt+n (browse): hs.hotkey.bind returned nil; use hammerspoon://ferry-browse")" <<<"$out")"
+check "failed bind: the others still ok, counted once" "8 1" \
+  "$(grep -c '^ok  *bound ' <<<"$out") $(grep -c '^1 item(s) need you' <<<"$out")"
+
+# Hammerspoon never answers after the reload: a missing: line, no status.
+setup running-dies; apps_ghostty_flow
+export FAKE_HS_RUNNING=1 FAKE_HS_DIES=1
+out=$(bash "$install" 2>&1)
+check "dies: did not answer line" 1 "$(grep -c '^missing:  *Hammerspoon did not answer within 1s of the reload: open its console' <<<"$out")"
+check "dies: no bound lines" 0 "$(grep -c 'bound' <<<"$out")"
+
+# Running, hs on PATH but no answer (hs.ipc not loaded yet): Reload Config
+# once, no reload attempted.
+setup running-noipc; apps_ghostty_flow
+export FAKE_HS_RUNNING=1 FAKE_HS_ANSWER=0
+out=$(bash "$install" 2>&1)
+check "no answer: Reload Config once line" 1 "$(grep -c '^missing:  *reload Hammerspoon: the hs CLI got no answer.*Reload Config' <<<"$out")"
+check "no answer: no reload sent" 0 "$(grep -c 'hs.reload()' "$s/calls")"
+
+# Running but no hs CLI: says how to install it, and Reload Config meanwhile.
 setup running-nohs brew open pgrep; apps_ghostty_flow
 export FAKE_HS_RUNNING=1
 out=$(bash "$install" 2>&1)
-check "running, no hs: Reload Config line" 1 "$(grep -c '^missing: *reload Hammerspoon: choose Reload Config' <<<"$out")"
+check "running, no hs: cliInstall hint and Reload Config" 1 \
+  "$(grep -c '^missing:  *the hs CLI: in the Hammerspoon console run hs.ipc.cliInstall(.*) once.*Reload Config' <<<"$out")"
+
+# Not running, no hs CLI: started, then the cliInstall hint.
+setup start-nohs brew open pgrep; apps_ghostty_flow
+out=$(bash "$install" 2>&1)
+check "start, no hs: started, then the cliInstall hint" "1 1" \
+  "$(grep -cx 'ok  *Hammerspoon started' <<<"$out") $(grep -c '^missing:  *the hs CLI (lets ./install.sh reload Hammerspoon and check ferry.s hotkeys): in the Hammerspoon console run hs.ipc.cliInstall(' <<<"$out")"
+
+# An init.lua block without require("hs.ipc"): the line is added above
+# require("ferry") with a .bak; a second run changes nothing.
+setup noipc; apps_ghostty_flow
+mkdir -p "$s/home/.hammerspoon"
+printf -- '-- require("hs.ipc")\nrequire("ferry").start({\n  windowSize = 0.6,\n})\n' > "$(init_lua)"
+cp "$(init_lua)" "$s/orig.lua"
+out=$(bash "$install" --check 2>&1)
+check "no hs.ipc: --check lists it" 1 "$(grep -c '^missing:  *require("hs.ipc") in ' <<<"$out")"
+check "no hs.ipc: --check changes nothing" same "$(cmp -s "$s/orig.lua" "$(init_lua)" && echo same)"
+out=$(bash "$install" 2>&1)
+check "no hs.ipc: line added above require(\"ferry\")" "require(\"hs.ipc\") -- enables the \`hs\` CLI for reloading and debugging|require(\"ferry\").start({" \
+  "$(sed -n '2,3p' "$(init_lua)" | paste -sd'|' -)"
+check "no hs.ipc: other lines kept, .bak is the original" "1 same" \
+  "$(grep -c 'windowSize = 0.6' "$(init_lua)") $(cmp -s "$s/orig.lua" "$(init_lua).bak" && echo same)"
+check "no hs.ipc: reported" 1 "$(grep -c '^installed  *require("hs.ipc") in .*backup' <<<"$out")"
+before=$(snapshot)
+out=$(bash "$install" 2>&1)
+check "no hs.ipc: second run ok, unchanged" "1 $before" "$(grep -c '^ok  *ferry block in ' <<<"$out") $(snapshot)"
 
 # Dry run: prints the commands, runs none of them, writes nothing.
 setup dry; apps_ghostty_flow
