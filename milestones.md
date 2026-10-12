@@ -28,7 +28,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   1. Run `./install.sh` (it installs Neovide with `brew install --cask neovide-app`). Open Neovide once from Applications so macOS stops asking about it, then quit it.
   2. Hammerspoon console → Reload Config. Look for the mode line and no alert. (Without Neovide you get one alert and the old per-press windows.)
   3. From Slack, Ctrl+Option+V: a Neovide window appears with a note in insert mode. Copy the `show: host focused after N ms` line (target under 150 ms; the very first show may be slower).
-  4. Dictate with Flow (hold-to-talk and Ctrl-S): the text lands in Neovide. **This is the key check for the Neovide pick.**
+  4. Dictate with Flow (hold-to-talk and Ctrl-S): the text lands in Neovide. **This is the key check for the Neovide pick.** (2026-10-11: Joe opened it — looks wrong, see "Neovide looks like the terminal".)
   5. Ctrl+Option+V again: Neovide hides and focus returns to Slack. Press again: the same draft is back.
   6. Ctrl-X: Neovide hides and the text lands in Slack. Ctrl-Q on another note: hides, nothing pasted.
   7. 20 presses across Slack, the Claude app and two Ghostty windows: never a second Neovide window, shows look instant, focus always returns to the start window.
@@ -282,6 +282,22 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-11: created at Joe's request ("an installer which installs Neovide / home for any other setup"). Extends the existing `install.sh` instead of adding a second script. Single task written by the orchestrator.
   - 2026-10-11: I1 done and verified (dry run against a copy of Joe's real `init.lua`: only `brew install --cask neovide` and a reload, no file changes). Orchestrator follow-ups: cask renamed to `neovide-app` (Homebrew's current name), `hs` calls read `/dev/null`, `/opt/homebrew/bin/brew` found when not on PATH. Agent checks pass (all 16 test scripts); status → needs-joe.
 
+## Neovide looks like the terminal
+
+- **Status:** in-progress
+- **Needs:** nothing
+- **Deliverable:** the Neovide note looks like Joe's Ghostty sessions (colours, font) and shows the note plus the history sidebar, not nvim-tree.
+- **Scope:**
+  - Joe's report (2026-10-11): "terribly ugly, no color scheme, the left bar is my nerdtree, not prompt history".
+  - Cause: NeoSolarized is set transparent, so `Normal` has `guifg` but no `guibg`; in Ghostty the terminal background (`#001e27`, theme "Solarized Dark Patched") shows through, in Neovide nothing does. Neovide also uses its default font, not Ghostty's `CaskaydiaCove Nerd Font Mono` 13. Joe's config opens nvim-tree on `VimEnter` when buffer 1 is an empty unnamed buffer, which is how the server starts. The note does not open the history sidebar (V0 does).
+  - Do not edit Joe's nvim config.
+- **Agent checks:** headless tests (below); every test passes.
+- **Joe checks:** reload, press the hotkey: Neovide shows his Solarized colours on the right background, his font at his size, the note on the right and the history sidebar on the left, no nvim-tree. Toggling `:History` / `<leader>h` still works.
+- **Tasks:**
+  - [ ] **N1. Note layout and Neovide appearance.** (a) Layout: on `show`, the note is the only normal window in its tab (close others, e.g. nvim-tree) and the history sidebar opens on the left unless `VOICE_VIM_SIDEBAR=0`, same as V0; `<Tab>` still jumps back to the note. (b) Appearance: when a GUI attaches (`UIEnter`, `vim.g.neovide`), set `guifont` and, if `Normal` has no `guibg`, a background — taken from Ghostty's effective config (`ghostty +show-config`: `font-family`, `font-size`, `background`), read once by `bin/voice-vim-host ensure` and passed to the server (e.g. `--cmd 'let g:voicevim_gui = {...}'`), with overrides `VOICE_VIM_GUI_FONT` / `VOICE_VIM_GUI_BG`. Re-apply the background after any `ColorScheme` event. Never change anything when no GUI is attached (terminal sessions keep their transparent look). Files: `lua/voice-vim/note.lua` (or a new `lua/voice-vim/gui.lua`), `bin/voice-vim-host`, `tests/test-host.sh`/`tests/test-note.sh` (or a new test), `guide.md`, `USER_GUIDE.md`. Depends: none. Verify: tests with a temp socket and `--clean` plus a fake `ghostty` first on PATH printing `font-family = Test Mono`, `font-size = 13`, `background = #001e27`: after `show` the tab has exactly the note and the sidebar windows (a pre-opened extra split is closed); with `VOICE_VIM_SIDEBAR=0` only the note; simulating a GUI (`let g:neovide = v:true` + `doautocmd UIEnter`) sets `&guifont` to `Test Mono:h13` and `Normal` guibg to `#001e27` when it had none, and leaves an existing guibg alone; after `colorscheme` changes, the bg is re-applied; without the GUI nothing changes; env overrides win. All other tests pass.
+- **Log:**
+  - 2026-10-11: created from Joe's first look at the Neovide instance. Cause diagnosed with a throwaway server on Joe's config: `colors_name=NeoSolarized`, `termguicolors=1`, `Normal guifg=#839496` with no `guibg`. Single task written by the orchestrator.
+
 ## Notes and history browser
 
 - **Status:** todo
@@ -374,3 +390,4 @@ Record each change here, dated, with the reason.
 - 2026-10-11: added "Close the session window cleanly" (Hammerspoon closes the session window on submit and cancel; cancel refocuses the start window), with no needs.
 - 2026-10-11: Joe picked Neovide as the host (spike → done without trying all three). B2 keeps the old path as a fallback when Neovide is missing; B3 (removing it) waits for Joe's checks of the one instance.
 - 2026-10-11: added "One installer" at Joe's request: `install.sh` becomes the single setup script (Homebrew check, Hammerspoon, Neovide, Neovim, checks for Ghostty/Wispr Flow/python3/sqlite3, Hammerspoon link and migration, manual-steps checklist, `--check`).
+- 2026-10-11: added "Neovide looks like the terminal" after Joe's first look: transparent colorscheme shows no background in Neovide, default font, nvim-tree instead of the history sidebar.
