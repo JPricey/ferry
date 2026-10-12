@@ -31,6 +31,23 @@ EOF
 chmod +x "$work/bin/open"
 # A failing ghostty: ferry-host ensure finds no GUI settings.
 printf '#!/bin/sh\nexit 1\n' >"$work/bin/ghostty"; chmod +x "$work/bin/ghostty"
+# A fake ferry-corrections (never Flow's real files): logs its arguments
+# and FERRY_NOTES_DIR, then answers as <work>/corr.mode says: nodb (exit 2,
+# Flow's database missing), empty (no suggestions), slow (1.5 s, then two
+# suggestions), else 0.4 s, then two suggestions.
+cat >"$work/bin/ferry-corrections" <<EOF
+#!/bin/sh
+printf '%s %s\n' "\$*" "\$FERRY_NOTES_DIR" >>"$work/corr.log"
+mode=\$(cat "$work/corr.mode" 2>/dev/null)
+case \$mode in
+  nodb) echo "ferry-corrections: no Wispr Flow database: /nowhere/flow.sqlite" >&2; exit 2 ;;
+  empty) echo '[]'; exit 0 ;;
+  slow) sleep 1.5 ;;
+  *) sleep 0.4 ;;
+esac
+echo '[{"count": 3, "wrong": "cube control", "right": "kubectl"}, {"count": 2, "wrong": "neo vim", "right": "Neovim"}]'
+EOF
+chmod +x "$work/bin/ferry-corrections"
 export PATH="$work/bin:$PATH"
 
 fail=0
@@ -245,6 +262,40 @@ check "<C-s> in the sidebar starts Flow from the note, in insert mode at the end
 send '<C-s>'; opened >/dev/null
 
 check "server still running after the sidebar keys" "$pid" "$(ask 'getpid()')"
+
+# --- fix-ups and :Corrections, typed ---------------------------------------
+# <leader> is \ (--clean). Typed through the main loop, as Joe would.
+# Wait (up to 2 s) for the buffer to read $1 (lines joined by |), print it.
+body_is() { local b; for _ in $(seq 40); do b=$(ask 'join(getline(1, "$"), "|")'); [ "$b" = "$1" ] && break; sleep 0.05; done; printf '%s' "$b"; }
+"$host" show com.example.app 4242 >/dev/null
+send '<Esc>ggdGiwe should<CR>deploy it.<Esc>\fj'
+check "\\fj after typing joins the broken line" "we should deploy it." "$(body_is "we should deploy it.")"
+send 'ggdGium, so we ship<Esc>\ff'
+check "\\ff strips the filler" "so we ship" "$(body_is "so we ship")"
+send 'ccthey put it their<Esc>\fw'
+check "\\fw cycles the word at the cursor" "they put it there" "$(body_is "they put it there")"
+echo slow >"$work/corr.mode"; rm -f "$work/corr.log"
+t0=$(perl -MTime::HiRes=time -e 'printf "%d", time * 1000')
+send ':Corrections<CR>'
+for _ in $(seq 20); do [ "$(ask 'bufname()')" = ferry://corrections ] && break; sleep 0.05; done
+got=$(ask 'bufname()." ".getline(1)." ".&buftype')
+t1=$(perl -MTime::HiRes=time -e 'printf "%d", time * 1000')
+check ":Corrections opens its split at once and the server answers while ferry-corrections runs (1.5 s)" \
+  "ferry://corrections Looking for corrections… nofile yes" "$got $([ $((t1 - t0)) -lt 1000 ] && echo yes || echo "no ($((t1 - t0)) ms)")"
+for _ in $(seq 60); do [ "$(ask 'getline(1)')" != "Looking for corrections…" ] && break; sleep 0.05; done
+check ":Corrections lists the suggestions, ferry-corrections ran with --json and the notes folder" \
+  "3× cube control → kubectl|2× neo vim → Neovim --json $FERRY_NOTES_DIR" \
+  "$(ask 'join(getline(1, "$"), "|")') $(cat "$work/corr.log")"
+send 'jy'
+for _ in $(seq 40); do [ "$(clipped)" = Neovim ] && break; sleep 0.05; done
+check "y copies the line's right-hand word" "Neovim" "$(clipped)"
+rm -f "$work/open.log"
+send 'o'
+check "o opens Wispr Flow" "-a Wispr Flow" "$(opened)"
+send 'q'
+for _ in $(seq 40); do [ "$(ask 'bufexists("ferry://corrections")')" = 0 ] && break; sleep 0.05; done
+check "q closes the split, back in the note" "1 0" "$(ask 'exists("b:ferry")') $(ask 'bufexists("ferry://corrections")')"
+rm -f "$work/corr.mode"
 "$host" stop
 check "submit file survives ferry-host stop" "to outbox" "$(cat "$file" 2>&1)"
 

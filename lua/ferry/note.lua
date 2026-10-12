@@ -32,6 +32,10 @@
 -- Cancel and Hide first wait for Flow's last paste when Flow is recording
 -- (flow.finish_then), so the last words land in the note, not the target.
 --
+-- Fix-ups (lua/ferry/fixup.lua): :FixJoin, :FixFillers, <leader>fj, ff,
+-- fw. :Corrections lists the words Joe keeps fixing after Flow
+-- (lua/ferry/corrections.lua) so he can add them in Flow's Dictionary.
+--
 -- Hold to talk: Hammerspoon starts Flow itself, then calls show{talk} (or
 -- talk() when the note is already in front), which tells flow a recording
 -- is in progress (flow.adopt_start). Key up calls release(): the stop goes
@@ -96,7 +100,8 @@ local function say(msg, level) require("ferry.notice").notify(msg, level) end
 -- 17: browse (the history sidebar focused after show; a pending edit wins it too).
 -- 18: history api 6 (the open note listed, marked ▶); every note write
 -- tells the sidebar (history.note_saved); pin_open.
-M.api = 18
+-- 19: fix-ups (fixup api 1) and :Corrections (corrections api 1) in a note.
+M.api = 19
 
 -- history api 4: the browser on the notes index (open, send, pin, ...,
 -- / search; opening syncs); 5: one-line notices; 6: the open note listed,
@@ -626,6 +631,22 @@ end
 -- Swappable (tests use a recording stub).
 M.host = M.default_host
 
+-- fixup api 1: :FixJoin, :FixFillers, <leader>fj/ff/fw (lua/ferry/fixup.lua).
+-- corrections api 1: the :Corrections split (lua/ferry/corrections.lua),
+-- loaded on first use. A note shown by an older module gains both on its
+-- next show (apply_options runs on every show). A module that fails to
+-- load costs its keys, never the show: one notice.
+local function fix_keys(buf)
+  local ok, err = pcall(function() current("ferry.fixup", 1).setup(buf) end)
+  if not ok and not M.state.fixup_failed then
+    M.state.fixup_failed = true
+    say("ferry: fix-up keys unavailable: " .. tostring(err), vim.log.levels.WARN)
+  end
+  vim.api.nvim_buf_create_user_command(buf, "Corrections", function()
+    current("ferry.corrections", 1).open({ dir = notes_dir() })
+  end, { force = true, desc = "ferry: words you keep fixing after Wispr Flow" })
+end
+
 -- Buffer and window settings, keys and commands of a note. Run with the
 -- note displayed in the current window.
 function M.apply_options(buf)
@@ -651,6 +672,7 @@ function M.apply_options(buf)
   vim.api.nvim_buf_create_user_command(buf, "History", function() M.toggle_history() end,
     { force = true })
   vim.keymap.set("n", "<leader>h", "<Cmd>History<CR>", { buffer = buf, silent = true })
+  fix_keys(buf)
   -- Submit, cancel and hide. A note never quits the server: :wq and :x
   -- submit, :q hides and keeps the draft.
   local function cmd(name, fn)

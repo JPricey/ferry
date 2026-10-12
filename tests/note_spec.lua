@@ -776,5 +776,60 @@ for _, mode in ipairs({ "throw", "drop" }) do
 end
 os.remove(work .. "/open.fail")
 
+-- --- fix-ups and :Corrections (V4) ------------------------------------------
+-- tests/test-note.sh puts a fake ferry-corrections first on PATH; it
+-- answers as <work>/corr.mode says.
+note.host = stub
+show()
+check("note has <leader>fj, ff (n, x), fw and :FixJoin, :FixFillers, :Corrections",
+  "<Cmd>FixJoin<CR> <Cmd>FixFillers<CR> :FixFillers<CR> 1 2 2 2",
+  table.concat({ vim.fn.maparg("<leader>fj", "n"), vim.fn.maparg("<leader>ff", "n"), vim.fn.maparg("<leader>ff", "x"),
+    vim.fn.empty(vim.fn.maparg("<leader>fw", "n", false, true)) == 0 and 1 or 0,
+    vim.fn.exists(":FixJoin"), vim.fn.exists(":FixFillers"), vim.fn.exists(":Corrections") }, " "))
+set({ "hello", "world" })
+vim.cmd("FixJoin")
+check(":FixJoin on hello/world gives one line", "hello world", table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|"))
+local nwin = vim.api.nvim_get_current_win()
+local function corr(mode)
+  if mode then vim.fn.writefile({ mode }, work .. "/corr.mode") else os.remove(work .. "/corr.mode") end
+  local t0 = vim.uv.hrtime()
+  vim.cmd("Corrections")
+  local ms = (vim.uv.hrtime() - t0) / 1e6
+  local first = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  vim.wait(5000, function() return vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] ~= first[1] end, 20)
+  return ms, table.concat(first, "|"), table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|")
+end
+local ms, first, got = corr(nil)
+check(":Corrections returns at once with a nofile split saying it is looking (the fake takes 0.4 s)",
+  "true Looking for corrections… nofile ferry://corrections true",
+  table.concat({ tostring(ms < 300), first, vim.bo.buftype, vim.api.nvim_buf_get_name(0),
+    tostring(vim.api.nvim_get_current_win() ~= nwin) }, " "))
+check(":Corrections then lists the suggestions", "3× cube control → kubectl|2× neo vim → Neovim", got)
+clip["+"] = nil; notices = {}
+vim.api.nvim_win_set_cursor(0, { 1, 0 })
+vim.api.nvim_feedkeys("y", "mx", false)
+check("y copies the right-hand word, one notice", "kubectl true",
+  table.concat(clip["+"] or {}, "|") .. " " .. tostring((notices[1] or ""):find("copied kubectl", 1, true) ~= nil))
+os.remove(log)
+vim.api.nvim_feedkeys("o", "mx", false)
+wait_for("Wispr")
+check("o runs open -a 'Wispr Flow'", "-a Wispr Flow\n", opened())
+local cbuf = vim.api.nvim_get_current_buf()
+vim.v.errmsg = ""
+local _, _, again = corr("nodb")
+check("a missing Flow database: one line in the same split, no error",
+  "true No Wispr Flow database (/nowhere/flow.sqlite), so nothing to suggest. ",
+  tostring(vim.api.nvim_get_current_buf() == cbuf) .. " " .. again .. " " .. vim.v.errmsg)
+clip["+"] = nil; notices = {}
+vim.api.nvim_feedkeys("y", "mx", false)
+check("y on a line with no suggestion copies nothing, one notice", "none ferry: no suggestion on this line",
+  tostring(clip["+"] and table.concat(clip["+"], "|") or "none") .. " " .. tostring(notices[1]))
+_, _, again = corr("empty")
+check("no suggestions: one line", "No corrections seen in 2 or more notes yet.", again)
+vim.api.nvim_feedkeys("q", "mx", false)
+check("q closes the split, back in the note", "true false",
+  tostring(vim.api.nvim_get_current_win() == nwin) .. " " .. tostring(vim.api.nvim_buf_is_valid(cbuf)))
+os.remove(work .. "/corr.mode")
+
 say(fail == 0 and "note_spec: all ok" or "note_spec: FAILED")
 os.exit(fail)

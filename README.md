@@ -106,7 +106,9 @@ commands live in `lua/ferry/note.lua`.
 - `bin/ferry-notes` — the search index over the notes folder (index, sync,
   list with `--query`, pin, delete); only a cache of the files.
 - `lua/ferry/fixup.lua` — post-dictation fix-ups (join breaks, fillers,
-  homophones); not wired into the note yet.
+  homophones), on keys in the note and the `$EDITOR` edit buffer.
+- `lua/ferry/corrections.lua` — `:Corrections`: runs `bin/ferry-corrections`
+  in the background into a split; copy a word, open Wispr Flow to add it.
 - `bin/ferry-migrate-history` — one-off: turns the old history
   database's rows into note files (reads the database only; safe to rerun).
 - `bin/ferry-corrections` — prints the word fixes you keep making after

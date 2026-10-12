@@ -88,7 +88,7 @@ rtp_fix="local ferryr = $(luastr "$root"); if not vim.tbl_contains(vim.opt.rtp:g
 # The note module, as a Lua expression (repo put on rtp first). A server
 # started before the module last changed (note.api differs) reloads it,
 # keeping its state and host.
-note_api=18
+note_api=19
 note_mod="(function(want) $rtp_fix; local n = require(\"ferry.note\"); if n.api == want then return n end; package.loaded[\"ferry.note\"] = nil; local ok, m = pcall(require, \"ferry.note\"); if not ok then package.loaded[\"ferry.note\"] = n; return n end; m.state = n.state; if n.host ~= n.default_host then m.host = n.host end; return m end)($note_api)"
 
 # The GUI module, as a Lua expression (rtp fixed by the caller). A server

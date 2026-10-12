@@ -16,6 +16,10 @@
 --                                       (git's only reliable abort)
 --   :q, :Hide                           hide; the edit stays pending
 --   <C-s> (n, i), :Dictate              Wispr Flow hands-free
+--   :FixJoin, :FixFillers, <leader>fj, ff, fw, :Corrections
+--                                       fix-ups and the corrections list,
+--                                       as in a note (fixup api 1,
+--                                       corrections api 1)
 -- Submit, Cancel and Hide first wait for Flow's last paste when Flow is
 -- recording (flow.finish_then), so the last words land in the file and a
 -- cancelled dictation lands nowhere.
@@ -57,7 +61,8 @@ local M = {}
 -- loaded module lacks; a reload keeps M.state.
 -- api 3: on_show, on_talk, on_release, on_draft.
 -- api 4: a finished Submit is recorded as a sent note; start takes dir.
-M.api = 4
+-- api 5: fix-ups and :Corrections in the edit buffer.
+M.api = 5
 
 -- The pending edit: { file, done, dir = notes folder or nil, started =
 -- Unix time, buf, tab = edit tab, prev_tab = the tab it came from,
@@ -74,6 +79,22 @@ end
 
 local function alert(msg)
   vim.schedule(function() require("ferry.notice").notify(msg, vim.log.levels.ERROR) end)
+end
+
+-- A module at api `want` or later: one loaded before that is reloaded,
+-- keeping its M.state (as note.lua's current() does); a failed reload
+-- keeps the loaded one.
+local function current(name, want)
+  local old = require(name)
+  if (old.api or 0) >= want then return old end
+  package.loaded[name] = nil
+  local ok, m = pcall(require, name)
+  if ok and type(m) == "table" and (m.api or 0) >= want then
+    m.state = old.state
+    return m
+  end
+  package.loaded[name] = old
+  return old
 end
 
 -- Write "<code>\n" to done whole: a temp file renamed over it, so a
@@ -238,6 +259,13 @@ local function apply_options(buf)
   cmd("Cancel", function() require("ferry.edit").cancel(buf) end)
   cmd("Hide", function() require("ferry.edit").hide(buf) end)
   cmd("Dictate", function() require("ferry.flow").start() end)
+  -- Fix-ups and :Corrections, as in a note; a fix-up module that fails to
+  -- load costs only its keys.
+  local fok, ferr = pcall(function() current("ferry.fixup", 1).setup(buf) end)
+  if not fok then alert("ferry: fix-up keys unavailable: " .. tostring(ferr)) end
+  vim.api.nvim_buf_create_user_command(buf, "Corrections", function()
+    current("ferry.corrections", 1).open({ dir = (M.state.edit or {}).dir })
+  end, { force = true, desc = "ferry: words you keep fixing after Wispr Flow" })
   local o = { buffer = buf, silent = true }
   vim.keymap.set("n", "ZZ", "<Cmd>Submit<CR>", o)
   vim.keymap.set({ "n", "i" }, "<C-x>", "<Cmd>Submit<CR>", o)

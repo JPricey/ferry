@@ -689,6 +689,26 @@ check "upgrade from note api 17: a save updates the open note's row" "▶ 1 none
   "$(hmark 'api 17 edited') $(hmark 'api 17 draft')"
 "$live/bin/ferry-host" stop
 
+# Live upgrade from cb1dd2f (H9 on main: note api 18, fix-ups not wired):
+# the draft's buffer has no fix-up keys and no :Corrections; the next show
+# reloads note and the same buffer gains them, and :FixJoin works there.
+live=$work/live-h9; old_tree cb1dd2f "$live"
+"$live/bin/ferry-host" ensure >/dev/null
+p18=$("$live/bin/ferry-host" show com.example.app 4242)
+ask "nvim_buf_set_lines(0, 0, -1, v:false, ['hello', 'world'])" >/dev/null
+"$live/bin/ferry-host" draft >/dev/null
+fixmaps() { ask 'maparg("<leader>fj", "n")."|".maparg("<leader>ff", "x")."|".!empty(maparg("<leader>fw", "n", 0, 1))."|".exists(":FixJoin")."|".exists(":Corrections")'; }
+check "cb1dd2f server: note api 18, no fix-up keys or :Corrections in the note" "18 ||0|0|0" \
+  "$(lua 'require"ferry.note".api') $(fixmaps)"
+upgrade "$live"
+check "upgrade from note api 18: show reloads note, same note and buffer text" "$p18 $napi hello|world" \
+  "$("$live/bin/ferry-host" show com.example.app 4242) $(lua 'require"ferry.note".api') $(body)"
+check "upgrade from note api 18: the note gains <leader>fj, ff, fw, :FixJoin and :Corrections" \
+  "<Cmd>FixJoin<CR>|:FixFillers<CR>|1|2|2" "$(fixmaps)"
+ask "execute('FixJoin')" >/dev/null
+check "upgrade from note api 18: :FixJoin on hello/world gives one line" "hello world" "$(body)"
+"$live/bin/ferry-host" stop
+
 # --- overrides and a missing or hung ghostty ------------------------------------
 FERRY_GUI_FONT='Other Font:h15' FERRY_GUI_BG='#112233' "$host" ensure >/dev/null
 check "FERRY_GUI_FONT and FERRY_GUI_BG win over Ghostty" "{'bg': '#112233', 'font': 'Other Font:h15'}" "$(ask 'string(g:ferry_gui)')"
