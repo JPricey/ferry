@@ -13,8 +13,9 @@ local M = {}
 
 -- Bumped when the module changes in a way a running server must pick up:
 -- the note module reloads an older one (keeping M.state). 1: open() binds
--- the note keys on the sidebar.
-M.api = 1
+-- the note keys on the sidebar. 2: <CR> and p take the whole note as its
+-- body (no `to:` header).
+M.api = 2
 
 M.width = 38
 M.state = { win = nil, buf = nil, main_win = nil, rows = {}, preview_win = nil }
@@ -118,24 +119,16 @@ local function text_lines(r)
   return vim.split(t, "\n", { plain = true })
 end
 
--- First line of the note's body: 1, or 2 below a `to:` target header,
--- which insert and paste_to_target leave alone.
-local function body_start(buf)
-  local spec = require("ferry.target").split(vim.api.nvim_buf_get_lines(buf, 0, 1, false))
-  return spec and 2 or 1
-end
-
 function M.insert()
   local r = current_row(); if not r then return end
   local win = main_win(); if not win then return end
   local buf = vim.api.nvim_win_get_buf(win)
   local lines = text_lines(r)
-  local from = body_start(buf)
-  local body = vim.api.nvim_buf_get_lines(buf, from - 1, -1, false)
+  local body = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
   vim.api.nvim_set_current_win(win)
-  if #body == 0 or (#body == 1 and body[1] == "") then
-    vim.api.nvim_buf_set_lines(buf, from - 1, -1, false, lines)
-    vim.api.nvim_win_set_cursor(win, { from - 1 + #lines, #lines[#lines] })
+  if #body == 1 and body[1] == "" then
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.api.nvim_win_set_cursor(win, { #lines, #lines[#lines] })
   else
     vim.api.nvim_put(lines, "l", true, true)
   end
@@ -145,7 +138,7 @@ function M.paste_to_target()
   local r = current_row(); if not r then return end
   local win = main_win(); if not win then return end
   local buf = vim.api.nvim_win_get_buf(win)
-  vim.api.nvim_buf_set_lines(buf, body_start(buf) - 1, -1, false, text_lines(r))
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, text_lines(r))
   vim.api.nvim_set_current_win(win)
   vim.cmd("Submit")
 end

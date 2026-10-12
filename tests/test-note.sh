@@ -71,8 +71,8 @@ ask "luaeval('(function() _G.ferryclip = {}; local c, p = {}, {}; for _, r in ip
 clipped() { ask "luaeval('table.concat(_G.ferryclip[\"+\"] or {}, \"|\")')"; }
 
 "$host" show com.example.app 4242 >/dev/null
-check "after show: line 1 is the target header, insert mode on row 2" "to: app:com.example.app#4242 i 2" \
-  "$(ask 'getline(1)." ".mode()." ".line(".")')"
+check "after show: no to: line (one empty line), insert mode on row 1" "1  i 1" \
+  "$(ask 'line("$")." ".getline(1)." ".mode()." ".line(".")')"
 id=$(ask 'b:ferry.id'); waitrow "$id" open
 send 'server draft<Esc>:q<CR>'
 check ":q hides via ferry-hide" hide "$(url_kind "$(opened)")"
@@ -87,9 +87,12 @@ check ":wq submits the resumed draft" "submit submitted" "$(url_kind "$(opened)"
 
 "$host" show com.example.app 4242 >/dev/null
 id=$(ask 'b:ferry.id'); waitrow "$id" open
-send 'by keys<C-x>'
-check "<C-x> in insert mode submits" "submit submitted" "$(url_kind "$(opened)") $(outcome "$id")"
-check "the history row's target is the header's spec" "app:com.example.app#4242" \
+send 'by keys<CR>to: app:com.other#7<C-x>'
+url=$(opened)
+file=$(python3 -c 'import sys, urllib.parse as u; print(u.parse_qs(u.urlsplit(sys.argv[1]).query)["file"][0])' "${url#-g }")
+check "<C-x> in insert mode submits the whole buffer to the captured target" \
+  "submit submitted by keys|to: app:com.other#7" "$(url_kind "$url") $(outcome "$id") $(paste -sd'|' - <"$file")"
+check "the history row's target is the captured spec" "app:com.example.app#4242" \
   "$("$db" get "$id" | python3 -c 'import json,sys;print(json.load(sys.stdin)["target"])')"
 
 "$host" show com.example.app 4242 >/dev/null
@@ -155,8 +158,8 @@ send 'typed by keys'
 sleep 1.5
 check "after typing and waiting 1.5 s: the file has state draft, the target and the text" \
   "draft|app:com.example.app#4242|typed by keys" "$(fkey "$nf" state)|$(fkey "$nf" target)|$(fbody "$nf")"
-check "... while buffer line 1 is the to: line (no frontmatter in the buffer)" \
-  "to: app:com.example.app#4242|typed by keys" "$(ask 'join(getline(1, "$"), "|")')"
+check "... while the buffer is the body only (no frontmatter, no to: line)" \
+  "typed by keys" "$(ask 'join(getline(1, "$"), "|")')"
 send ' and saved<Esc>:w<CR>'
 for _ in $(seq 40); do [ "$(fbody "$nf")" = "typed by keys and saved" ] && break; sleep 0.05; done
 check ":w writes the frontmatter, then the body" "---|id: $id|typed by keys and saved|" \
@@ -180,7 +183,7 @@ nf=$(ask 'expand("%:p")')
 send 'gone soon'
 sleep 1.5
 had=$(exists "$nf")
-send '<Esc>:2,$d<CR>ZQ'
+send '<Esc>:%d<CR>ZQ'
 check "blank Cancel leaves no file (it had one after autosave)" "yes hide no" "$had $(url_kind "$(opened)") $(exists "$nf")"
 "$host" show com.example.app 4242 >/dev/null
 nf=$(ask 'expand("%:p")')
@@ -232,10 +235,10 @@ d=$(ask 'g:ferry_draft')
 check ":q in the sidebar hides and keeps the draft, target and all" "hide app:com.example.app#4242 kept open 2" \
   "$(url_kind "$(opened)") $(fkey "$d" target) $(fbody "$d") $(outcome "$id") $(ask 'winnr("$")')"
 side_key '<C-s>' ' more'
-# Joe stays in insert mode (GT 8), at the end of the body, off the to: line.
+# Joe stays in insert mode (GT requirement 7), at the end of the body.
 check "<C-s> in the sidebar starts Flow from the note, in insert mode at the end of the body" \
-  "-g wispr-flow://start-hands-free 1 i 1 1 1" \
-  "$(opened) $(ask 'exists("b:ferry")') $(ask "mode().' '.(line('.') == line('\$')).' '.(col('.') == col('\$')).' '.(line('.') > 1)")"
+  "-g wispr-flow://start-hands-free 1 i 1 1" \
+  "$(opened) $(ask 'exists("b:ferry")') $(ask "mode().' '.(line('.') == line('\$')).' '.(col('.') == col('\$'))")"
 send '<C-s>'; opened >/dev/null
 
 check "server still running after the sidebar keys" "$pid" "$(ask 'getpid()')"

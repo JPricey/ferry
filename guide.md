@@ -20,23 +20,11 @@ lands in another app; if the note does not come up within 5 seconds, or Flow
 was slow to start, an alert says Flow may still be recording. `talkHotkey =
 false` turns it off, and one equal to `hotkey` is not bound.
 
-## Choose where it goes: the `to:` line
-
-The note's first line names its target, for example
-`to: app:com.tinyspeck.slackmacgap#4242` (the app and window you pressed
-from), or `to: clipboard` when no app was captured; you type below it, and
-only the text below it is sent. Edit it like any text to send elsewhere
-(`app:<bundle id>` with an optional `#<window id>`); delete it to use the
-captured window. `to: clipboard` copies the text and hides the note (see
-below). Any other target (`tmux:…`, `fleet:…`) or a line that does not
-parse is not sent yet: the text goes on the clipboard with a "copied —
-target …" message and the note stays open.
-
 ## Copy and hide
 
 `Ctrl-Y` (insert or normal mode, also from the history sidebar) or `:Copy`
-puts the text below the `to:` line on the clipboard and hides the note,
-whatever the `to:` line says. The note is recorded as sent to `clipboard`
+puts the note's text on the clipboard and hides the note; `Ctrl-X` does the
+same when no app was captured. The note is recorded as sent to `clipboard`
 and the next press opens a fresh one; a blank note is cancelled instead.
 If the clipboard does not take the text, it says "could not copy to the
 clipboard — note kept" and the note stays open.
@@ -44,8 +32,8 @@ clipboard — note kept" and the note stays open.
 ## Drafts
 
 Hiding the note (the hotkey, or `:q`) keeps it as a draft, and the next
-press brings the same note back, aimed at the window you pressed from (an
-unedited `to:` line follows; one you edited is kept). Drafts also save
+press brings the same note back, aimed at the window you pressed from
+that time. Drafts also save
 themselves about a second after you stop typing, so nothing is lost if
 Neovim quits. If
 Flow is still recording from `Ctrl-S`, the note stays up until Flow's text
@@ -169,7 +157,7 @@ and `<C-s>` toggles Flow from insert mode at the end of the note.
 ## Reuse a past dictation
 
 In the sidebar, `<CR>` inserts the entry into your buffer, `p` replaces the
-note's text with it (keeping the `to:` line) and sends it, `y` copies it to the clipboard, `K` previews the
+note's text with it and sends it, `y` copies it to the clipboard, `K` previews the
 full text (`Esc` closes it), `d` deletes it, `R` refreshes the list and `q`
 closes the sidebar. Cancelled notes with text show a `~`.
 
@@ -178,7 +166,7 @@ closes the sidebar. Cancelled notes with text show a `~`.
 Every note is a markdown file in `~/notes/scratchpads`, named
 `<date>-<time>-<id>.md`, with its state (draft, sent or cancelled), target
 and times in frontmatter above the text. The note window shows only the
-`to:` line and the text; `:w` saves the file. A note gets its file on its
+text; `:w` saves the file. A note gets its file on its
 first change, sent and cancelled notes keep theirs, and only cancelling a
 blank note deletes its file.
 

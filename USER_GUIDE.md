@@ -45,11 +45,11 @@ position and the `~/.hammerspoon` setup (with an `init.lua` backup).
 ## Your first dictation
 
 1. Click into a text field, for example a Slack message box.
-2. Press **Ctrl+Option+V**. The ferry window appears with a note in
-   insert mode. Its first line, `to: app:…`, says where the text will go
-   (Slack's window here); the cursor waits on the line below. The very
-   first press after Hammerspoon starts also opens Neovide, so it takes a
-   moment; after that it is instant.
+2. Press **Ctrl+Option+V**. The ferry window appears with an empty note
+   in insert mode, and ferry remembers the window you pressed from
+   (Slack's here) as where the text will go. The very first press after
+   Hammerspoon starts also opens Neovide, so it takes a moment; after that
+   it is instant.
 3. Dictate with your usual Wispr Flow shortcut. Flow types into the note.
 4. Fix anything with Vim.
 5. Press **Ctrl-X**. The window hides, Slack comes back to the front, and
@@ -65,8 +65,7 @@ Steps 2 and 3 can be one: hold **Ctrl+Option+B**, speak, let go (see
 There is only ever one ferry window. The hotkey shows it from any app
 and hides it again from the note, putting you back in the window you came
 from. A hidden note is kept as a draft: the next press brings the same note
-back, and Ctrl-X then sends it to the window you pressed from that time
-(its `to:` line follows, unless you edited it).
+back, and Ctrl-X then sends it to the window you pressed from that time.
 
 `:q` in the note also hides it; it never quits ferry. After you send or
 cancel, the next press starts a fresh note.
@@ -80,8 +79,8 @@ Each note is a markdown file in `~/notes/scratchpads` (ferry creates the
 folder), named after the time it started, like
 `2026-10-12-091502-3f9a1c2e.md`. The top of the file holds the note's
 details (state: draft, sent or cancelled; where it goes; when it was
-written and sent), then your text. In ferry you only see the `to:` line
-and your text, never those details.
+written and sent), then your text. In ferry you only see your text,
+never those details.
 
 Nothing is deleted: sent and cancelled notes keep their files. The one
 exception is cancelling a note with no text, which leaves no file. A note
@@ -110,7 +109,7 @@ All of these work in insert mode, so you never have to leave it.
 | --- | --- |
 | `Ctrl-X` | Send the text to the window you started from. `ZZ`, `:Submit`, `:wq` and `:x` do the same. |
 | `Ctrl-Q` | Throw the note away without sending. `ZQ` and `:Cancel` do the same. |
-| `Ctrl-Y` | Copy the text to the clipboard and hide, whatever the `to:` line says. `:Copy` does the same. |
+| `Ctrl-Y` | Copy the text to the clipboard and hide. `:Copy` does the same. |
 | `Ctrl+Option+V` | Hide the note and keep it as a draft. `:q` does the same. |
 | `Ctrl+Option+B` (hold) | Wispr Flow listens while held and its text is added at the cursor; the note stays up. From any other app it shows the note first. |
 | `Ctrl-S` | Start Wispr Flow listening; press again to stop. |
@@ -178,26 +177,13 @@ told apart.
 - After every send, the text stays on your clipboard, so you can paste it
   again elsewhere.
 
-## The `to:` line
+## Copy instead of sending
 
-Every note starts with a line like `to: app:com.tinyspeck.slackmacgap#4242`:
-the app (its bundle id) and window you pressed the hotkey from. It reads
-`to: clipboard` when no app was captured. Only the text below it is sent.
-
-- **Send somewhere else** by editing the line: `app:<bundle id>` sends to
-  that app's front window, and `app:<bundle id>#<window id>` to that
-  window.
-- **Delete the line** and Ctrl-X sends to the window you pressed from.
-- **Hide and come back from another app**: an untouched `to:` line follows
-  you to the new window; one you edited stays as you left it.
-- **Copy instead of sending.** With `to: clipboard`, Ctrl-X copies the
-  text and hides the note. Ctrl-Y does the same from any note, whatever
-  its `to:` line says, also while the history sidebar is focused. Then
-  press Cmd+V wherever you want it.
-- **Other targets are not sent yet.** `to: tmux:…`, `to: fleet:…`, or a
-  line ferry cannot read: Ctrl-X puts the text on the clipboard, says
-  "copied — target …", and leaves the note open so you can fix the line or
-  paste by hand.
+Ctrl-Y (or `:Copy`) puts the whole note on the clipboard and hides the
+window, also while the history sidebar is focused; then press Cmd+V
+wherever you want it. Ctrl-X does the same when ferry captured no app to
+send to. Ctrl-X always sends to the window you pressed the hotkey from
+last; to send somewhere else, copy with Ctrl-Y and paste there.
 
 ## Cancelling
 
@@ -225,7 +211,7 @@ On an entry in the sidebar:
 | Key | What it does |
 | --- | --- |
 | `Enter` | Insert it into your buffer |
-| `p` | Replace your note's text with it and send it (your `to:` line stays) |
+| `p` | Replace your note's text with it and send it |
 | `y` | Copy it to the clipboard |
 | `K` | Preview the full text |
 | `d` | Delete it |
@@ -306,9 +292,8 @@ with how long it took, the target, the window, each check, the paste.
 - **Nothing was pasted.** Look for "copied — paste manually". The text is
   on your clipboard; paste it by hand. The console shows which check
   failed.
-- **"could not copy to the clipboard — note kept".** A copy (Ctrl-Y,
-  `to: clipboard`, or another target's fallback) did not reach the
-  clipboard. Nothing was sent or recorded; the note is still open with
+- **"could not copy to the clipboard — note kept".** A copy (Ctrl-Y, or
+  Ctrl-X with no app captured) did not reach the clipboard. Nothing was sent or recorded; the note is still open with
   your text. Try again, or select the text and copy it yourself.
 - **The hotkey only shows an alert.** Neovide is missing, or setting up
   the one window failed when Hammerspoon loaded; the alert and the

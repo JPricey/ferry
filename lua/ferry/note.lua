@@ -10,8 +10,8 @@
 -- Notes persist as markdown files (GROUND_TRUTHS decision 11), one per
 -- note, <notes dir>/<YYYY-MM-DD-HHMMSS>-<id8>.md (lua/ferry/store.lua):
 -- frontmatter (id, state, created, updated, sent, target, ...), then the
--- body. The buffer never shows the frontmatter: it is the `to:` line plus
--- the body, and BufWriteCmd (also :w) writes the file through store.write,
+-- body. The buffer never shows the frontmatter: it is the body only, and
+-- BufWriteCmd (also :w) writes the file through store.write,
 -- then runs `ferry-notes index <file>` in the background. A note gets its
 -- file on its first change (an untouched blank note leaves nothing);
 -- drafts autosave about 1 s after a change, and on draft and Hide. Submit
@@ -35,14 +35,12 @@
 -- is in progress (flow.adopt_start). Key up calls release(): the stop goes
 -- through flow's queue and waits for the paste like a Submit would.
 --
--- Line 1 of a note is its target header, `to: <spec>` (lua/ferry/
--- target.lua), and the rest is the body. A fresh note's header is the
--- captured target (b:ferry.auto_spec); a resume rewrites it only while it
--- still equals auto_spec, so an edited header is kept. Submit sends the body
--- to the header's target, or to the captured one when line 1 is not a header.
--- `to: clipboard` copies the body and hides; :Copy (<C-y>) does that for any
--- header. The file always stores a target (the captured one when line 1 is
--- not a header), so a body line starting with `to:` stays body on reload.
+-- Submit sends the whole buffer to the target captured at the latest show
+-- (b:ferry.target and .window; every show and resume takes the new one),
+-- or copies it when nothing was captured; :Copy (<C-y>) copies it and
+-- hides. The file stores that target as a spec (lua/ferry/target.lua), or
+-- `clipboard` after a copy. Note api 11 and older showed it as a `to:`
+-- header on line 1; see drop_header for the upgrade.
 --
 -- ferry never overwrites an outside edit: it remembers the bytes of the
 -- note file as it last wrote or read it (b:ferry_disk, a sha256). A write
@@ -88,10 +86,11 @@ local store = require("ferry.store")
 -- Bumped when the module changes in a way an already-running server must
 -- pick up: bin/ferry-host reloads the module (keeping M.state and a
 -- swapped M.host) when the loaded one reports a different api.
-M.api = 11
+M.api = 12
 
--- history api 1: open() binds the note keys on the sidebar.
-local function history() return current("ferry.history", 1) end
+-- history api 2: open() binds the note keys on the sidebar; <CR> and p
+-- take the whole note as its body.
+local function history() return current("ferry.history", 2) end
 
 -- The current (unfinished) note: { id = uuid, path = file, buf = bufnr,
 -- created = Unix time its file name was stamped with (nil: a note from
@@ -158,21 +157,14 @@ local function captured_spec(meta)
   return target.render({ kind = "app", bundle = bundle, window = win:match("^%d+$") and tonumber(win) or nil })
 end
 
-local function header(spec) return "to: " .. spec end
-
 local function repo_root()
   local src = debug.getinfo(1, "S").source:sub(2)
   return vim.fn.fnamemodify(src, ":p:h:h:h")
 end
 
--- The note's target spec and body lines: line 1 `to: <spec>` is the
--- header; without one the spec is the captured target.
--- Repeats of the header right under it (stacked by an older resume) are
--- not body.
+-- The note's target spec (the captured one) and its body (every line).
 local function parts(buf)
-  local spec, body = target.split(vim.api.nvim_buf_get_lines(buf, 0, -1, false))
-  while spec and #body > 0 and target.split({ body[1] }) == spec do table.remove(body, 1) end
-  return spec or captured_spec(vim.b[buf].ferry), body
+  return captured_spec(vim.b[buf].ferry), vim.api.nvim_buf_get_lines(buf, 0, -1, false)
 end
 
 local function is_blank(body) return not table.concat(body, "\n"):find("%S") end
@@ -198,17 +190,6 @@ local function index(path)
   end
   pcall(vim.system, { repo_root() .. "/bin/ferry-notes", "index", path },
     { text = true, env = { FERRY_NOTES_DIR = dir } }, function() end)
-end
-
--- Buffer lines for a note file: `to: <target>` (the fallback spec when the
--- file has none, so a body line starting with `to:` stays body), then the
--- body. Returns lines, meta; or nil, err.
-function M.read_note(path, fallback)
-  local meta, body = store.read(path)
-  if not meta then return nil, body end
-  local spec = rawget(meta, "target")
-  if type(spec) ~= "string" or spec == "" then spec = fallback or "clipboard" end
-  return target.join(spec, body), meta
 end
 
 -- An error notice, shown after the current command: raised inside :write
@@ -392,9 +373,10 @@ local function load(buf)
   -- Hashed before the read: a write in between then reads as an outside
   -- edit (kept), never as ferry's.
   local sum = digest(path)
-  local lines = M.read_note(path, captured_spec(vim.b[buf].ferry))
-  if not lines then return end
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  local meta, body = store.read(path)
+  if not meta then return end
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, body)
+  vim.b[buf].ferry_body = true
   remember(buf, sum)
   vim.bo[buf].modified = false
 end
@@ -467,6 +449,28 @@ local function adopt(note)
   attach(note.buf)
 end
 
+-- Note api 11 and older showed the target as a `to: <spec>` header on line
+-- 1 of the buffer. A buffer such a module held (no b:ferry_body) loses that
+-- line the first time this module touches it: the text below stays, the
+-- cursor stays on the same text (also the one draft() kept), and the
+-- modified flag is kept, since the file already stores the body and the
+-- target apart. Buffers this module fills are marked b:ferry_body, so a
+-- body line starting with `to:` is never taken for a header.
+local function drop_header(buf)
+  if vim.b[buf].ferry_body then return end
+  vim.b[buf].ferry_body = true
+  if target.split(vim.api.nvim_buf_get_lines(buf, 0, 1, false)) == nil then return end
+  local modified = vim.bo[buf].modified
+  local cursors = {}
+  for _, win in ipairs(vim.fn.win_findbuf(buf)) do cursors[win] = vim.api.nvim_win_get_cursor(win) end
+  vim.api.nvim_buf_set_lines(buf, 0, 1, false, {})
+  vim.bo[buf].modified = modified
+  local up = function(c) return c[1] > 1 and { c[1] - 1, c[2] } or { 1, 0 } end
+  for win, c in pairs(cursors) do pcall(vim.api.nvim_win_set_cursor, win, up(c)) end
+  local note = M.state.note
+  if note and note.buf == buf and M.state.cursor then M.state.cursor = up(M.state.cursor) end
+end
+
 -- The note's buffer, reloading it from its file if it was wiped.
 local function note_buf(note)
   if not (note.buf and vim.api.nvim_buf_is_valid(note.buf)) then
@@ -477,6 +481,7 @@ local function note_buf(note)
       load(note.buf)
     end
   end
+  drop_header(note.buf)
   adopt(note)
   return note.buf
 end
@@ -702,6 +707,7 @@ local function new_note(dir)
   place(note, dir)
   note.buf = vim.fn.bufadd(note.path)
   vim.fn.bufload(note.buf)
+  vim.b[note.buf].ferry_body = true
   display(note.buf)
   M.apply_options(note.buf)
   return note
@@ -725,16 +731,15 @@ local function fresh(opts, seed)
   local id = note.id
   local meta = { id = id, target = opts.target or "", window = opts.window or "", seed = seed,
     created = note.created }
-  meta.auto_spec = captured_spec(meta)
   local body = seed ~= "" and vim.split(seed, "\n", { plain = true }) or { "" }
-  vim.api.nvim_buf_set_lines(note.buf, 0, -1, false, target.join(meta.auto_spec, body))
+  vim.api.nvim_buf_set_lines(note.buf, 0, -1, false, body)
   -- Untouched: no file until the first change (a seed counts as text, so
   -- the next draft or Hide writes it).
   vim.bo[note.buf].modified = false
-  vim.api.nvim_win_set_cursor(0, { 2, 0 })
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
   M.state.note, M.state.cursor = note, nil
   vim.b[note.buf].ferry = meta
-  history_start(id, meta.auto_spec, seed)
+  history_start(id, captured_spec(meta), seed)
   vim.cmd("startinsert")
   return note
 end
@@ -748,49 +753,15 @@ local function resume(opts)
   display(buf)
   M.apply_options(buf)
   local meta = vim.b[buf].ferry or { id = note.id, seed = "", created = note.created }
-  local prev = captured_spec(meta)
   meta.target, meta.window = opts.target or "", opts.window or ""
-  -- The header follows the new target while it is still the automatic one.
-  -- A note that never had one (a blank note, or a draft from before
-  -- headers) gets it above its text. A note with a header but no
-  -- auto_spec (a draft last held by a module without auto_spec) keeps
-  -- that header; it is automatic only when it equals a captured spec.
-  local spec = captured_spec(meta)
-  local cur = M.state.cursor
-  if meta.auto_spec == nil then
-    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    local have = target.split(lines)
-    if have == nil then
-      vim.api.nvim_buf_set_lines(buf, 0, 0, false, { header(spec) })
-      cur = cur and { cur[1] + 1, cur[2] } or { 2, 0 }
-      meta.auto_spec = spec
-    else
-      -- Drop repeats of the header that an earlier resume stacked on it,
-      -- so Submit never sends one as the body's first line.
-      local extra = 0
-      while lines[2 + extra] and target.split({ lines[2 + extra] }) == have do extra = extra + 1 end
-      if extra > 0 then
-        vim.api.nvim_buf_set_lines(buf, 1, 1 + extra, false, {})
-        if cur and cur[1] > 1 then cur = { math.max(cur[1] - extra, 2), cur[2] } end
-      end
-      if have == prev or have == spec then
-        vim.api.nvim_buf_set_lines(buf, 0, 1, false, { header(spec) })
-        meta.auto_spec = spec
-      else
-        meta.auto_spec = false
-      end
-    end
-  elseif meta.auto_spec and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] == header(meta.auto_spec) then
-    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { header(spec) })
-    meta.auto_spec = spec
-  end
   vim.b[buf].ferry = meta
   if note.unstarted then
     note.unstarted = nil
-    history_start(meta.id or note.id, spec, "")
+    history_start(meta.id or note.id, captured_spec(meta), "")
   end
   -- Put the cursor back where draft() found it. In insert mode it may sit
   -- just past the end of the line, which normal mode cannot hold.
+  local cur = M.state.cursor
   local append = false
   if cur then
     local last = vim.api.nvim_buf_line_count(buf)
@@ -803,24 +774,9 @@ local function resume(opts)
   return note
 end
 
--- Hold to talk: Flow's paste lands at the cursor, so never in the to:
--- header. With the cursor on a header line 1, move to the end of line 2
--- (added when missing) and insert there. Returns true when it moved.
-local function off_header(buf)
-  local win = vim.api.nvim_get_current_win()
-  if vim.api.nvim_win_get_cursor(win)[1] ~= 1 then return false end
-  if target.split(vim.api.nvim_buf_get_lines(buf, 0, 1, false)) == nil then return false end
-  if vim.api.nvim_buf_line_count(buf) < 2 then vim.api.nvim_buf_set_lines(buf, 1, 1, false, { "" }) end
-  local len = #vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1]
-  vim.api.nvim_win_set_cursor(win, { 2, len })
-  if vim.fn.mode():sub(1, 1) ~= "i" then vim.cmd("startinsert!") end
-  return true
-end
-
 -- Insert mode at the cursor, like `a` from normal mode (already in insert
--- mode: the cursor stays), never in the header.
+-- mode: the cursor stays).
 local function insert_here(buf)
-  if off_header(buf) then return end
   if vim.fn.mode():sub(1, 1) == "i" then return end
   local win = vim.api.nvim_get_current_win()
   local row, col = unpack(vim.api.nvim_win_get_cursor(win))
@@ -852,16 +808,12 @@ function M.show(opts)
     note = fresh(opts, seed)
   end
   layout(opts)
-  if on(opts.talk) then
-    off_header(note.buf)
-    flow.adopt_start()
-  end
+  if on(opts.talk) then flow.adopt_start() end
   return note.path
 end
 
 -- Hold to talk with the note already in front: no show, no new target, no
--- layout change. Enter insert mode at the cursor (like `a`, never in the
--- header) and tell flow that Hammerspoon started a recording. Returns
+-- layout change. Enter insert mode at the cursor (like `a`) and tell flow that Hammerspoon started a recording. Returns
 -- "talk <path>", or "no note".
 function M.talk(opts)
   use_dir(opts)
@@ -1028,7 +980,9 @@ local function to_tempfile(buf, body)
 end
 
 local function bufnr(buf)
-  return (buf and buf ~= 0) and buf or vim.api.nvim_get_current_buf()
+  buf = (buf and buf ~= 0) and buf or vim.api.nvim_get_current_buf()
+  if type(vim.b[buf].ferry) == "table" then drop_header(buf) end
+  return buf
 end
 
 -- Run fn(buf) once Flow's last paste has landed (at once when Flow is idle).
@@ -1078,31 +1032,22 @@ local function copy_body(buf, body, text)
   M.host.hide({})
 end
 
--- Submit: a blank body, or one unchanged from the seed, is a cancel. An
--- app target goes to the host with only the body; `clipboard` is a Copy.
--- Any other target, or a header that does not parse, cannot be sent yet:
--- the body goes on the clipboard and the note stays current and shown.
+-- Submit: a blank body, or one unchanged from the seed, is a cancel. The
+-- body goes to the host with the target captured at the latest show; with
+-- nothing captured it is a Copy.
 local function submit_now(buf)
   local spec, body = parts(buf)
   local text = body_text(buf, body)
   if not text then return cancel_now(buf) end
-  local t, err = target.parse(spec)
-  if t and t.kind == "clipboard" then return copy_body(buf, body, text) end
-  if not (t and t.kind == "app") then
-    local why = t and "cannot be sent to yet" or ("is not valid (" .. tostring(err) .. ")")
-    if not to_clipboard(text) then
-      vim.notify(string.format("%s (target %q %s)", CLIP_FAIL, spec, why), vim.log.levels.ERROR)
-      return
-    end
-    vim.notify(string.format("ferry: copied — target %q %s", spec, why), vim.log.levels.WARN)
-    return
-  end
+  local meta = vim.b[buf].ferry or {}
+  local bundle = meta.target or ""
+  if bundle == "" then return copy_body(buf, body, text) end
   local file = to_tempfile(buf, body)
-  finish(buf, "submitted", file, target.render(t))
-  M.host.submit({ file = file, target = t.bundle, window = t.window and tostring(t.window) or "" })
+  finish(buf, "submitted", file, spec)
+  M.host.submit({ file = file, target = bundle, window = tostring(meta.window or ""):match("^%d+$") or "" })
 end
 
--- Copy and hide (:Copy, <C-y>): whatever the header says.
+-- Copy and hide (:Copy, <C-y>).
 local function copy_now(buf)
   local _, body = parts(buf)
   local text = body_text(buf, body)
@@ -1155,16 +1100,11 @@ function M.for_tab_note(action)
     vim.notify("ferry: no note to " .. action, vim.log.levels.WARN)
     return
   end
+  drop_header(buf)
   if win then vim.api.nvim_set_current_win(win) else display(buf) end
   if action == "flow" then
-    -- Joe stays in insert mode (GT 8), at the end of the body: never on
-    -- the to: line, where Flow's paste would change the target.
-    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    if #lines == 1 and target.split(lines) then
-      vim.api.nvim_buf_set_lines(buf, 1, 1, false, { "" })
-      lines[2] = ""
-    end
-    vim.api.nvim_win_set_cursor(0, { #lines, 0 })
+    -- Joe stays in insert mode (GT requirement 7), at the end of the body.
+    vim.api.nvim_win_set_cursor(0, { vim.api.nvim_buf_line_count(buf), 0 })
     vim.cmd("startinsert!")
     return flow.toggle()
   end

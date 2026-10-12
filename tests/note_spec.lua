@@ -138,7 +138,7 @@ local p2, id2 = show()
 check("an untouched blank note leaves no file", "0 0", vim.fn.filereadable(blank_path) .. " " .. vim.fn.filereadable(p2))
 check("after Submit the next show is fresh", true, p2 ~= p1 and id2 ~= id1)
 check("next show resumes the blank note", blank_id, id2)
-check("fresh note is only the target header", "to: app:com.example.app#4242|", table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|"))
+check("fresh note is one empty line, no to: line", "", table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|"))
 -- history start runs in the background; give it a moment.
 vim.wait(3000, function() return outcome(id2) == "open" end, 20)
 check("fresh note has an open row", "open", outcome(id2))
@@ -172,7 +172,7 @@ local function has_buf(id)
   return false
 end
 check("a seeded show drops the unused blank note", "none false", outcome(blank4) .. " " .. tostring(has_buf(blank4)))
-check("seeded note shows the header, then the seed", "to: app:com.example.app#4242|selected text|line two",
+check("seeded note shows the seed only", "selected text|line two",
   table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|"))
 vim.cmd("Submit")
 check("unchanged-seed Submit calls host.hide only", "hide", kinds())
@@ -209,175 +209,103 @@ check("history lists other notes", true, listed(id1))
 show()
 vim.cmd("Cancel")
 
--- --- the to: header (target spec) -----------------------------------------
+-- --- the target: captured at the latest show, the buffer is the body ------
 local function lines() return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|") end
-local function header(spec) vim.api.nvim_buf_set_lines(0, 0, 1, false, { "to: " .. spec }) end
-local function body(b) vim.api.nvim_buf_set_lines(0, 1, -1, false, b) end
+local function body(b) vim.api.nvim_buf_set_lines(0, 0, -1, false, b) end
 local function sent() local c = calls[1] or { nil, {} }
   return kinds() .. " " .. tostring(c[2].target) .. " " .. tostring(c[2].window) .. " " .. tostring(c[3])
 end
 
 reset()
 local _, idh = show()
-check("show: line 1 is the captured target, cursor on row 2", "to: app:com.example.app#4242 2",
-  vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] .. " " .. vim.api.nvim_win_get_cursor(0)[1])
-check("show: b:ferry.auto_spec is the header's spec", "app:com.example.app#4242", vim.b.ferry.auto_spec)
-body({ "only the body", "two" })
+check("show: no to: line, cursor on row 1", " 1", lines() .. " " .. vim.api.nvim_win_get_cursor(0)[1])
+body({ "the whole buffer", "two" })
 vim.cmd("Submit")
-check("Submit: host.submit gets the header's target and window, the file only the body",
-  "submit com.example.app 4242 only the body\ntwo\n", sent())
-check("Submit: history row target is the spec", "submitted app:com.example.app#4242",
+check("Submit: host.submit gets the captured target and window, the file the whole buffer",
+  "submit com.example.app 4242 the whole buffer\ntwo\n", sent())
+check("Submit: history row target is the captured spec", "submitted app:com.example.app#4242",
   outcome(idh) .. " " .. tostring((row(idh) or {}).target))
 
 reset()
-local _, idh2 = show()
-header("app:com.other#7")
-body({ "elsewhere" })
+show()
+body({ "to: app:com.other#7", "is body" })
 vim.cmd("Submit")
-check("header edited to app:com.other#7: sent there", "submit com.other 7 elsewhere\n", sent())
-check("edited header: history row target is that spec", "app:com.other#7", tostring((row(idh2) or {}).target))
+check("a first line starting with to: is body, sent to the captured target",
+  "submit com.example.app 4242 to: app:com.other#7\nis body\n", sent())
 
 reset()
 show()
-header("app:com.nowin")
-body({ "no window" })
-vim.cmd("Submit")
-check("header without a window: sent to the app, window empty", "submit com.nowin  no window\n", sent())
-
-reset()
-show()
-set({ "no header here" })
-vim.cmd("Submit")
-check("header deleted: sent to the captured target", "submit com.example.app 4242 no header here\n", sent())
-
-reset()
-local _, idh3 = show()
-vim.cmd("Submit")
-check("header only: Submit cancels (hide, the empty row is dropped)", "hide none", kinds() .. " " .. outcome(idh3))
-
-for _, case in ipairs({
-  { "bogus:x", "is not valid" },
-  { "fleet:task:x", "cannot be sent to yet" },
-}) do
-  reset(); notices = {}; clip["+"] = nil
-  local _, idb = show()
-  header(case[1])
-  body({ "keep this", "safe" })
-  vim.cmd("Submit")
-  check("to: " .. case[1] .. ": no host call, + holds the body", " keep this\nsafe",
-    kinds() .. " " .. table.concat(clip["+"] or {}, "\n"))
-  check("to: " .. case[1] .. ": notifies copied — target", true,
-    (notices[#notices] or ""):find('ferry: copied — target "' .. case[1] .. '" ' .. case[2], 1, true) ~= nil)
-  vim.wait(3000, function() return outcome(idb) == "open" end, 20)
-  check("to: " .. case[1] .. ": note still current and shown, row open",
-    idb .. " to: " .. case[1] .. "|keep this|safe open",
-    tostring((note.current() or {}).id) .. " " .. lines() .. " " .. outcome(idb))
-  set({ "" })
-  vim.cmd("Cancel")
-end
-
-reset()
-show()
-check("resumed blank note gets the header, cursor on row 2", "to: app:com.example.app#4242| 2",
-  lines() .. " " .. vim.api.nvim_win_get_cursor(0)[1])
 note.show({ target = "com.b", window = "9" })
-check("resume from com.b 9 replaces the automatic header", "to: app:com.b#9|", lines())
-header("app:com.kept#1")
-note.show({ target = "com.c", window = "3" })
-check("resume keeps an edited header", "to: app:com.kept#1|", lines())
-set({ "" })
-vim.cmd("Cancel")
+body({ "resumed" })
+vim.cmd("Submit")
+check("resume from com.b 9: Submit goes to the latest show's target", "submit com.b 9 resumed\n", sent())
+
+reset(); notices = {}; clip["+"] = nil
 note.show({ target = "", window = "" })
-check("nothing captured: the header is to: clipboard", "to: clipboard|", lines())
-local lb = vim.api.nvim_get_current_buf()
-local lm = vim.b[lb].ferry; lm.auto_spec = nil; vim.b[lb].ferry = lm
-set({ "old draft" })
-show()
-check("a draft from before headers gets one above its text", "to: app:com.example.app#4242|old draft", lines())
-vim.cmd("Cancel")
+local idn = vim.b.ferry.id
+body({ "nowhere to go" })
+vim.cmd("Submit")
+check("nothing captured: Submit copies the body and hides, row target clipboard",
+  "hide nowhere to go submitted clipboard",
+  kinds() .. " " .. table.concat(clip["+"] or {}, "\n") .. " " .. outcome(idn) .. " " .. tostring((row(idn) or {}).target))
 
--- A header already on line 1 with no auto_spec (a draft last held by a
--- module without auto_spec) is never stacked under a second one.
-local function drop_auto()
-  local b = vim.api.nvim_get_current_buf()
-  local m = vim.b[b].ferry; m.auto_spec = nil; vim.b[b].ferry = m
-end
+-- A buffer a note api 11 module held (no b:ferry_body) loses its to: line
+-- on the next show; the cursor stays on the same text. A buffer this module
+-- filled keeps a first line starting with to:.
+local function as_api11() vim.b.ferry_body = nil end
 reset()
 note.show({ target = "com.a", window = "1" })
-body({ "hello body" })
-drop_auto()
-note.draft()
+body({ "to: app:com.a#1", "kept text", "more" })
+as_api11()
+note.state.cursor = { 3, 2 }
 note.show({ target = "com.a", window = "1" })
-check("no auto_spec, header already there: one header", "to: app:com.a#1|hello body", lines())
+check("api 11 buffer with a to: header: show drops it, cursor on the same text", "kept text|more 2:2",
+  lines() .. " " .. table.concat(vim.api.nvim_win_get_cursor(0), ":"))
+body({ "to: typed later", "more" })
+note.show({ target = "com.a", window = "1" })
+check("... and only once: a to: line typed after that stays", "to: typed later|more", lines())
+body({ "kept text", "more" })
 vim.cmd("Submit")
-check("no auto_spec, header already there: Submit sends only the body",
-  "submit com.a 1 hello body\n", sent())
+check("... Submit sends the whole buffer", "submit com.a 1 kept text\nmore\n", sent())
 reset()
 note.show({ target = "com.a", window = "1" })
-set({ "to: app:com.a#1", "to: app:com.a#1", "stacked" })
-drop_auto()
-note.draft()
+body({ "to: app:com.a#1" })
+as_api11()
+note.state.cursor = { 1, 3 }
 note.show({ target = "com.a", window = "1" })
-check("no auto_spec, stacked headers: collapsed to one", "to: app:com.a#1|stacked", lines())
-vim.cmd("Submit")
-check("no auto_spec, stacked headers: Submit sends only the body", "submit com.a 1 stacked\n", sent())
-reset()
-note.show({ target = "com.a", window = "1" })
-body({ "follow" })
-drop_auto()
-note.draft()
-note.show({ target = "com.b", window = "9" })
-check("no auto_spec, header equal to the captured spec follows com.b 9", "to: app:com.b#9|follow", lines())
-note.show({ target = "com.c", window = "2" })
-check("... and is automatic again after that", "to: app:com.c#2|follow", lines())
-set({ "to: app:com.other#7", "edited" })
-drop_auto()
-note.draft()
-note.show({ target = "com.b", window = "9" })
-check("no auto_spec, edited header is kept", "to: app:com.other#7|edited", lines())
-note.show({ target = "com.d", window = "4" })
-check("... and still kept on the next show", "to: app:com.other#7|edited", lines())
-set({ "" })
+check("api 11 buffer that is only a header: one empty line left, cursor on row 1", " 1",
+  lines() .. " " .. vim.api.nvim_win_get_cursor(0)[1])
 vim.cmd("Cancel")
 reset()
 note.show({ target = "com.a", window = "1" })
-set({ "to: app:com.a#1", "to: app:com.a#1", "direct" })
-vim.cmd("Submit")
-check("Submit drops header repeats under line 1", "submit com.a 1 direct\n", sent())
+body({ "plain api 11 draft" })
+as_api11()
+note.show({ target = "com.a", window = "1" })
+check("api 11 buffer without a header: unchanged", "plain api 11 draft", lines())
+vim.cmd("Cancel")
 
--- --- clipboard target and copy-and-hide (T3) -----------------------------
+-- --- copy and hide (T3) ---------------------------------------------------
 local function clipped() return table.concat(clip["+"] or {}, "\n") end
 local function target_of(id) return tostring((row(id) or {}).target) end
 reset(); clip["+"] = nil
-local _, idc = show()
-header("clipboard")
-body({ "copy me", "two" })
-vim.cmd("Submit")
-check("to: clipboard + Submit: + holds the body, one hide, no submit", "hide copy me\ntwo", kinds() .. " " .. clipped())
-check("to: clipboard + Submit: row submitted, target clipboard", "submitted clipboard",
-  outcome(idc) .. " " .. target_of(idc))
 local _, idc2 = show()
-check("after a clipboard Submit the next show is fresh", "true to: app:com.example.app#4242|",
-  tostring(idc2 ~= idc) .. " " .. lines())
-
 check("note has :Copy and <C-y> maps (n, i)", "2 <Cmd>Copy<CR> <Cmd>Copy<CR>",
   vim.fn.exists(":Copy") .. " " .. vim.fn.maparg("<C-y>", "n") .. " " .. vim.fn.maparg("<C-y>", "i"))
-reset(); clip["+"] = nil
 vim.wait(3000, function() return outcome(idc2) == "open" end, 20)
 vim.api.nvim_feedkeys(vim.keycode("Ayanked<C-y>"), "x", false)
 check("<C-y> in insert mode on an app note: + holds the body, one hide, no submit", "hide yanked",
   kinds() .. " " .. clipped())
 check("<C-y>: row submitted, target clipboard", "submitted clipboard", outcome(idc2) .. " " .. target_of(idc2))
-local _, idc3 = show()
-check("after <C-y> the next show is fresh", "true to: app:com.example.app#4242|",
-  tostring(idc3 ~= idc2) .. " " .. lines())
+local pc3, idc3 = show()
+check("after <C-y> the next show is fresh", "true ", tostring(idc3 ~= idc2) .. " " .. lines())
 
 reset(); clip["+"] = nil
-header("bogus:x")
-body({ "any header" })
+body({ "to: app:com.other#7", "copied whole" })
 vim.cmd("Copy")
-check(":Copy ignores a header that does not parse", "hide any header submitted clipboard",
+check(":Copy copies the whole buffer, a to: first line too",
+  "hide to: app:com.other#7\ncopied whole submitted clipboard",
   kinds() .. " " .. clipped() .. " " .. outcome(idc3) .. " " .. target_of(idc3))
+check(":Copy: the note file stores target clipboard", "sent|clipboard|true|to: app:com.other#7|copied whole", nfile(pc3))
 
 reset(); clip["+"] = nil
 local _, idc4 = show()
@@ -390,15 +318,13 @@ check(":Copy of a blank body cancels: hide, + untouched, row dropped", "hide  no
 local CLIP_FAIL = "ferry: could not copy to the clipboard — note kept"
 for _, mode in ipairs({ "throw", "drop" }) do
   for _, case in ipairs({
-    { ":Copy", nil, "Copy" },
-    { "to: clipboard + Submit", "clipboard", "Submit" },
-    { "to: fleet:task:x + Submit", "fleet:task:x", "Submit" },
-    { "to: bogus:x + Submit", "bogus:x", "Submit" },
+    { ":Copy", "com.example.app", "Copy" },
+    { "nothing captured + Submit", "", "Submit" },
   }) do
     reset(); clip["+"] = nil; notices = {}
-    local _, idf, bf = show()
+    note.show({ target = case[2], window = "" })
+    local idf, bf = vim.b.ferry.id, vim.api.nvim_get_current_buf()
     vim.wait(3000, function() return outcome(idf) == "open" end, 20)
-    if case[2] then header(case[2]) end
     body({ "do not lose", "me" })
     local want_lines = lines()
     clip_mode = mode
@@ -436,7 +362,7 @@ vim.wait(500)
 check("autosave waits about 1 s", 0, vim.fn.filereadable(pa))
 vim.wait(3000, function() return vim.fn.filereadable(pa) == 1 end, 20)
 check("autosave after a change: draft, target, text; the buffer has no frontmatter",
-  "draft|app:com.example.app#4242|false|autosaved text to: app:com.example.app#4242|autosaved text",
+  "draft|app:com.example.app#4242|false|autosaved text autosaved text",
   nfile(pa) .. " " .. lines())
 local fm = store.read(pa)
 check("the file has id, created and updated", true,
@@ -458,7 +384,7 @@ notices = {}
 vim.cmd("checktime")
 vim.wait(300)
 check("an outside write to an unchanged buffer: checktime reloads it, no notice, no prompt",
-  "0 false to: app:com.example.app#4242|written by :w|pinned elsewhere",
+  "0 false written by :w|pinned elsewhere",
   #notices .. " " .. tostring(vim.bo[ba].modified) .. " " .. lines())
 body({ "after pin" })
 vim.cmd("write")
@@ -466,27 +392,23 @@ local m3 = store.read(pa)
 check("a save keeps pinned and unknown keys, same file", "true calm true",
   tostring(rawget(m3, "pinned")) .. " " .. tostring(rawget(m3, "mood")) .. " "
   .. tostring(vim.fn.resolve(vim.api.nvim_buf_get_name(ba)) == vim.fn.resolve(pa)))
--- A body line starting with to: stays body on reload (fixture body-to.md:
--- no target in the file, so the captured target becomes the header).
+-- A reopened note never gains a to: line, and a body line starting with
+-- to: stays body (fixture body-to.md: no target in the file).
 local fx = io.open(root .. "/tests/fixtures/notes/body-to.md"):read("a")
 local f = io.open(pa, "w"); f:write(fx); f:close()
 vim.cmd("edit!")
-check(":e! of a file without a target: captured header, body line to: x stays body",
-  "to: app:com.example.app#4242|to: x|The first body line looks like a header but is body.", lines())
+check(":e! of a file without a target: the body only, to: x stays body",
+  "to: x|The first body line looks like a header but is body.", lines())
 vim.cmd("write")
 vim.cmd("edit!")
-check("... saved and read again: target stored, to: x still body",
+check("... saved and read again: the captured target stored, the buffer still the body only",
   "draft|app:com.example.app#4242|false|to: x|The first body line looks like a header but is body. "
-  .. "to: app:com.example.app#4242|to: x|The first body line looks like a header but is body.",
+  .. "to: x|The first body line looks like a header but is body.",
   nfile(pa) .. " " .. lines())
--- No to: line in the buffer: the captured target is stored.
-set({ "to: y is not line 1", "plain" })
-set({ "plain", "to: y" })
-vim.cmd("write")
-check("no header in the buffer: the file stores the captured target", "draft|app:com.example.app#4242|false|plain|to: y",
-  nfile(pa))
+note.show({ target = "com.example.app", window = "4242" })
+check("... and a show keeps it", "to: x|The first body line looks like a header but is body.", lines())
 -- A blank Cancel deletes the file; nothing else is ever deleted.
-set({ "to: app:com.example.app#4242", "" })
+set({ "" })
 vim.cmd("Cancel")
 check("blank Cancel deletes the note file", 0, vim.fn.filereadable(pa))
 -- The index sees the files (ferry-notes index runs in the background).
@@ -589,7 +511,7 @@ check("forking a conflict file names it after the original stem (no chained .con
   vim.fs.basename(cf2):match("^" .. vim.pesc(stem) .. "%.conflict%-[%d%-]+%.md$") ~= nil)
 -- A blank Cancel never deletes a file changed outside.
 store.write(cf2, store.read(cf2), { "outside again" })
-set({ "to: app:com.example.app#4242", "" })
+set({ "" })
 vim.cmd("Cancel")
 check("blank Cancel keeps a file changed outside ferry", T .. "outside again", nfile(cf2))
 -- Submit over an outside edit forks too: the sent text is kept.
@@ -667,7 +589,7 @@ vim.cmd("Cancel")
 -- shown and submitted: one history row, under the note's own id, submitted.
 reset(); notices = {}
 show()
-set({ "to: app:com.example.app#4242", "sent before" })
+set({ "sent before" })
 vim.cmd("Submit")
 local bb = vim.api.nvim_get_current_buf()
 local bid = (vim.b.ferry or {}).id
@@ -767,7 +689,7 @@ check("Flow is idle after the voice-key cases", false, flow.recording())
 -- --- hold to talk: release, and draft (the main hotkey) during its wait ---
 reset(); events = {}
 local pt = note.show({ target = "com.example.app", window = "4242", talk = "1" })
-check("show{talk}: Flow recording, no URL, insert on row 2", "true  2",
+check("show{talk}: Flow recording, no URL, insert on row 1", "true  1",
   tostring(flow.recording()) .. " " .. flow_events() .. " " .. vim.api.nvim_win_get_cursor(0)[1])
 body({ "spoken" })
 at_end()

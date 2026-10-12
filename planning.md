@@ -113,9 +113,11 @@ new-window-per-press path were removed on 2026-10-12 (B3).
 
 **Parked (Joe, 2026-10-12).** Choosing a target inside the note is more to learn than
 going to the window and pasting by hand, which Ctrl-Y (copy and hide)
-already covers. What exists stays: the `to:` line, `to: clipboard`, Ctrl-Y,
-`lua/ferry/target.lua` and `lua/ferry/tmux.lua`. The rest of this section
-is the design to pick up if a need shows up.
+already covers. What exists stays: Ctrl-Y, `lua/ferry/target.lua` and
+`lua/ferry/tmux.lua`. The `to:` line and `to: clipboard` were removed
+(T8): the note is the body only and Ctrl-X sends to the window captured at
+the latest show. The rest of this section is the design to pick up if a
+need shows up.
 
 - A target is one of these kinds:
   - app + window (the default, captured on show)

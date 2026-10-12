@@ -503,7 +503,7 @@ do
   local e = execs(rec, "'show' 'com.example.target' '4242'")[1]
   local seed = e and e.cmd:match("'4242' '([^']+)'")
   check("captureSelection: show gets a seed file", true, seed ~= nil)
-  check("captureSelection: note holds the selection below its to: line", "picked text", ask(sock, 'getline(2)'))
+  check("captureSelection: note holds the selection", "picked text", ask(sock, 'getline(1)'))
   check("captureSelection: seed file removed", nil, seed and io.open(seed, "r"))
   check("captureSelection: clipboard restored", "old clipboard", rec.pasteboard.contents)
   stop(sock)
@@ -701,7 +701,7 @@ do
   check("first paste before the second up: its key up stops once", 5, stops(sock))
   paste(sock, " b")
   check("then Flow idle", "false false", waiting(sock) .. " " .. recording(sock))
-  check("the pastes landed in the note, in order", true, has(ask(sock, "getline(2)"), " more one two a b"))
+  check("the pastes landed in the note, in order", true, has(ask(sock, "getline(1)"), " more one two a b"))
   check("talk session: never hidden", 0, count(t.order, "host.hide"))
   stop(sock)
 end

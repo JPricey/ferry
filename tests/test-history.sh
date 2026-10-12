@@ -60,22 +60,22 @@ for ln = 1, #lines do if lines[ln]:find("first line", 1, true) then vim.api.nvim
 h.insert()
 local main = vim.api.nvim_win_get_buf(h.state.main_win)
 out[#out + 1] = "MAIN=" .. table.concat(vim.api.nvim_buf_get_lines(main, 0, -1, false), "|")
--- p replaces the body, keeps an edited to: line and submits to it.
+-- p replaces the whole note and submits it to the captured target.
 local sent = "none"
 note.host = { hide = function() end, submit = function(p)
   sent = p.target .. "#" .. p.window .. " " .. table.concat(vim.fn.readfile(p.file), "|")
 end }
-vim.api.nvim_buf_set_lines(main, 0, 2, false, { "to: app:com.other#7", "old text" })
+vim.api.nvim_buf_set_lines(main, 0, -1, false, { "to: app:com.other#7", "old text" })
 vim.api.nvim_set_current_win(h.state.win)
 for ln = 1, #lines do if lines[ln]:find("first line", 1, true) then vim.api.nvim_win_set_cursor(0, { ln, 0 }) end end
 h.paste_to_target()
 out[#out + 1] = "SENT=" .. sent
 -- Reopened by :History (not through show), the sidebar still has the note
--- keys, and they act on the note: <C-x> sends the body to the edited to:
--- line. Joe's global <C-x> (:write) must not run.
-note.show({ target = "com.example.app", window = "4242" })
+-- keys, and they act on the note: <C-x> sends it to the target captured
+-- at the latest show. Joe's global <C-x> (:write) must not run.
+note.show({ target = "com.third", window = "9" })
 local fresh = vim.api.nvim_win_get_buf(h.state.main_win)
-vim.api.nvim_buf_set_lines(fresh, 0, -1, false, { "to: app:com.third#9", "side text", "more" })
+vim.api.nvim_buf_set_lines(fresh, 0, -1, false, { "side text", "more" })
 vim.keymap.set("n", "<C-x>", vim.cmd.write)
 h.close(); vim.cmd("History")
 vim.api.nvim_set_current_win(h.state.win)
@@ -90,9 +90,9 @@ out=$(FERRY_NOTES_DIR="$notes/n" FERRY_INDEX="$notes/index.sqlite" FERRY_OUTBOX=
 check "note opens the sidebar, focus stays on the note" "WINS=2 ROWS=1 CUR=main" "$(grep -o 'WINS=[0-9]* ROWS=[0-9]* CUR=[a-z]*' <<<"$out")"
 check "sidebar is on the left" "LEFT=true" "$(grep -o 'LEFT=[a-z]*' <<<"$out")"
 check "sidebar shows date header" "LINE1=── Today" "$(grep '^LINE1=' <<<"$out" | sed 's/ *$//')"
-check "<CR> inserts text below the to: line of the empty note" "MAIN=to: app:com.example.app#4242|first line|second line" "$(grep '^MAIN=' <<<"$out")"
-check "p replaces the body and sends it to the to: line's target" "SENT=com.other#7 first line|second line" "$(grep '^SENT=' <<<"$out")"
-check "<C-x> in a sidebar opened by :History sends the body to the edited to: line" "SIDEKEY=com.third#9 side text|more err=" "$(grep '^SIDEKEY=' <<<"$out")"
+check "<CR> fills the empty note (no to: line)" "MAIN=first line|second line" "$(grep '^MAIN=' <<<"$out")"
+check "p replaces the whole note, to: first line too, and sends it to the captured target" "SENT=com.example.app#4242 first line|second line" "$(grep '^SENT=' <<<"$out")"
+check "<C-x> in a sidebar opened by :History sends the note to the latest show's target" "SIDEKEY=com.third#9 side text|more err=" "$(grep '^SIDEKEY=' <<<"$out")"
 
 rm -rf "$seed" "$fin" "$empty" "$notes" "$FERRY_DB"
 exit $fail
