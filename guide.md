@@ -51,8 +51,10 @@ buffer like any other text field. Stop with the Flow shortcut, not Escape.
 
 ## Dictate again from inside the buffer
 
-`:Dictate` (or `<leader>d` in normal mode) starts a Flow hands-free session
-without leaving Neovim. Use it to add more text after editing.
+`Ctrl-S` in insert or normal mode starts a Flow hands-free session, and
+pressing it again stops it; you stay in insert mode. `:Dictate` (or
+`<leader>d` in normal mode) also starts one. If you stop Flow with its own
+shortcut instead, the next `Ctrl-S` starts a new session.
 
 ## Submit
 
@@ -63,10 +65,19 @@ afterwards. If the target cannot be confirmed in front within
 `confirmTimeout` seconds, or delivery fails, nothing is pasted and an alert
 says "copied — paste manually".
 
+## Submit while Flow is recording
+
+If Flow was started with `Ctrl-S`, `:Dictate` or `autoStartFlow` and has not
+pasted yet, submitting stops it first and waits up to 4 seconds for its text
+to land, so the last words are included. Flow started with its own shortcut
+is not waited for; pressing the submit key again submits at once.
+
 ## Cancel
 
-`ZQ`, `:Cancel`, or `:cq` closes the window and pastes nothing. Quitting with
-the buffer empty or unchanged from its starting text also cancels.
+`ZQ`, `Ctrl-Q` in normal or insert mode, `:Cancel`, or `:cq` closes the
+window and pastes nothing; if Flow is still recording from `Ctrl-S`, it is
+stopped and its text is discarded. Quitting with the buffer empty or
+unchanged from its starting text also cancels.
 
 ## Browse history
 
