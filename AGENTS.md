@@ -18,9 +18,10 @@ practical context an agent needs to work on the code.
 
 ## Status
 
-V0 is built, but Joe stopped using it. Built: the hotkey, a new Ghostty +
+V0 was built, but Joe stopped using it. It had the hotkey, a new Ghostty +
 nvim window per press, submit by pasting into the start app, and a SQLite
-history with a sidebar. Problems in daily use:
+history with a sidebar. The one instance in Neovide has since replaced the
+per-press windows (removed 2026-10-12). Problems V0 had in daily use:
 
 - paste was unreliable
 - the Option+V hotkey was flaky and at times did not fire
@@ -40,8 +41,8 @@ defines the loop that moves the milestones forward with subagents.
 
 Layout is in `README.md`. User-facing usage is in `USER_GUIDE.md` (walkthrough)
 and `guide.md` (terse feature reference). Run
-`bash tests/test-session.sh` and `bash tests/test-history.sh` after touching
-the session script, the database helper, or the sidebar,
+`bash tests/test-history.sh` after touching the database helper or the
+sidebar (`lua/voice-vim/history.lua`),
 `bash tests/test-delivery.sh` and `bash tests/test-hammerspoon.sh` after
 touching `lua/voice-vim/delivery.lua` or the Hammerspoon module,
 `bash tests/test-migrate.sh` after touching `bin/voice-vim-migrate-init`,
@@ -100,8 +101,8 @@ symlink into it. Edits here go live the next time Hammerspoon reloads.
 - Wispr Flow is installed at `/Applications/Wispr Flow.app`
   (Electron, bundle id `com.electron.wispr-flow`).
 - Hammerspoon is the hotkey daemon (installed via Homebrew by
-  `install.sh`). It binds the hotkey, reads the frontmost app and selection,
-  launches Ghostty, and pastes the result back. No other hotkey tools are
+  `install.sh`). It binds the hotkey, reads the frontmost app and window,
+  shows and hides Neovide, and pastes the result back. No other hotkey tools are
   installed.
 
 ## How Wispr Flow can be integrated (research, Sept 2026)
@@ -157,82 +158,56 @@ the personal dictionary, or by mirroring edits into Flow's `History` rows.
 
 ## V0 shape (as built)
 
-**One instance (default, `mode = "instance"`).** `start()` loads
-`hammerspoon/hosts/neovide.lua` and, when Neovide is installed, builds the
-`hammerspoon/instance.lua` controller with it (deliver = `M.submit` below),
-binds `voicevim-submit`/`voicevim-hide`, and pre-warms the nvim server
+**One instance.** `start()` loads `hammerspoon/hosts/neovide.lua` and, when
+Neovide is installed, builds the `hammerspoon/instance.lua` controller with
+it (deliver = `M.submit`, see Delivery below), binds
+`voicevim-submit`/`voicevim-hide`, and pre-warms the nvim server
 (`bin/voice-vim-host ensure` as an hs.task). The hotkey and `voicevim-start`
 call `M.toggle`: from another app it captures app + window and runs
 `voice-vim-host show` (Neovide is launched with `--server <sock>` when no UI
 is attached), then unhides our Neovide; from the note it runs `draft`, hides
 Neovide and refocuses that window (while Flow is recording, `draft` answers
 `waiting for flow` and the note hides itself after Flow's paste). The note
-(`lua/voice-vim/note.lua`) sends `voicevim-submit` (hide, then the delivery
-of step 5) or `voicevim-hide`. The adapter only touches the Neovide process
-started with our `--server <sock>`. No selection grab unless
-`captureSelection = true`. The mode is decided once, synchronously, in
-`start()`: if Neovide is missing, or setting up the controller raises, it
-logs a `mode:` line, alerts once, and falls back to the session path below
+(`lua/voice-vim/note.lua`) sends `voicevim-submit` (hide, then Delivery) or
+`voicevim-hide`. The adapter only touches the Neovide process started with
+our `--server <sock>`. No selection grab unless `captureSelection = true`.
+Setup happens once, synchronously, in `start()`: if Neovide is missing, or
+setting up the controller raises, it logs a `mode:` line and alerts once
+("Neovide is not installed — run ./install.sh", or the setup error), and
+each press alerts again and does nothing else; there is no fallback window
 (a half-built controller is `disable()`d: pending show dropped, URL
-handlers unbound). A failed or slow pre-warm never changes the mode: the
-next press runs `ensure` again and alerts if that fails too. A show that
-fails (`host.show` false, or Neovide not focused within `pollTimeout`)
-alerts once per press, and the next press relaunches Neovide instead of
-waiting out `launchGrace`. Show unminimizes our window after Cmd+M, and
+handlers unbound). The obsolete config keys `mode`, `terminal`,
+`autoStartFlow`, `windowTitle` and `activateDelay` log a warning and are
+ignored. A failed or slow pre-warm changes nothing: the next press runs
+`ensure` again and alerts if that fails too. A show that fails
+(`host.show` false, or Neovide not focused within `pollTimeout`) alerts
+once per press, and the next press relaunches Neovide instead of waiting
+out `launchGrace`. Show unminimizes our window after Cmd+M, and
 `isFocused` is false while it is minimized or not visible. Ctrl-X/Ctrl-Q
-during the hotkey's wait for Flow take over that wait
-(`flow.finish_then`) instead of skipping it.
+during the hotkey's wait for Flow take over that wait (`flow.finish_then`)
+instead of skipping it. `hammerspoon/window-frame.lua` gives the Neovide
+window its saved or default frame (unless `rememberFrame = false`) and
+saves moves.
 
-**Session path (`mode = "session"`, or the fallback; removed by B3):**
+**Delivery.** `voicevim-submit?file=&target=&window=` hides Neovide, then
+`M.submit` reads and deletes the file and runs `lua/voice-vim/delivery.lua`
+(loaded with `dofile`, effects passed in as an `env` built from `hs.*`):
+put the text on the clipboard, focus the target window (or activate the
+app if the window is gone), poll every 0.05 s up to `confirmTimeout`
+(1.0 s) until it is frontmost, wait a 0.05 s settle and re-check, then
+post one global Cmd+V (`hs.eventtap.keyStroke` with no app). The target
+window is looked up once per submit. If it never comes to front, or
+delivery.lua fails to load or errors, nothing is pasted and it alerts
+"copied — paste manually". The clipboard is not restored. Each step is
+logged to the `voice-vim` logger.
 
-1. `hammerspoon/voice-vim.lua` hotkey handler records the frontmost app's
-   bundle id and the focused window's id (nil-guarded), and grabs the
-   selection with Cmd+C (clipboard restored after).
-2. It writes the selection to a temp file and opens a Ghostty window running
-   `bin/voice-vim-session <file> <bundle-id> [window-id] [session-token]`, via Ghostty's AppleScript
-   `new window with configuration {command:...}`. Ghostty 1.3.1 may leave a
-   "Process exited" screen when the command exits, so Hammerspoon closes the
-   window itself (step 5). `hammerspoon/window-frame.lua` then finds the new
-   window (by id diff), reports it so the session token maps to it, sets its
-   saved or default frame (unless `rememberFrame = false`), and saves moves.
-   If the hotkey is pressed from an adopted session window, the new session
-   reuses that session's target instead of targeting Ghostty. iTerm2 remains available with
-   `terminal = "iTerm2"`. Do not use `open -na Ghostty.app --args -e`: it
-   starts a second Ghostty instance per session that never quits.
-3. The session script prepends Homebrew and `~/.local/bin` to PATH (the
-   Ghostty command runs with a bare launchd environment), then opens `nvim`
-   with `vim/voice-vim.vim` sourced, in insert mode. With `VOICE_VIM_AUTOSTART_FLOW=1` it also fires
-   `wispr-flow://start-hands-free`.
-4. Flow pastes the dictation into the buffer. The user edits.
-5. On editor exit the script decides: non-zero exit, empty, whitespace-only,
-   or unchanged from seed means cancel; anything else means submit. Cancel
-   calls `hammerspoon://voicevim-cancel?target=&window=&session=`
-   (dry run: `voice-vim-cancel-url: …`): Hammerspoon closes the session
-   window and focuses the start window (or activates its app). Submit
-   calls `hammerspoon://voicevim-submit?file=&target=&window=&session=`
-   (`VOICE_VIM_DRY_RUN=1` prints it as `voice-vim-url: …` instead).
-   Hammerspoon closes the session window (`win:close()`, pcall-guarded,
-   logged as `session: closed window …` or `session: window not found`),
-   reads and deletes the file, then runs
-   `lua/voice-vim/delivery.lua` (loaded with `dofile`, effects passed in as
-   an `env` built from `hs.*`): put the text on the clipboard, focus the
-   target window (or activate the app if the window is gone), poll every
-   0.05 s up to `confirmTimeout` (1.0 s) until it is frontmost, wait a
-   0.05 s settle and re-check, then post one global Cmd+V
-   (`hs.eventtap.keyStroke` with no app). The target window is looked up
-   once per submit. If it never comes to front, or delivery.lua fails to
-   load or errors, nothing is pasted and it alerts "copied — paste
-   manually". The clipboard is not restored. Each step is logged to the
-   `voice-vim` logger. Under iTerm2 only, the script also closes its own
-   session by `ITERM_SESSION_ID`.
-6. History: the session script calls `bin/voice-vim-db start` before the
-   editor and `finish` after, recording target, seed, final text, and
-   outcome in `~/Library/Application Support/voice-vim/history.sqlite`.
-   Empty cancels are dropped. `lua/voice-vim/history.lua` renders the
-   sidebar by shelling out to `voice-vim-db list` (JSON). The vim file adds
-   the repo to `runtimepath` so `require("voice-vim.history")` resolves, and
-   a `QuitPre` autocmd closes the sidebar so quitting the dictation buffer
-   still ends the session.
+**History.** The note calls `bin/voice-vim-db start` when a note gets
+going and `finish` on submit or cancel, recording target, seed, final
+text, and outcome in
+`~/Library/Application Support/voice-vim/history.sqlite`. Empty cancels
+are dropped and drafts stay `open` rows the sidebar hides.
+`lua/voice-vim/history.lua` renders the sidebar by shelling out to
+`voice-vim-db list` (JSON); the note layout opens it on the left.
 
 ## Conventions
 

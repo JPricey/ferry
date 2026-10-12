@@ -64,7 +64,7 @@ clipboard. Often the destination is chosen after writing, not before.
 - Submit and cancel are nvim commands, not process exits. They call the host
   (`hs -c`, or a `hammerspoon://` URL), which hides the window and delivers
   the text.
-- Host window options, to settle with a spike:
+- Host window options (settled: Neovide, see "Host spike"):
   - **A dedicated Ghostty window.** It shares the app with Joe's main Ghostty
     windows, so hide/show must act on that one window (move off-screen or
     minimize), not on the whole app.
@@ -80,73 +80,22 @@ clipboard. Often the destination is chosen after writing, not before.
 
 ### Host spike
 
-Prototypes are in `spike/host/`. All three share one server: `vv-host`
-starts `nvim --headless --listen <sock>` and drives it with
-`nvim --server <sock> --remote-expr`. `note.lua` runs inside it: `new` opens
-a fresh markdown note in insert mode, `draft` writes it and sets
-`g:voicevim_draft`. Spike notes go to a temp dir, not the history database.
-`host.lua` binds Ctrl+Option+Cmd+V. From hidden it records the frontmost
-window, runs `note`, and shows the host. From focused it runs `draft`, hides
-the host, and refocuses that window, or its app if the window is gone. It
-logs `show:`/`hide:` ms from the key press to logger `voice-vim-spike`.
+Done. The spike prototyped three hosts around one shared nvim server: a
+dedicated Ghostty window, Neovide, and Ghostty's quick terminal. Pick:
+**Neovide** (Joe, 2026-10-11, on the orchestrator's recommendation, without
+trying all three). Show/hide is a plain app hide/unhide that cannot raise or
+disturb Ghostty work windows. Fallback: a Ghostty window, if Flow does not
+paste into Neovide (Joe's checks passed on 2026-10-12, so it was not
+needed).
 
-#### Ghostty window
-
-- How: `ghostty-window.sh launch` opens a Ghostty window over AppleScript.
-  The window runs `nvim --server <sock> --remote-ui`, titled `voice-vim-host`.
-- Start-up: one AppleScript window on first use. Later shows only move and
-  focus that window. The server is pre-warmed when `host.lua` starts.
-- Focus/hide: hide parks the window at the far bottom-right corner of its
-  screen. Show moves it back and focuses it. The rest of Ghostty is not
-  touched.
-- Risks: a sliver stays visible, and a second monitor may show more of it.
-  It sits among work windows, so Cmd+` and Mission Control list it. A
-  reload while parked loses the saved position; the next show centres it.
-- Look for: other Ghostty windows stay where they were on show and hide.
-
-#### Neovide
-
-- How: `neovide.sh launch` runs `neovide --server <sock>`, or
-  `open -a Neovide --args --server <sock>` without the CLI. `note.lua` maps
-  `<D-v>` to paste `+`, because Neovide sends Cmd+V as a key.
-- Start-up: the first launch starts a GUI app and is slow; leave it out of
-  the median. Later shows are `unhide` plus `activate`.
-- Focus/hide: hide is `app:hide()`. macOS then gives focus to the previous
-  app, and `host.lua` refocuses the recorded window.
-- Risks: not installed yet (Joe check 1). Flow's paste depends on the
-  `<D-v>` mapping. Its fonts and options differ from the terminal.
-- Look for: Flow text lands in the note, and the cold-launch time.
-
-#### Ghostty quick terminal
-
-- How: `quick-terminal.sh` toggles it with AppleScript
-  `perform action "toggle_quick_terminal"`, or with a Joe-added `global:`
-  keybind (`qtMode = "keystroke"`). Ghostty 1.3.1 has no
-  quick-terminal-command, so the first show types
-  `exec nvim --server <sock> --remote-ui` into the shell.
-- Start-up: every show and hide is an `osascript` call, so expect it to be
-  slower than the other two.
-- Focus/hide: hide is the same toggle. Ghostty's autohide may hide it on
-  its own when focus moves.
-- Risks: whether `perform action` toggles it, whether it is in AppleScript
-  `terminals` and is an `hs.window`, and whether autohide fights Flow's
-  overlay. In AppleScript mode the toggle needs another Ghostty window open (keystroke mode does not). Shell plugins may
-  eat the typed `exec`. See the script header.
-- Look for: nvim starts in it, and it stays up while Flow dictates.
-
-| Option | Median show ms | Median hide ms | Flow pastes (y/n) | Focus returns (y/n) | Notes |
-| --- | --- | --- | --- | --- | --- |
-| Ghostty window | | | | | |
-| Neovide | | | | | |
-| Ghostty quick terminal | | | | | |
-
-Pick: **Neovide** (Joe, 2026-10-11, on the orchestrator's recommendation, without trying all three). Show/hide is a plain app hide/unhide that cannot raise or disturb Ghostty work windows. Fallback: Ghostty window, if Flow does not paste into Neovide.
-
-What carries over to "One instance toggled by a hotkey": the server and note
-model do not depend on the host. `vv-host` moves to `bin/` and `note.lua` to
-`lua/voice-vim/`. The capture, show, hide and refocus flow and its timing
-logs move from `host.lua` into `hammerspoon/voice-vim.lua`, keeping only the
-picked host. The prototypes for the other two hosts are not carried over.
+What carried over to "One instance toggled by a hotkey": the server and
+note model, which do not depend on the host. The spike's server script
+became `bin/voice-vim-host` and its `note.lua` became
+`lua/voice-vim/note.lua`. The capture, show, hide and refocus flow and its
+timing logs became `hammerspoon/instance.lua`, with the Neovide adapter in
+`hammerspoon/hosts/neovide.lua` (Neovide sends Cmd+V as a key, so the note
+maps `<D-v>` to paste `+`). The prototypes (`spike/host/`) and the old
+new-window-per-press path were removed on 2026-10-12 (B3).
 
 ### Reliable delivery
 
@@ -220,9 +169,12 @@ The contract:
 Moved to `milestones.md` (2026-10-11), which tracks status, checks and
 tasks for each milestone.
 
-## How V0 works today
+## How V0 worked (removed 2026-10-12)
 
-There are three moving parts and one contract between them.
+The new-window-per-press path described here was removed when the one
+instance in Neovide replaced it (milestone "One instance toggled by a
+hotkey", B3); kept as a record. There were three moving parts and one
+contract between them.
 
 1. **Host (Hammerspoon).** Owns everything that touches the OS. On Option+V
    it records the frontmost app's bundle id, copies the current selection

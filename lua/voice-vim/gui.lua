@@ -1,4 +1,4 @@
--- voice-vim GUI appearance: make Neovide look like Joe's Ghostty sessions.
+-- voice-vim GUI appearance: make Neovide look like Joe's Ghostty terminal.
 --
 -- In a terminal, a transparent colorscheme (Normal with no guibg) shows the
 -- terminal's background; in Neovide nothing shows through, and Neovide uses

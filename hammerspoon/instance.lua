@@ -1,9 +1,8 @@
 -- instance.lua: Hammerspoon controller for the one long-lived voice-vim.
 --
--- Loaded by hammerspoon/voice-vim.lua in the one-instance mode, with the
--- Neovide host (hammerspoon/hosts/neovide.lua). Ported from
--- spike/host/host.lua without its hosts table: the window that shows nvim is
--- an injected host, and the server and note are driven by bin/voice-vim-host.
+-- Loaded by hammerspoon/voice-vim.lua with the Neovide host
+-- (hammerspoon/hosts/neovide.lua). The window that shows nvim is an
+-- injected host, and the server and note are driven by bin/voice-vim-host.
 --
 --   local instance = dofile(root .. "/hammerspoon/instance.lua")
 --   local c = instance.new({ host = host, deliver = M.submit, root = root })
@@ -65,7 +64,7 @@
 -- the next press launches the host again instead of waiting out
 -- launchGrace.
 --
--- disable(): stop for good (voice-vim.lua fell back to another mode):
+-- disable(): stop for good (a new start() replaced it, or its setup failed):
 -- drops a show waiting for the pre-warm, stops the poll, unbinds the URL
 -- handlers bindURLs() made, and makes toggle/show/hide no-ops.
 --

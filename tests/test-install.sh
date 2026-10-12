@@ -94,6 +94,8 @@ check "fresh: migration ran" 1 "$(grep -c '^ok  *no old Option+V hotkey' <<<"$ou
 check "fresh: Hammerspoon started" 1 "$(grep -cx 'open -g -a Hammerspoon' "$s/calls")"
 check "fresh: no missing lines" 0 "$(grep -c '^missing:' <<<"$out")"
 check "fresh: manual checklist printed" 1 "$(grep -c 'Accessibility for Hammerspoon' <<<"$out")"
+check "fresh: no Ghostty Automation step" 0 "$(grep -c 'Automation for Ghostty' <<<"$out")"
+check "fresh: Ghostty ok as optional" 1 "$(grep -c '^ok  *Ghostty (optional' <<<"$out")"
 # The block is valid Lua and passes no settings, so the module defaults apply.
 if [ -n "$real_nvim" ]; then
   cat > "$tmp/load-init.lua" <<'LUA'
@@ -132,16 +134,21 @@ check "check fresh: exits 0" 0 $st
 check "check fresh: no fake calls" "" "$(cat "$s/calls")"
 check "check fresh: home untouched" "." "$(snapshot | cut -d' ' -f1 | tr '\n' ' ' | sed 's/ $//')"
 check "check fresh: apps untouched" "" "$(ls "$s/apps")"
-for item in Hammerspoon Neovide Neovim Ghostty "Wispr Flow" "module link" "voice-vim block"; do
+for item in Hammerspoon Neovide Neovim "Wispr Flow" "module link" "voice-vim block"; do
   check "check fresh: lists $item as missing" 1 "$(grep -c "^missing: *$item" <<<"$out")"
 done
+check "check fresh: Ghostty is optional, not missing" "0 1" \
+  "$(grep -c '^missing: *Ghostty' <<<"$out") $(grep -c '^skipped *Ghostty not found (optional' <<<"$out")"
 check "check fresh: says nothing changed" 1 "$(grep -c 'nothing was changed' <<<"$out")"
 
-# Ghostty and Wispr Flow missing: missing: lines, never installed.
+# Ghostty and Wispr Flow absent: Wispr Flow is a missing: line, Ghostty is
+# optional (skipped, not counted); neither is installed.
 setup noapps
 out=$(bash "$install" 2>&1); st=$?
 check "no apps: exits 0" 0 $st
-check "no apps: Ghostty missing line" 1 "$(grep -c '^missing: *Ghostty: get it from https://ghostty.org' <<<"$out")"
+check "no apps: Ghostty skipped as optional" 1 "$(grep -c '^skipped *Ghostty not found (optional' <<<"$out")"
+check "no apps: no Ghostty missing line" 0 "$(grep -c '^missing: *Ghostty' <<<"$out")"
+check "no apps: only Wispr Flow counted missing" 1 "$(grep -c '^1 item(s) need you' <<<"$out")"
 check "no apps: Wispr Flow missing line" 1 "$(grep -c '^missing: *Wispr Flow: get it from https://wisprflow.ai' <<<"$out")"
 check "no apps: neither installed" 0 "$(grep -ciE 'ghostty|wispr' "$s/calls")"
 check "no apps: neither app created" no "$([ -e "$s/apps/Ghostty.app" ] || [ -e "$s/apps/Wispr Flow.app" ] && echo yes || echo no)"

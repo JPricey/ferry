@@ -148,8 +148,8 @@ end
 -- Swappable (tests use a recording stub).
 M.host = M.default_host
 
--- Buffer and window settings, as in vim/voice-vim.vim minus the V0
--- process-exit commands. Run with the note displayed in the current window.
+-- Buffer and window settings, keys and commands of a note. Run with the
+-- note displayed in the current window.
 function M.apply_options(buf)
   vim.bo[buf].buflisted = true
   if vim.bo[buf].filetype ~= "markdown" then vim.bo[buf].filetype = "markdown" end
@@ -483,8 +483,7 @@ local function cancel_now(buf)
   M.host.hide({})
 end
 
--- Submit, deciding like bin/voice-vim-session: blank, or unchanged from the
--- seed, is a cancel. Otherwise the text goes to the host with the target.
+-- Submit: blank, or unchanged from the seed, is a cancel. Otherwise the text goes to the host with the target.
 local function submit_now(buf)
   local meta = vim.b[buf].voicevim or {}
   local text = text_of(buf)

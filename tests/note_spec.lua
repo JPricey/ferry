@@ -177,10 +177,6 @@ local function listed(id)
 end
 check("history excludes b:voicevim.id of the note", false, listed(id9))
 check("history lists other notes", true, listed(id1))
-vim.cmd("enew")
-vim.env.VOICE_VIM_SESSION_ID = id1
-check("history falls back to VOICE_VIM_SESSION_ID", "false true", tostring(listed(id1)) .. " " .. tostring(listed(id9)))
-vim.env.VOICE_VIM_SESSION_ID = nil
 show()
 vim.cmd("Cancel")
 

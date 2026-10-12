@@ -64,7 +64,7 @@ end
 
 function M.recording() return M.state.recording end
 
--- Flow was started outside nvim (VOICE_VIM_AUTOSTART_FLOW): treat it as ours.
+-- Treat a Flow recording started elsewhere as ours (tests use it).
 function M.assume_recording() M.state.recording = true end
 
 function M.start()

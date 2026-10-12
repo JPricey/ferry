@@ -21,7 +21,7 @@
       ]
     },
     {
-      "description": "Hyper+V starts a voice-vim session (hammerspoon://voicevim-start)",
+      "description": "Hyper+V shows or hides voice-vim (hammerspoon://voicevim-start)",
       "manipulators": [
         {
           "type": "basic",

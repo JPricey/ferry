@@ -3,8 +3,8 @@
 --
 -- The frame logic (default, restore, clamping) is pure and lives in
 -- lua/voice-vim/frame.lua; this file only reads screens and windows, sets
--- the frame, and saves moves. hammerspoon/voice-vim.lua uses it for the
--- Ghostty session window. The one-instance host adapter (B1) reuses it.
+-- the frame, and saves moves. The Neovide host (hammerspoon/hosts/neovide.lua)
+-- uses it for the one voice-vim window.
 --
 --   local wf = dofile(root .. "/hammerspoon/window-frame.lua").new({
 --     log = log,            -- hs.logger (default: a "voice-vim" logger)
@@ -14,9 +14,9 @@
 --     key = "voice-vim.windowFrame",  -- hs.settings key
 --     fraction = 0.5,       -- default size, as a fraction of the main screen
 --   })
---   local before = wf.snapshot("com.mitchellh.ghostty")  -- before opening
+--   local before = wf.snapshot("com.neovide.neovide")  -- before opening
 --   ... open the window ...
---   wf.adopt("com.mitchellh.ghostty", before)            -- after opening
+--   wf.adopt("com.neovide.neovide", before)            -- after opening
 --
 --   snapshot(bundle)        -> set of the app's current window ids
 --   adopt(bundle, before, timeout, opts)
@@ -25,7 +25,7 @@
 --                           once, then every 0.02 s up to timeout (2 s).
 --                           On a hit: opts.onFound(win) if given, then
 --                           apply and watch unless opts.frame == false. On
---                           a miss: log `frame: session window not found`.
+--                           a miss: log `frame: new window not found`.
 --   apply(win, done)        leave native fullscreen if needed (retry once
 --                           after 0.6 s), set the restored frame with no
 --                           animation, log `frame: default|restored|moved
@@ -35,7 +35,7 @@
 --                           fullscreen, unchanged, or parked off every
 --                           screen. Logs `frame: saved …`.
 --
--- Watching starts only after our frame is applied, so the terminal's own
+-- Watching starts only after our frame is applied, so the app's own
 -- opening frame is never saved. Every hs call is nil-guarded and pcall'd;
 -- nothing here raises after new(). new() raises when frame.lua cannot be
 -- loaded (callers pcall it). Valid for Lua 5.4 and LuaJIT.
@@ -204,7 +204,7 @@ function W.new(cfg)
       o._adoptTimer = nil
       local win = findNew(bundle, before)
       if win then
-        log.i(string.format("frame: session window %s found after %d polls", tostring(winId(win)), polls))
+        log.i(string.format("frame: new window %s found after %d polls", tostring(winId(win)), polls))
         if type(opts.onFound) == "function" then
           local ok, err = pcall(opts.onFound, win)
           if not ok then log.w("frame: onFound: " .. tostring(err)) end
@@ -213,12 +213,12 @@ function W.new(cfg)
         return
       end
       if polls >= maxPolls then
-        log.w(string.format("frame: session window not found after %.1f s (%s)", timeout, tostring(bundle)))
+        log.w(string.format("frame: new window not found after %.1f s (%s)", timeout, tostring(bundle)))
         return
       end
       polls = polls + 1
       o._adoptTimer = after(W.POLL, check)
-      if not o._adoptTimer then log.w("frame: session window not found (no timer)") end
+      if not o._adoptTimer then log.w("frame: new window not found (no timer)") end
     end
     check()
   end

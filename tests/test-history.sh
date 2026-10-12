@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# History: database helper, session recording, and the Neovim sidebar.
+# History: database helper and the Neovim sidebar.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 export VOICE_VIM_DB=$(mktemp -t vv-hist-db).sqlite
@@ -28,21 +28,35 @@ check "outcome recorded" "submitted cancelled" "$("$db" get aaa | python3 -c 'im
 check "delete" "1" "$("$db" list | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')"
 check "VOICE_VIM_HISTORY=0 is a no-op" "1" "$(VOICE_VIM_HISTORY=0 "$db" start zzz x "$seed"; VOICE_VIM_HISTORY=0 "$db" finish zzz submitted "$fin"; "$db" list | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')"
 
-# --- session script records ---------------------------------------------
-ed=$(mktemp -t vv-ed); printf '#!/bin/bash\nprintf "dictated words\\n" > "${@: -1}"\n' > "$ed"; chmod +x "$ed"
-f=$(mktemp -t vv-file); : > "$f"
-VOICE_VIM_DRY_RUN=1 VOICE_VIM_EDITOR="$ed" VOICE_VIM_SESSION_ID=sess1 "$root/bin/voice-vim-session" "$f" com.example.app >/dev/null 2>&1
-check "session script records submit" "submitted dictated words" "$("$db" get sess1 | python3 -c 'import json,sys;r=json.load(sys.stdin);print(r["outcome"],r["preview"])')"
+# --- sidebar in headless neovim, through the note -----------------------
+# A note shown with a stub host opens the sidebar on its left. (Recording a
+# submitted note is covered by tests/test-note.sh.)
+notes=$(mktemp -d -t vv-hist-notes)
+cat > "$notes/spec.lua" <<'LUA'
+local root = arg[1]
+vim.opt.rtp:prepend(root)
+local note = require("voice-vim.note")
+note.host = { submit = function() end, hide = function() end }
+note.show({ target = "com.example.app", window = "4242" })
+local h = require("voice-vim.history")
+local lines = vim.api.nvim_buf_get_lines(h.state.buf, 0, -1, false)
+local out = {}
+out[#out + 1] = "WINS=" .. #vim.api.nvim_list_wins() .. " ROWS=" .. #h.state.rows .. " CUR="
+  .. (vim.api.nvim_get_current_win() == h.state.main_win and "main" or "side")
+out[#out + 1] = "LEFT=" .. tostring(vim.fn.win_screenpos(h.state.win)[2] < vim.fn.win_screenpos(h.state.main_win)[2])
+out[#out + 1] = "LINE1=" .. lines[1]
+vim.api.nvim_set_current_win(h.state.win)
+for ln = 1, #lines do if lines[ln]:find("first line", 1, true) then vim.api.nvim_win_set_cursor(0, { ln, 0 }) end end
+h.insert()
+out[#out + 1] = "MAIN=" .. table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(h.state.main_win), 0, -1, false), "|")
+io.stdout:write(table.concat(out, "\n"), "\n")
+vim.cmd("qall!")
+LUA
+out=$(VOICE_VIM_NOTES_DIR="$notes/n" VOICE_VIM_SIDEBAR=1 perl -e "alarm 20; exec @ARGV" nvim --headless --clean -l "$notes/spec.lua" "$root" 2>&1 | tr -d '\r')
+check "note opens the sidebar, focus stays on the note" "WINS=2 ROWS=1 CUR=main" "$(grep -o 'WINS=[0-9]* ROWS=[0-9]* CUR=[a-z]*' <<<"$out")"
+check "sidebar is on the left" "LEFT=true" "$(grep -o 'LEFT=[a-z]*' <<<"$out")"
+check "sidebar shows date header" "LINE1=── Today" "$(grep '^LINE1=' <<<"$out" | sed 's/ *$//')"
+check "<CR> inserts text into the empty note" "MAIN=first line|second line" "$(grep '^MAIN=' <<<"$out")"
 
-# --- sidebar in headless neovim ----------------------------------------
-main=$(mktemp -t vv-main).md; : > "$main"
-out=$(VOICE_VIM_SIDEBAR=1 VOICE_VIM_SESSION_ID=none perl -e "alarm 20; exec @ARGV" nvim --headless -u NONE -c "source $root/vim/voice-vim.vim" -c 'lua local h=require("voice-vim.history"); local lines=vim.api.nvim_buf_get_lines(h.state.buf,0,-1,false); print("WINS="..#vim.api.nvim_list_wins(), "ROWS="..#h.state.rows, "CUR="..(vim.api.nvim_get_current_win()==h.state.main_win and "main" or "side")); print("LINE1="..lines[1]); vim.api.nvim_set_current_win(h.state.win); h.insert(); print("MAIN="..table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(h.state.main_win),0,-1,false),"|")); vim.cmd("quit!")' -- "$main" 2>&1 | tr -d '\r' | tr '\n' ' ')
-check "sidebar opens left, focus stays on main" "WINS=2 ROWS=2 CUR=main" "$(echo "$out" | grep -o 'WINS=[0-9]* ROWS=[0-9]* CUR=[a-z]*')"
-check "sidebar shows date header" "── Today" "$(echo "$out" | sed 's/.*LINE1=//; s/ MAIN=.*//; s/ *$//')"
-check "<CR> inserts text into empty main buffer" "MAIN=dictated words" "$(echo "$out" | grep -o 'MAIN=[^ ]* [a-z]*' | head -1)"
-VOICE_VIM_SIDEBAR=1 perl -e "alarm 20; exec @ARGV" nvim --headless -u NONE -c "source $root/vim/voice-vim.vim" -c 'quit' -- "$main" >/dev/null 2>&1
-check ":quit from main ends nvim with sidebar open" "exit=0" "exit=$?"
-check "sidebar disabled with VOICE_VIM_SIDEBAR=0" "WINS=1" "$(VOICE_VIM_SIDEBAR=0 perl -e "alarm 20; exec @ARGV" nvim --headless -u NONE -c "source $root/vim/voice-vim.vim" -c 'lua print("WINS="..#vim.api.nvim_list_wins())' -c q -- "$main" 2>&1 | grep -o 'WINS=[0-9]*')"
-
-rm -f "$seed" "$fin" "$empty" "$ed" "$f" "$main" "$VOICE_VIM_DB"
+rm -rf "$seed" "$fin" "$empty" "$notes" "$VOICE_VIM_DB"
 exit $fail

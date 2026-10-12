@@ -85,11 +85,12 @@ else
   say installed "Neovim (brew install neovim)"
 fi
 
-# 4. Apps we only check for: Ghostty (session windows) and Wispr Flow.
+# 4. Apps we only check for: Wispr Flow (required) and Ghostty (optional:
+# Neovide copies its font and background colour; never counted as missing).
 if has_app Ghostty; then
-  say ok "Ghostty"
+  say ok "Ghostty (optional: Neovide uses its font and colour)"
 else
-  say missing: "Ghostty: get it from https://ghostty.org (session windows use it)"
+  say skipped "Ghostty not found (optional: Neovide copies its font and colour when it is installed)"
 fi
 if has_app "Wispr Flow"; then
   say ok "Wispr Flow"
@@ -186,9 +187,7 @@ Once, by hand (macOS allows no script to do these):
   1. Accessibility for Hammerspoon: System Settings > Privacy & Security >
      Accessibility > enable Hammerspoon. Then quit and relaunch Hammerspoon;
      it only checks at launch.
-  2. Automation for Ghostty: the first session window asks whether
-     Hammerspoon may control Ghostty. Click OK.
-  3. Open Neovide once (open -a Neovide) and click Open if macOS asks, so
+  2. Open Neovide once (open -a Neovide) and click Open if macOS asks, so
      it starts without a prompt later. Quit it again.
 
 Hotkey: Ctrl+Option+V. Settings: the voice-vim block in $init.

@@ -2,8 +2,7 @@
 -- instance (GROUND_TRUTHS decision 10). Implements the host interface
 -- documented at the top of hammerspoon/instance.lua.
 --
--- Loaded by hammerspoon/voice-vim.lua in the one-instance mode. Ported
--- from the neovide block of spike/host/host.lua and spike/host/neovide.sh.
+-- Loaded by hammerspoon/voice-vim.lua.
 --
 --   local neovide = dofile(root .. "/hammerspoon/hosts/neovide.lua")
 --   if neovide.available() then
@@ -22,9 +21,8 @@
 --                `open -n -a Neovide --args --server <sock>`. cb(ok, why)
 --                once the task started. Then the first new Neovide window
 --                is adopted by hammerspoon/window-frame.lua: it gets the
---                saved frame (or the default) and moves are saved, shared
---                with the Ghostty session window (hs.settings key
---                voice-vim.windowFrame). If window-frame.lua cannot load,
+--                saved frame (or the default) and moves are saved
+--                (hs.settings key voice-vim.windowFrame). If window-frame.lua cannot load,
 --                a plain poll finds the launched window instead, so a held
 --                show still happens (the frame is then left to Neovide).
 --   show(cb)     app:unhide(), unminimize its window (after Cmd+M),

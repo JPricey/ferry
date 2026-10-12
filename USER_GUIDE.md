@@ -10,9 +10,10 @@ setting, see `guide.md`.
 ## What you need
 
 - macOS with [Homebrew](https://brew.sh).
-- [Wispr Flow](https://wisprflow.ai) installed and working, and
-  [Ghostty](https://ghostty.org) for session windows. `install.sh` checks
-  for both but does not install them.
+- [Wispr Flow](https://wisprflow.ai) installed and working. `install.sh`
+  checks for it but does not install it.
+- Optionally [Ghostty](https://ghostty.org): if it is installed, the
+  voice-vim window copies its font and background colour.
 - Everything else (Hammerspoon, Neovide, Neovim) `install.sh` installs for
   you. Hammerspoon owns the hotkey and does the pasting; Neovide shows
   voice-vim's one always-running window.
@@ -28,12 +29,11 @@ setting, see `guide.md`.
 2. Do the manual steps it lists at the end: give Hammerspoon Accessibility
    (System Settings → Privacy & Security → Accessibility), then quit and
    start Hammerspoon again, since it only checks Accessibility at launch.
-   Open Neovide once and click Open if macOS asks. The first session
-   window asks whether Hammerspoon may control Ghostty; allow it.
+   Open Neovide once and click Open if macOS asks.
 3. The Hammerspoon console (menu bar icon → Console) shows
-   `mode: one instance in Neovide`; if Neovide is missing, an alert says
-   "install Neovide for the one-instance mode" and voice-vim uses session
-   windows until you install it and Reload Config.
+   `mode: one instance in Neovide`. If Neovide is missing, an alert says
+   "Neovide is not installed — run ./install.sh", and every press of the
+   hotkey shows that alert again until you install it and Reload Config.
 
 `./install.sh --check` reports what is installed and what is missing, and
 changes nothing. Re-run `./install.sh` any time; it is also where any new
@@ -75,7 +75,7 @@ All of these work in insert mode, so you never have to leave it.
 | `<leader>d` | Start Wispr Flow from normal mode (`:Dictate`). |
 | `<leader>h` | Show or hide the history sidebar (`:History`). |
 
-## Three ways to dictate
+## Two ways to dictate
 
 - **Hold to talk.** Hold your normal Wispr Flow shortcut, speak, let go.
   This works in the voice-vim buffer like in any other app, and needs
@@ -84,9 +84,6 @@ All of these work in insert mode, so you never have to leave it.
   you like, press it again to stop. You stay in insert mode. If you stop
   Flow with its own shortcut instead, that is fine: the next Ctrl-S starts
   a new recording.
-- **Start listening on open** (session windows only). Set
-  `autoStartFlow = true` (see Settings) and Flow starts listening as soon
-  as the window opens.
 
 Stop a recording with Flow's shortcut or Ctrl-S, not Escape. Escape only
 leaves insert mode in Vim.
@@ -97,10 +94,9 @@ Ctrl-X sends the text to the window you were in when you pressed the
 hotkey, not just that app. Two Ghostty windows, or two Slack windows, are
 told apart.
 
-- In session windows, if you had text selected when you pressed the
-  hotkey, the buffer starts with that text, and sending replaces the
-  selection. The one window skips this by default so it appears
-  instantly; `captureSelection = true` turns it on.
+- With `captureSelection = true` in Settings, text you had selected when
+  you pressed the hotkey starts a new note, and sending replaces the
+  selection. It is off by default so the window appears instantly.
 - If you send while Flow is still recording (started with Ctrl-S), voice-vim
   stops Flow first and waits up to 4 seconds for its text, so your last
   words are included.
@@ -141,7 +137,7 @@ On an entry in the sidebar:
 | `K` | Preview the full text |
 | `d` | Delete it |
 
-Cancelled sessions that had text are marked with `~`. The history lives in
+Cancelled notes that had text are marked with `~`. The history lives in
 `~/Library/Application Support/voice-vim/history.sqlite`.
 
 ## The window
@@ -150,14 +146,6 @@ The first time, the window opens centred on your main screen at half its
 width and height. Move or resize it, and it comes back in the same place at
 the same size. If that place was on a monitor you have since unplugged, it
 moves onto your main screen.
-
-## Session windows
-
-With `mode = "session"` in Settings, or when Neovide is not installed,
-each press opens a new Ghostty window with Neovim instead of showing the
-one window. The keys are the same; sending or cancelling closes that
-window, and there are no drafts. The first time, macOS asks whether
-Hammerspoon may control Ghostty. Allow it.
 
 ## Other ways to start
 
@@ -176,22 +164,23 @@ from the Hammerspoon menu bar icon. Leave out any line to keep its default.
 ```lua
 require("voice-vim").start({
   hotkey = { { "ctrl", "alt" }, "v" },  -- the hotkey ("alt" is Option)
-  mode = "instance",        -- or "session": a new Ghostty window per press
-  captureSelection = nil,   -- start with the selected text (default: session only)
-  autoStartFlow = false,    -- session only: start Flow when the window opens
-  terminal = "ghostty",     -- session only: or "iTerm2"
+  captureSelection = false, -- start a new note with the selected text
   confirmTimeout = 1.0,     -- seconds to wait for the target window
   rememberFrame = true,     -- reopen the window where you left it
   windowSize = 0.5,         -- first-open size, as a fraction of the screen
 })
 ```
 
-Environment variables: `VOICE_VIM_EDITOR` picks another editor than
-`nvim`, `VOICE_VIM_HISTORY=0` stops saving history, `VOICE_VIM_SIDEBAR=0`
-keeps the sidebar closed, and `VOICE_VIM_DB` moves the history database.
+Older settings (`mode`, `terminal`, `autoStartFlow`, `windowTitle`) are no
+longer used; voice-vim logs a warning for each and ignores it.
 
-Neovide uses Ghostty's font, size and background colour, so the note looks
-like your terminal even with a transparent colorscheme. They are read when
+Environment variables: `VOICE_VIM_HISTORY=0` stops saving history,
+`VOICE_VIM_SIDEBAR=0` keeps the sidebar closed, and `VOICE_VIM_DB` moves the
+history database.
+
+If Ghostty is installed, Neovide uses its font, size and background
+colour, so the note looks like your terminal even with a transparent
+colorscheme. They are read when
 the Neovim server starts (Reload Config to pick up Ghostty changes);
 `VOICE_VIM_GUI_FONT` (for example `Menlo:h14`) and `VOICE_VIM_GUI_BG` (for
 example `#001e27`) override them. Each time the note appears, other splits
@@ -206,10 +195,10 @@ with how long it took, the target, the window, each check, the paste.
 - **Nothing was pasted.** Look for "copied — paste manually". The text is
   on your clipboard; paste it by hand. The console shows which check
   failed.
-- **A new Ghostty window opens instead of the one window.** Neovide is
-  missing or setting up the one window failed when Hammerspoon loaded; the
-  console's `mode:` line says why. Install Neovide (`brew install --cask
-  neovide`) and Reload Config.
+- **The hotkey only shows an alert.** Neovide is missing, or setting up
+  the one window failed when Hammerspoon loaded; the alert and the
+  console's `mode:` line say why. Run `./install.sh` (it installs Neovide)
+  and Reload Config.
 - **"Neovide did not appear" or "could not open the note".** The press did
   not get the window up (Neovide did not start, or its Neovim server did
   not). The console says which step failed. Press the hotkey again: it
@@ -220,9 +209,6 @@ with how long it took, the target, the window, each check, the paste.
   pick a different `hotkey`, or use the start URL.
 - **Submit says it needs Accessibility.** Grant it to Hammerspoon, then
   quit and restart Hammerspoon.
-- **A Ghostty window says "Process exited".** It is left over from an older
-  session. Press any key in it to close it. Current versions close the
-  window themselves.
 - **The sidebar shows the wrong app.** It shows the app that was in front
   when you pressed the hotkey. Make sure the app you want to paste into is
   in front before you press it.
