@@ -47,8 +47,8 @@ Sections:
 9. **The window is where Joe left it.** Not fullscreen. The first open is
    centred on the main screen at 50% of its width and 50% of its height.
    After that it opens at the position and size Joe last gave it.
-10. **Ending a session leaves nothing behind.** No leftover window or
-    "Process exited" screen after sending or cancelling.
+10. **Ending a note leaves nothing behind.** Sending and cancelling hide
+    the one window; no other window is left open.
 11. **Speech comes from the Wispr Flow desktop app.** No custom
     speech-to-text, so Flow's dictionary and style learning keep working.
 
@@ -75,23 +75,33 @@ Sections:
    ferry windows, or send keys to other apps. Tests use a temp
    `FERRY_DB`, their own nvim servers and `tmux -L ferry-test`.
    Every commit leaves ferry working.
-7. **Ghostty sessions open through AppleScript** (`new window with
-   configuration`), never `open -na Ghostty.app --args -e`, which starts a
-   second Ghostty per session that never quits.
+7. **ferry never opens terminal windows.** The one instance is the ferry
+   window (Neovide); the old per-press Ghostty windows were removed
+   (2026-10-12).
 8. **Fleet integrates through a contract, not code.** ferry does not
    edit the fleet repo.
 9. **No secrets in the repo.** Wispr's `config.json` holds tokens and is
    never copied here.
 10. **The one instance runs in Neovide** (Joe, 2026-10-11). Show and hide
     are a plain app unhide and hide, so the composer never raises or
-    disturbs Ghostty work windows. Fallback, if Wispr Flow does not paste
-    into Neovide: a dedicated Ghostty window.
+    disturbs Ghostty work windows. Joe's checks passed (2026-10-12), so
+    there is no fallback host: without Neovide, ferry alerts and does
+    nothing.
 11. **Notes are markdown files** (Joe, 2026-10-11). Each note is a file in
     a notes folder and that file is the source of truth. SQLite is only a
     search index that can be rebuilt from the files.
 12. **No selection grab by default in the one instance** (Joe, 2026-10-11).
     Copying the selection costs up to 0.4 s per press, which breaks the
     instant show. A setting turns it back on.
+13. **Note files live in `~/notes/scratchpads/`** (Joe, 2026-10-12), one
+    `.md` per note, not in this repo. ferry owns that folder;
+    `notesDir`/`FERRY_NOTES_DIR` override it.
+14. **Two hotkeys** (Joe, 2026-10-12). Ctrl+Option+V shows and hides the
+    note; Ctrl+Option+B is hold to talk (Flow records while it is held, and
+    the text lands in the note).
+15. **The project is called ferry** (Joe, 2026-10-12). It was renamed from
+    its first name everywhere at once, with no aliases; git history is left
+    as it was.
 
 ## Implementation details
 
@@ -99,10 +109,10 @@ Sections:
    modifier is Option. On Joe's macOS 26.6, Option+V did bind (2026-10-11),
    so the old flakiness was intermittent, not a refused bind. A failed bind
    now logs an error and shows an alert.
-2. **Bare PATH in Ghostty commands.** A Ghostty command runs with launchd's
-   bare environment, so scripts prepend Homebrew and `~/.local/bin` to PATH
-   and print absolute paths (for example the full `nvim` path) for anything
-   Ghostty runs.
+2. **Bare PATH for anything Hammerspoon launches.** `ferry-host` and the
+   ferry window run with launchd's bare environment, so scripts prepend
+   Homebrew and `~/.local/bin` to PATH and use absolute paths (for example
+   the full `nvim` path).
 3. **Detecting Flow's paste.** Flow pastes with Cmd+V, which reaches
    terminal nvim as a bracketed paste. ferry wraps `vim.paste` to know
    that Flow pasted; Neovide's `<D-v>` mapping signals the same. Counting
@@ -115,24 +125,19 @@ Sections:
 5. **Flow deep links run one at a time, with a timeout.** Two quick `open`
    calls could reach Flow as stop-then-start. They are queued, and each has
    a 5 s timeout so a hung `open` cannot block later ones.
-6. **Finding the session window.** Ghostty's AppleScript returns its own
-   window id, not an `hs.window` id, and the title is not set. Hammerspoon
-   diffs Ghostty's window ids before and after opening to find the new
-   window.
+6. **Finding the ferry window.** `window-frame.lua` diffs the ferry app's
+   window ids (ferry.app, else Neovide) before and after launch to find the
+   new window. Only the process started with `--server <ferry socket>` is
+   ever shown, hidden or quit.
 7. **Remembering the window frame.** Cancel never calls Hammerspoon, so the
    frame is saved on every move or resize (per-window watcher, debounced)
-   in `hs.settings` key `ferry.windowFrame`. Ghostty's opening frame is
+   in `hs.settings` key `ferry.windowFrame`. The window's opening frame is
    never saved. A saved frame whose screen is gone moves onto the main
-   screen. `rememberFrame = false` leaves the window to Ghostty.
-8. **Ghostty does not always close the window.** Ghostty 1.3.1 shows
-   "Process exited. Press any key to close the terminal." after a session
-   ends, even with `wait after command:false` and exit code 0. So
-   Hammerspoon closes the session window itself on submit and cancel
-   (milestone "Close the session window cleanly").
-9. **Test isolation details.** macOS limits socket paths to 104 bytes, so
+   screen. `rememberFrame = false` leaves the window to Neovide.
+8. **Test isolation details.** macOS limits socket paths to 104 bytes, so
    test sockets live under `/tmp`. Tests that clean up with
    `pkill -f "--listen $work/"` check that `mktemp` succeeded first, so an
    empty path can never match Joe's own nvim.
-10. **Hammerspoon Lua runs on 5.4; tests run on LuaJIT.** Code loaded by
-    Hammerspoon must parse under both: no `//`, `<const>` or bitwise
-    operators.
+9. **Hammerspoon Lua runs on 5.4; tests run on LuaJIT.** Code loaded by
+   Hammerspoon must parse under both: no `//`, `<const>` or bitwise
+   operators.
