@@ -109,34 +109,46 @@ done
 
 # >>> BEGIN one-time migration from voice-vim, the old name (R2 removes it) >>>
 # An old install has ~/.hammerspoon/voice-vim.lua, a require("voice-vim")
-# block in init.lua, a server on $TMPDIR/voice-vim.sock or the data folder
-# ~/Library/Application Support/voice-vim. Moving it: save the open draft
-# (the old server still has voice-vim.note in memory), copy the old notes,
-# stop the old Neovide and server (only the processes on the old socket),
-# move the data folder, move the saved window frame (hs -c, before the
-# reload), drop the old link (step 6 makes the new one) and rename the
-# init.lua block (with a .bak). Each action prints one status line.
+# block in init.lua, a server on <some TMPDIR>/voice-vim.sock or the data
+# folder ~/Library/Application Support/voice-vim. Moving it: save the open
+# draft (the old server still has voice-vim.note in memory), copy the old
+# notes, stop the old Neovide and server (only the processes on an old
+# socket), move the data folder, move the saved window frame (hs -c,
+# before the reload), drop the old link (step 6 makes the new one) and
+# rename the init.lua block (with a .bak). Each action prints one status
+# line. The old socket is found by its basename in process args too, so a
+# server started under a different TMPDIR is still found.
 old_tmp=${TMPDIR:-/tmp}; old_tmp=${old_tmp%/}
-old_sock="$old_tmp/voice-vim.sock"
 old_link="$hsdir/voice-vim.lua"
 old_data="$HOME/Library/Application Support/voice-vim"
 new_data="$HOME/Library/Application Support/ferry"
+new_notes="$old_tmp/ferry-notes"
 old_require='require("voice-vim")'
+# Every old socket: $TMPDIR/voice-vim.sock if present, and each absolute
+# path whose basename is exactly voice-vim.sock after --server or --listen
+# in a running process's args. One path per line, no duplicates.
+old_socks() {
+  local all; all=$(ps -axww -o command= | sed 's/$/ /')
+  { [ -S "$old_tmp/voice-vim.sock" ] && echo "$old_tmp/voice-vim.sock"
+    grep -oE -- '--(server|listen) /([^ ]*/)?voice-vim\.sock ' <<<"$all" |
+      sed -E 's/^--(server|listen) //; s/ $//'
+  } | awk 'NF && !seen[$0]++' || true
+}
 old_found() {
-  [ -L "$old_link" ] || [ -e "$old_link" ] || [ -S "$old_sock" ] || [ -d "$old_data" ] ||
+  [ -L "$old_link" ] || [ -e "$old_link" ] || [ -n "$(old_socks)" ] || [ -d "$old_data" ] ||
     { [ -f "$init" ] && grep -qF "$old_require" "$init"; }
 }
-# Pids of processes whose command line contains $1. ps runs first, so the
-# filters below never match themselves.
+# Pids of processes with the exact argument pair "$1 $2" (flag and socket)
+# on their command line. ps runs first, so the filters never match themselves.
 old_pids() {
-  local all; all=$(ps -axww -o pid= -o command=)
-  grep -F -- "$1" <<<"$all" | awk -v me=$$ '$1 != me { print $1 }' || true
+  local all; all=$(ps -axww -o pid= -o command= | sed 's/$/ /')
+  grep -F -- " $1 $2 " <<<"$all" | awk -v me=$$ '$1 != me { print $1 }' || true
 }
-old_nvim() { # nvim talking to the old server, cut off after 5 s
-  local nv; nv=$(command -v nvim || echo /opt/homebrew/bin/nvim)
-  perl -e 'alarm 5; exec @ARGV' "$nv" --server "$old_sock" "$@" 2>/dev/null
+old_nvim() { # old_nvim <socket> <args>: nvim talking to an old server, cut off after 5 s
+  local nv sock=$1; shift; nv=$(command -v nvim || echo /opt/homebrew/bin/nvim)
+  perl -e 'alarm 5; exec @ARGV' "$nv" --server "$sock" "$@" 2>/dev/null
 }
-old_alive() { [ -S "$old_sock" ] && [ "$(old_nvim --remote-expr 1)" = 1 ]; }
+old_alive() { [ -S "$1" ] && [ "$(old_nvim "$1" --remote-expr 1)" = 1 ]; }
 # Wait up to 5 s until none of the given pids is running.
 old_wait_gone() {
   local i p up
@@ -154,38 +166,59 @@ elif [ "$dry" = 1 ]; then
   echo "+ migrate the voice-vim install (draft, notes, Neovide, server, data, window frame, link, init.lua)"
   say skipped "voice-vim migration (dry run)"
 else
-  # Save the open draft while the old server still answers.
-  if old_alive; then
-    saved=$(old_nvim --remote-expr "luaeval('(function() local ok, n = pcall(require, \"voice-vim.note\"); if not ok or type(n) ~= \"table\" or type(n.draft) ~= \"function\" then return \"\" end; local ok2, p = pcall(n.draft); return ok2 and tostring(p or \"\") or \"\" end)()')" || true)
-    if [ -n "$saved" ]; then say installed "saved the open voice-vim draft ($saved)"
-    else say ok "no open voice-vim draft to save"; fi
-  fi
-  for pair in voice-vim-notes:ferry-notes voice-vim-outbox:ferry-outbox; do
-    from="$old_tmp/${pair%%:*}" to="$old_tmp/${pair#*:}"
-    if [ -d "$from" ]; then
-      mkdir -p "$to"; cp -Rn "$from/." "$to/" 2>/dev/null || true
-      say installed "copied notes $from -> $to"
+  socks=$(old_socks)
+  # Save the open draft while each old server still answers.
+  drafts=""
+  while IFS= read -r sock; do
+    [ -n "$sock" ] && old_alive "$sock" || continue
+    saved=$(old_nvim "$sock" --remote-expr "luaeval('(function() local ok, n = pcall(require, \"voice-vim.note\"); if not ok or type(n) ~= \"table\" or type(n.draft) ~= \"function\" then return \"\" end; local ok2, p = pcall(n.draft); return ok2 and tostring(p or \"\") or \"\" end)()')" || true)
+    # draft() may prefix the path ("waiting for flow <path>"): keep the path.
+    case "$saved" in */*) drafts+="/${saved#*/}"$'\n' ;; esac
+  done <<<"$socks"
+  # Copy the notes and outbox from $TMPDIR and from each old socket's folder.
+  dirs=$( { echo "$old_tmp"; if [ -n "$socks" ]; then sed 's|/[^/]*$||' <<<"$socks"; fi; } | awk '!seen[$0]++')
+  while IFS= read -r dir; do
+    for pair in voice-vim-notes:ferry-notes voice-vim-outbox:ferry-outbox; do
+      from="$dir/${pair%%:*}" to="$old_tmp/${pair#*:}"
+      if [ -d "$from" ]; then
+        mkdir -p "$to"; cp -Rn "$from/." "$to/" 2>/dev/null || true
+        say installed "copied notes $from -> $to"
+      fi
+    done
+  done <<<"$dirs"
+  # Name each saved draft that has text by its new path.
+  shown=0
+  while IFS= read -r d; do
+    [ -n "$d" ] && [ -f "$d" ] && grep -q '[^[:space:]]' "$d" || continue
+    to="$new_notes/${d##*/}"
+    [ -e "$to" ] || { mkdir -p "$new_notes"; cp -p "$d" "$to"; }
+    say installed "your draft from the old server: $to (open it and paste it into a ferry note)"
+    shown=1
+  done <<<"$drafts"
+  [ $shown = 1 ] || [ -z "$socks" ] || say ok "no open voice-vim draft with text to save"
+  while IFS= read -r sock; do
+    [ -n "$sock" ] || continue
+    # The old Neovide: only the process started with --server <old socket>.
+    pids=$(old_pids --server "$sock")
+    if [ -n "$pids" ]; then
+      # shellcheck disable=SC2086 # one pid per word
+      kill $pids 2>/dev/null || true
+      if old_wait_gone $pids; then say installed "stopped the old Neovide (pid $(echo $pids))"
+      else say missing: "the old Neovide (pid $(echo $pids)) did not quit: quit it by hand"; fi
     fi
-  done
-  # The old Neovide: only the process started with --server <old socket>.
-  pids=$(old_pids "--server $old_sock")
-  if [ -n "$pids" ]; then
+    # The old server: ask it to quit, then the process listening on the socket.
+    pids=$(old_pids --listen "$sock") up=0
+    if old_alive "$sock"; then
+      up=1
+      old_nvim "$sock" --remote-expr "luaeval('vim.schedule(function() vim.cmd(\"silent! wall | qall!\") end)')" >/dev/null || true
+    fi
     # shellcheck disable=SC2086 # one pid per word
-    kill $pids 2>/dev/null || true
-    if old_wait_gone $pids; then say installed "stopped the old Neovide (pid $(echo $pids))"
-    else say missing: "the old Neovide (pid $(echo $pids)) did not quit: quit it by hand"; fi
-  fi
-  # The old server: ask it to quit, then the process listening on the socket.
-  if old_alive; then
-    old_nvim --remote-expr "luaeval('vim.schedule(function() vim.cmd(\"silent! wall | qall!\") end)')" >/dev/null || true
-  fi
-  pids=$(old_pids "--listen $old_sock")
-  # shellcheck disable=SC2086 # one pid per word
-  if [ -n "$pids" ] && ! old_wait_gone $pids; then kill $pids 2>/dev/null || true; old_wait_gone $pids || true; fi
-  if [ -S "$old_sock" ] || [ -n "$pids" ]; then
-    rm -f "$old_sock"
-    say installed "stopped the old server ($old_sock)"
-  fi
+    if [ -n "$pids" ] && ! old_wait_gone $pids; then kill $pids 2>/dev/null || true; old_wait_gone $pids || true; fi
+    if [ -S "$sock" ] || [ -n "$pids" ] || [ $up = 1 ]; then
+      rm -f "$sock"
+      say installed "stopped the old server ($sock)"
+    fi
+  done <<<"$socks"
   if [ -d "$old_data" ]; then
     if [ -e "$new_data" ]; then
       say missing: "both $old_data and $new_data exist: merge them by hand"
