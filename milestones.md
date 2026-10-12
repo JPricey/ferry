@@ -19,7 +19,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 
 - **Diagnose paste and the hotkey: Joe checks** (all tasks done, agent checks pass). Do these in order:
   1. ~~Done 2026-10-11: Option+V binds and opens a session.~~ Open the Hammerspoon console, then Reload Config. Your `init.lua` still sets Option+V, so look for `bound alt+v` or `failed to bind alt+v` (plus an Option-only warning), and for any `hs.hotkey` error line (Hammerspoon may log the bind failure itself and still return an object). Then press Option+V and note whether a session opens. Write the result here; it answers "did Option+V fail to bind on macOS 26?".
-  2. In a terminal: `~/Code/voice-vim/bin/voice-vim-migrate-init`. It prints the removed line and the backup path (`~/.hammerspoon/init.lua.bak`). Reload Config again and confirm the console shows `bound ctrl+alt+v` with no error. Press Ctrl+Option+V once and confirm a session opens.
+  2. ~~Done 2026-10-11: migrated; Ctrl+Option+V works.~~ In a terminal: `~/Code/voice-vim/bin/voice-vim-migrate-init`. It prints the removed line and the backup path (`~/.hammerspoon/init.lua.bak`). Reload Config again and confirm the console shows `bound ctrl+alt+v` with no error. Press Ctrl+Option+V once and confirm a session opens.
   3. Optional: `cp ~/Code/voice-vim/karabiner/voice-vim-hyper.json ~/.config/karabiner/assets/complex_modifications/`, then Karabiner-Elements → Complex Modifications → Add rule → enable both voice-vim rules. Hold right Command and press V and confirm a session opens. Tap right Command alone and confirm it still acts as Command.
   4. Ten submits in a row, spread across Slack, the Claude app and a Claude Code pane in Ghostty/tmux (use two Ghostty windows, so the wrong-window case is tested). Each should either land in the window you started from, or show "copied — paste manually" with the text on the clipboard. For any miss, copy the `voice-vim` lines from the console here (they log target, window, focus, each frontmost check, settle and the keystroke).
   - When 1–4 pass, set the milestone to `done`. The next milestone, "One instance toggled by a hotkey", has a hard need on the host spike, not on this one.
@@ -73,6 +73,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-11: all tasks done; status → verifying.
   - 2026-10-11: agent checks pass (all five test scripts, karabiner JSON valid, luajit syntax check); status → needs-joe.
   - 2026-10-11: Joe check 1: on macOS 26.6, after Reload Config with the explicit Option+V line, Option+V binds and opens a session (Ghostty window, nvim with sidebar, insert mode). So Option+V is not refused outright; the earlier flakiness was intermittent, not a bind failure. Moving to Ctrl+Option+V still stands (fewer conflicts; Option+V types √ when missed).
+  - 2026-10-11: Joe check 2: ran `bin/voice-vim-migrate-init` (removed line 5, backup `~/.hammerspoon/init.lua.bak`), reloaded; Ctrl+Option+V opens a session.
 
 ## Single-instance host spike
 
