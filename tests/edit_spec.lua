@@ -236,5 +236,28 @@ check("abort with Flow recording in the note: aborted at once, Flow still record
 vim.paste({ " x" }, -1)
 evs()
 
+-- --- a pending edit wins the hotkey: live upgrade, release --force ----------
+-- A server whose loaded edit module predates api 3 (no on_show): the note
+-- reloads it, keeping the pending edit.
+file, done = files("hot\n")
+edit.start({ file = file, done = done })
+vim.cmd("stopinsert")
+vim.cmd("tabnext 1")
+edit.api = 2
+local shown = note.show({ target = "com.other", window = "7", seed = "" })
+local edit3 = package.loaded["ferry.edit"]
+check("show with an api-2 edit module and an edit pending: reloaded, edit kept and shown",
+  file .. " 3 true hot", shown .. " " .. tostring(edit3.api) .. " " .. tostring(edit3.pending()) .. " " .. lines())
+check("release --force with Flow idle in the edit: forced, waiting on the edit buffer",
+  "forced true", note.release({ force = "1" }) .. " " .. tostring(flow.state.waiting
+    and flow.state.waiting.buf == vim.fn.bufnr(file)))
+vim.paste({ "said " }, -1)
+vim.wait(1000, function() return flow.state.waiting == nil end, 10)
+check("the forced stop's paste ended the wait in the edit", "true nil",
+  tostring(lines():find("said ", 1, true) ~= nil) .. " " .. tostring(flow.state.waiting))
+edit3.abort({ done = done })
+check("with no edit pending, show is the note again", npath, note.show({ target = "com.example.app", window = "4242", seed = "" }))
+evs()
+
 say(fail == 0 and "edit_spec: all ok" or "edit_spec: FAILED")
 os.exit(fail)

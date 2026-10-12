@@ -112,7 +112,7 @@ printf 'keep\n# no newline' >"$f"; cp "$f" "$work/b.orig"
 ask "luaeval('(function() require\"ferry.edit\".api = 1; return 1 end)()')" >/dev/null
 run "$f"
 started
-check "an older loaded edit module is reloaded (api 2), the edit in its state" "2 true" \
+check "an older loaded edit module is reloaded (api 3), the edit in its state" "3 true" \
   "$(ask "luaeval('require\"ferry.edit\".api')") $(pending)"
 focus; sleep 0.3
 send 'junk<C-q>'

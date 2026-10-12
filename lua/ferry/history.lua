@@ -30,7 +30,8 @@ local M = {}
 -- that database.
 -- 4: / searches (state.query), open and R sync the index first; the old
 -- history database is no longer written or read.
-M.api = 4
+-- 5: one-line notices (ferry.notice).
+M.api = 5
 
 M.width = 38
 -- query: the active search ("" or nil: none).

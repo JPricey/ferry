@@ -92,14 +92,16 @@ local function say(msg, level) require("ferry.notice").notify(msg, level) end
 -- pick up: bin/ferry-host reloads the module (keeping M.state and a
 -- swapped M.host) when the loaded one reports a different api.
 -- 15: one-line notices; a wiped buffer's note keeps its fork's file id.
-M.api = 15
+-- 16: a pending $EDITOR edit wins show, talk, release and draft.
+M.api = 16
 
 -- history api 4: the browser on the notes index (open, send, pin, ...,
--- / search; opening syncs). A sidebar the old module opened keeps its
--- keys bound to the old functions (and, before api 3, lists rows of the
--- old database), so rebind its keys to the new ones and list it again.
+-- / search; opening syncs); 5: one-line notices. A sidebar the old
+-- module opened keeps its keys bound to the old functions (and, before
+-- api 3, lists rows of the old database), so rebind its keys to the new
+-- ones and list it again.
 local function history()
-  return current("ferry.history", 4, function(_, new)
+  return current("ferry.history", 5, function(_, new)
     if new.is_open() then
       new.bind_keys(new.state.buf)
       vim.schedule(function() pcall(new.refresh) end)
@@ -806,12 +808,24 @@ end
 
 local function on(v) return v ~= nil and v ~= "" and v ~= "0" and v ~= false and v ~= 0 end
 
+-- A pending $EDITOR edit wins the hotkey: show, talk, release and draft
+-- go to lua/ferry/edit.lua (api 3: on_show, ...) while one is pending.
+-- Returns that module, or nil. A server that never loaded it has none.
+local function pending_edit()
+  if not package.loaded["ferry.edit"] then return nil end
+  local e = current("ferry.edit", 3)
+  if (e.api or 0) >= 3 and e.pending() then return e end
+  return nil
+end
+
 -- Show the note: resume the unfinished one unless seeded, else open a fresh
 -- note. opts: { target, window, seed = seed file path, dir = notes folder,
 -- sidebar = "0" to leave the history sidebar closed, talk = "1" when
 -- Hammerspoon has started Flow (hold to talk) }.
 -- A resumed note takes the new target and window. Returns the note's path.
 function M.show(opts)
+  local edit = pending_edit()
+  if edit then return edit.on_show(opts) end
   opts = opts or {}
   if opts.dir and opts.dir ~= "" then M.state.dir = opts.dir end
   M.state.captured = { target = opts.target or "", window = opts.window or "" }
@@ -831,6 +845,8 @@ end
 -- layout change. Enter insert mode at the cursor (like `a`) and tell flow that Hammerspoon started a recording. Returns
 -- "talk <path>", or "no note".
 function M.talk(opts)
+  local edit = pending_edit()
+  if edit then return edit.on_talk(opts) end
   use_dir(opts)
   local note = M.state.note
   if not note then return "no note" end
@@ -849,6 +865,8 @@ end
 -- and stop it anyway (the key-up stop Hammerspoon sends only while the note
 -- is focused, so the paste lands here): returns "forced".
 function M.release(opts)
+  local edit = pending_edit()
+  if edit then return edit.on_release(opts) end
   use_dir(opts)
   local note = M.state.note
   local buf = note and note_buf(note) or vim.api.nvim_get_current_buf()
@@ -886,6 +904,8 @@ M.FLOW_WAIT = "waiting for flow"
 -- A key-up release wait has nothing to run after the paste, so draft()
 -- makes it a Hide; a Submit or Cancel wait is left as it is.
 function M.draft(opts)
+  local edit = pending_edit()
+  if edit then return edit.on_draft(opts) end
   use_dir(opts)
   local note = M.state.note
   if not note then return "" end

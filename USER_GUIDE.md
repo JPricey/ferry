@@ -271,7 +271,9 @@ comes back untouched. Dictate with Ctrl-S as in a note. Then:
   to the terminal. The tool sees exit code 0.
 - **Ctrl-Q** (or `ZQ`) leaves the file exactly as it was and exits 1. Git
   then reports a problem with the editor and does not commit.
-- `:q` hides ferry and leaves the edit open; the terminal keeps waiting.
+- `:q` or the hotkey hides ferry and leaves the edit open; the terminal
+  keeps waiting. Until you press Ctrl-X or Ctrl-Q, the hotkey brings the
+  edit back, not your note, and hold to talk dictates into the edit.
 - Ctrl-C in the terminal ends the edit in ferry without saving.
 
 One edit at a time. When ferry cannot take the edit, `ferry-edit` opens

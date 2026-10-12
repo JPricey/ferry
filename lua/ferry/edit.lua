@@ -34,11 +34,19 @@
 -- One edit at a time. start answers `busy` while one is pending, or while
 -- Flow is busy in the note (recording, or a finish still waiting for its
 -- paste), since the note must stay in front for that paste.
+--
+-- A pending edit wins the hotkey (note api 16 and later): while pending()
+-- is true, note.show, talk, release and draft hand their call to
+-- on_show, on_talk, on_release and on_draft here, so the hotkey re-shows
+-- the edit tab, the talk key dictates at the edit's cursor, and the hotkey
+-- pressed in ferry hides with the edit still pending. The note, its
+-- captured target and its draft are left alone.
 local M = {}
 
 -- Bumped when callers (note.lua, bin/ferry-edit) need functions an older
 -- loaded module lacks; a reload keeps M.state.
-M.api = 2
+-- api 3: on_show, on_talk, on_release, on_draft.
+M.api = 3
 
 -- The pending edit: { file, done, buf, tab = edit tab, prev_tab = the tab
 -- it came from, showtabline = value before, shown = FocusGained since } or
@@ -297,5 +305,87 @@ end
 
 -- True while an edit is pending.
 function M.pending() return M.state.edit ~= nil end
+
+local function on(v) return v ~= nil and v ~= "" and v ~= "0" and v ~= false and v ~= 0 end
+
+-- note.show while an edit is pending (the hotkey from another app): show
+-- the edit tab in insert mode instead of the note. opts.talk (hold to
+-- talk; Hammerspoon has started Flow): Flow is recording into the edit.
+-- The seed, target and window are ignored: the note keeps its own.
+-- Returns the edit's file.
+function M.on_show(opts)
+  local file = M.show()
+  if file ~= "none" and opts and on(opts.talk) then flow().adopt_start() end
+  return file
+end
+
+-- Insert mode at the cursor, like `a` from normal mode (already in insert
+-- mode: the cursor stays). As note.lua's insert_here.
+local function insert_here(buf)
+  if vim.fn.mode():sub(1, 1) == "i" then return end
+  local win = vim.api.nvim_get_current_win()
+  local row, col = unpack(vim.api.nvim_win_get_cursor(win))
+  local line = vim.api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or ""
+  local after = col + #vim.fn.strcharpart(line:sub(col + 1), 0, 1)
+  if line ~= "" and after >= #line then
+    vim.cmd("startinsert!")
+  else
+    if line ~= "" then vim.api.nvim_win_set_cursor(win, { row, after }) end
+    vim.cmd("startinsert")
+  end
+end
+
+-- note.talk while an edit is pending (the talk key with ferry in front):
+-- dictate at the edit's cursor (the edit tab is brought back first when
+-- another tab is current). Returns "talk <file>", or "no note" when the
+-- edit buffer is gone.
+function M.on_talk()
+  local e = M.state.edit
+  if not (e and vim.api.nvim_buf_is_valid(e.buf)) then return "no note" end
+  if vim.api.nvim_get_current_buf() ~= e.buf then
+    if M.show() == "none" then return "no note" end
+  else
+    insert_here(e.buf)
+  end
+  flow().adopt_start()
+  return "talk " .. e.file
+end
+
+-- note.release while an edit is pending (talk key up): stop Flow and wait
+-- for its paste into the edit buffer. As note.release: "released",
+-- "idle", or "forced" with opts.force.
+function M.on_release(opts)
+  local e = M.state.edit
+  local buf = (e and vim.api.nvim_buf_is_valid(e.buf)) and e.buf or vim.api.nvim_get_current_buf()
+  local f = flow()
+  if f.release(buf) then return "released" end
+  if not (opts and on(opts.force)) then return "idle" end
+  f.assume_recording()
+  f.release(buf)
+  return "forced"
+end
+
+-- note.draft while an edit is pending (the hotkey with ferry in front):
+-- leave the edit pending and let Hammerspoon hide ferry; the note's draft
+-- was saved when the edit started. While Flow is recording or a wait for
+-- its paste runs, ferry must stay in front for that paste: the edit hides
+-- itself after it (as :Hide does; a key-up release wait becomes that
+-- Hide) and this returns "waiting for flow <file>", so the caller does not
+-- hide. Returns the edit's file otherwise.
+function M.on_draft()
+  local e = M.state.edit
+  local f, wait = flow(), note().FLOW_WAIT or "waiting for flow"
+  local w = f.state.waiting
+  if w then
+    if w.kind == "release" then M.hide(e.buf) end
+    return wait .. " " .. e.file
+  end
+  if f.recording() then
+    M.hide(e.buf)
+    return wait .. " " .. e.file
+  end
+  vim.cmd("stopinsert")
+  return e.file
+end
 
 return M

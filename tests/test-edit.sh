@@ -104,4 +104,68 @@ edit start "$f" "$d" >/dev/null
 send 'a<Esc>ZQ'
 check "ZQ leaves the file and ends the edit with 1" "zq|1" "$(cat "$f")|$(done_code "$d")"
 
+
+# --- a pending edit wins the hotkey (ferry-host show/talk/release/draft) ----
+bufname() { ask "fnamemodify(resolve(bufname('%')), ':p')"; }
+paste() { ask "luaeval('vim.paste({_A}, -1)', '$1')" >/dev/null; }
+flow_state() { "$host" flow-state; }
+# Wait until flow-state prints $1 (a release wait ends after the paste settles).
+wait_flow() { for _ in $(seq 60); do [ "$(flow_state)" = "$1" ] && break; sleep 0.05; done; flow_state; }
+rf() { (cd "$(dirname "$1")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")"); }
+notel1() { ask "luaeval('vim.fn.getbufline(vim.fn.bufnr(_A), 1)[1]', '$npath')"; }
+"$host" show com.example.app 4242 >/dev/null
+send '<Esc>'
+npath=$(ask 'luaeval("require\"ferry.note\".current().path")')
+f=$work/k6.txt d=$work/done/k6
+printf 'edit me\n' >"$f"
+edit start "$f" "$d" >/dev/null
+sleep 0.3
+rm -f "$work/open.log"
+r=$("$host" draft)
+check "draft during an edit: prints the edit file, no hide, edit still pending, normal mode" \
+  "$f 0 pending n" "$r $(grep -c ferry-hide "$work/open.log" 2>/dev/null || echo 0) $(edit status "$f" "$d") $(ask 'mode()')"
+ask "execute('tabnext 1')" >/dev/null
+r=$("$host" show com.other.app 7)
+check "show x 1 during an edit: prints the edit file, edit buffer current, insert mode" \
+  "$f $(rf "$f") i" "$r $(bufname) $(ask 'mode()')"
+check "show during an edit leaves the note's captured target and draft alone" \
+  "com.example.app 4242 note text" \
+  "$(ask 'luaeval("require\"ferry.note\".state.captured.target")') $(ask 'luaeval("require\"ferry.note\".state.captured.window")') $(notel1)"
+
+send '<Esc>'
+ask "execute('tabnext 1')" >/dev/null
+r=$("$host" show --talk com.other.app 7)
+check "show --talk during an edit: edit buffer current, Flow recording" \
+  "$f $(rf "$f") i recording" "$r $(bufname) $(ask 'mode()') $(flow_state)"
+r=$("$host" release)
+paste ' spoken'
+check "show --talk, release: the fake paste lands in the edit buffer, Flow idle again" \
+  "released  spokenedit me|stopped" "$r $(ask 'getline(1)')|$(wait_flow stopped)"
+check "the note did not get the paste" "note text" "$(notel1)"
+check "Flow saw a stop" "1" "$(grep -c stop-hands-free "$work/open.log" 2>/dev/null)"
+
+send '<Esc>0'
+r=$("$host" talk)
+check "talk with the edit in front: talk <file>, insert after the cursor" "talk $f i" "$r $(ask 'mode()')"
+r=$("$host" release)
+paste 'X'
+check "talk, release: the paste lands just after the edit's cursor (like a)" "released  Xspokenedit me|stopped" \
+  "$r $(ask 'getline(1)')|$(wait_flow stopped)"
+
+# The hotkey while Flow records in the edit: draft waits for the paste, then
+# the edit hides itself and stays pending.
+rm -f "$work/open.log"
+"$host" show --talk com.other.app 7 >/dev/null
+r=$("$host" draft)
+paste ' late'
+check "draft while Flow records in the edit: waiting for flow, paste in the edit, one hide, still pending" \
+  "waiting for flow $f| X latespokenedit me|1|pending" \
+  "$r|$(ask 'getline(1)')|$(hides)|$(edit status "$f" "$d")"
+
+send '<C-x>'
+check "Ctrl-X after all that: the file holds the dictation, done=0" " X latespokenedit me|0" \
+  "$(cat "$f")|$(done_code "$d")"
+r=$("$host" show com.example.app 4242)
+check "with no edit pending, show is the note again" "$npath note text" "$r $(ask 'getline(1)')"
+
 exit $fail
