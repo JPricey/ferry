@@ -251,7 +251,7 @@ def short_app(target):
     if kind == "app":
         bundle = rest.split("#", 1)[0]
         return bundle.rsplit(".", 1)[-1] or "?"
-    if kind in ("tmux", "fleet"):
+    if kind in ("tmux", "fleet", "editor"):
         return kind
     return "?"
 

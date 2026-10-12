@@ -227,12 +227,13 @@ check "sync does not index .trash or dot files" "indexed 0, dropped 0, notes 9" 
 check "delete: unknown id exits 1" "1" "$?"
 
 # --- app names and path ---------------------------------------------------
-check "app names from target specs" "slackmacgap|slackmacgap|tmux|fleet|clipboard||?" "$(python3 -c '
+check "app names from target specs" "slackmacgap|slackmacgap|tmux|fleet|editor|clipboard||?" "$(python3 -c '
 import sys
 from importlib.machinery import SourceFileLoader
 N = SourceFileLoader("ferrynotes", sys.argv[1]).load_module()
 print("|".join(N.short_app(t) for t in ["app:com.tinyspeck.slackmacgap#4242",
-  "com.tinyspeck.slackmacgap", "tmux:default:%3", "fleet:task:jpX", "clipboard", "", "what"]))' "$notes")"
+  "com.tinyspeck.slackmacgap", "tmux:default:%3", "fleet:task:jpX", "editor:COMMIT_EDITMSG",
+  "clipboard", "", "what"]))' "$notes")"
 check "path prints the index path" "$FERRY_INDEX" "$("$notes" path)"
 check "path <id> prints the note path" "$pinned" "$("$notes" path 55aa66bb)"
 check "real notes folder untouched" "no" "$([ -e "$HOME/notes" ] && echo yes || echo no)"

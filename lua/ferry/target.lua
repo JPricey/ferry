@@ -13,11 +13,17 @@
 --   fleet:<id>                  fleet session or task; id is everything
 --                               after `fleet:` and may contain colons
 --                               e.g. fleet:task:jpX -> id task:jpX
+--   editor:<name>               a finished $EDITOR edit (lua/ferry/edit.lua)
+--                               of a file with basename <name> (spaces
+--                               and colons allowed); only recorded in
+--                               note files, nothing delivers to it
+--                               e.g. editor:COMMIT_EDITMSG
 --   <bundle>                    legacy history rows: a bare bundle id (no
 --                               colon, at least one dot) parses as app
 --
--- Parsed form: { kind = "app"|"clipboard"|"tmux"|"fleet", bundle, window
--- (number), server, pane, id }. Only the fields of that kind are set.
+-- Parsed form: { kind = "app"|"clipboard"|"tmux"|"fleet"|"editor", bundle,
+-- window (number), server, pane, id, name }. Only the fields of that kind
+-- are set.
 --
 -- In the buffer, line 1 `to: <spec>` is the header and the rest is the
 -- body (`split` / `join`). The note file keeps the spec in its frontmatter
@@ -80,6 +86,15 @@ M.kinds = {
     end,
     render = function(t) return "fleet:" .. t.id end,
     label = function(t) return "fleet " .. t.id end,
+  },
+  editor = {
+    parse = function(rest)
+      if rest == "" then return nil, "editor: missing file name" end
+      if rest:find("[\r\n]") then return nil, "editor: file name has a line break" end
+      return { kind = "editor", name = rest }
+    end,
+    render = function(t) return "editor:" .. t.name end,
+    label = function(t) return "editor " .. t.name end,
   },
 }
 

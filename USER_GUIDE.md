@@ -276,9 +276,16 @@ its own without the history sidebar. Your note is put aside as a draft and
 comes back untouched. Dictate with Ctrl-S as in a note. Then:
 
 - **Ctrl-X** (or `ZZ`, `:wq`, `:x`) saves the file, hides ferry and returns
-  to the terminal. The tool sees exit code 0.
+  to the terminal. The tool sees exit code 0. ferry also keeps a copy of
+  the text in your notes folder as a sent note, so it shows in the notes
+  browser with `editor` in the app column (the file says
+  `target: editor:<file name>`, e.g. `editor:COMMIT_EDITMSG`). Opening it
+  or sending it again from the browser sends it to the app you started
+  from, like any other note, never back to the editor. Blank text is not
+  kept.
 - **Ctrl-Q** (or `ZQ`) leaves the file exactly as it was and exits 1. Git
-  then reports a problem with the editor and does not commit.
+  then reports a problem with the editor and does not commit. Nothing is
+  kept in the notes folder.
 - `:q` or the hotkey hides ferry and leaves the edit open; the terminal
   keeps waiting. Until you press Ctrl-X or Ctrl-Q, the hotkey brings the
   edit back, not your note, and hold to talk dictates into the edit.

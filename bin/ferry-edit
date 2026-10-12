@@ -3,7 +3,8 @@
 # the running ferry instance (lua/ferry/edit.lua in the ferry-host nvim
 # server), shows ferry over the terminal through Hammerspoon, and waits
 # until the edit ends:
-#   Ctrl-X, ZZ, :wq, :x   the file is written, exit 0
+#   Ctrl-X, ZZ, :wq, :x   the file is written, exit 0 (non-blank text is
+#                         also kept in the notes folder as a sent note)
 #   Ctrl-Q, ZQ            the file is left as it was, exit 1
 #   :q, the hotkey        ferry hides, the edit stays pending
 # Ctrl-C, TERM or HUP here abort the edit in ferry (file unchanged; a Flow
@@ -30,6 +31,8 @@
 #   FERRY_EDIT_ENSURE_TIMEOUT  seconds `ferry-host ensure` may take, a cold
 #                              server start included (default 10)
 #   FERRY_EDIT_DIR             done files (default ${TMPDIR}/ferry-edit)
+#   FERRY_NOTES_DIR            notes folder a finished edit is kept in
+#                              (default ~/notes/scratchpads)
 #   FERRY_APP                  the ferry.app wrapper (default
 #                              ~/Applications/ferry.app); its bundle id
 #                              local.ferry is what "ferry is frontmost"
@@ -55,6 +58,7 @@ app=${FERRY_APP:-$HOME/Applications/ferry.app}
 show_timeout=${FERRY_EDIT_SHOW_TIMEOUT:-5}
 ensure_timeout=${FERRY_EDIT_ENSURE_TIMEOUT:-10}
 edit_dir=${FERRY_EDIT_DIR:-$tmp/ferry-edit}
+notes_dir=${FERRY_NOTES_DIR:-$HOME/notes/scratchpads}
 
 started=   # set while the server may hold our edit
 child=     # pid of the background step being waited for
@@ -148,7 +152,7 @@ rexpr() {
 # require("ferry.edit"), repo on the runtimepath (as in ferry-host); a
 # server holding an older module (api below edit_api) reloads it, keeping
 # its state.
-edit_api=3
+edit_api=4
 edit_mod="(function(want) local r = $(luastr "$root"); if not vim.tbl_contains(vim.opt.rtp:get(), r) then vim.opt.rtp:prepend(r) end; local e = require(\"ferry.edit\"); if (e.api or 0) >= want then return e end; package.loaded[\"ferry.edit\"] = nil; local ok, m = pcall(require, \"ferry.edit\"); if not ok then package.loaded[\"ferry.edit\"] = e; return e end; m.state = e.state; return m end)($edit_api)"
 call() { rexpr "luaeval('$edit_mod.$1(_A)', $2)"; } # fn dict -> $reply
 
@@ -156,7 +160,8 @@ mkdir -p "$edit_dir" || fallback "cannot create $edit_dir"
 done_file=$edit_dir/$$-$RANDOM$RANDOM
 out=$done_file.out
 rm -f "$done_file"
-dict="{'file': $(vimstr "$file"), 'done': $(vimstr "$done_file")}"
+# dir: the notes folder a finished edit is recorded in (as ferry-host's).
+dict="{'file': $(vimstr "$file"), 'done': $(vimstr "$done_file"), 'dir': $(vimstr "$notes_dir")}"
 
 # From here a signal aborts the edit, even while start is in flight (abort
 # of an edit that never started is a no-op).

@@ -228,6 +228,9 @@ unchanged and exits 1, `:q` or the hotkey hides ferry and the edit stays
 open until Ctrl-X or Ctrl-Q (the hotkey and the browse key show the edit again,
 not the note, and hold to talk dictates into it), Ctrl-S dictates, and Ctrl-C in the
 terminal ends it unsaved (exit 130).
+A Ctrl-X with text also keeps a copy in the notes folder as a sent note
+(target `editor:<file name>`), listed in the browser as `editor`; Ctrl-Q
+and blank text keep nothing.
 Over SSH, with `FERRY_EDIT_TERMINAL=1`, without Hammerspoon or ferry.app,
 while ferry is busy, or with no window shown within 5 s, it runs
 `${FERRY_EDIT_FALLBACK:-nvim}` in the terminal instead.

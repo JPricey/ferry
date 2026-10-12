@@ -25,6 +25,16 @@
 -- a rename), wipes the buffer, closes the tab and calls note.host.hide{}.
 -- A write that fails keeps the edit open and shown, with an error.
 --
+-- A Submit whose text is not blank is also kept in history (E5): a new
+-- note file in the notes folder (opts.dir from start, else note.dir()),
+-- named and written as note.lua names and writes notes (store.name,
+-- store.write): id, state sent, created (when the edit started), updated
+-- and sent (now), target editor:<basename of the file>, then the text as
+-- the body; then `ferry-notes index <file>` runs in the background. Cancel,
+-- abort and a blank text record nothing. Recording runs after the done
+-- file is written and the tab is closed, so it never holds up or fails the
+-- edit: an error is one notice.
+--
 -- A FocusGained while the edit is pending marks it shown: the client waits
 -- for that before it trusts the window is up (status(); not state(): M.state
 -- is the module's data, kept across reloads). With ferry already in front
@@ -46,11 +56,12 @@ local M = {}
 -- Bumped when callers (note.lua, bin/ferry-edit) need functions an older
 -- loaded module lacks; a reload keeps M.state.
 -- api 3: on_show, on_talk, on_release, on_draft.
-M.api = 3
+-- api 4: a finished Submit is recorded as a sent note; start takes dir.
+M.api = 4
 
--- The pending edit: { file, done, buf, tab = edit tab, prev_tab = the tab
--- it came from, showtabline = value before, shown = FocusGained since } or
--- nil.
+-- The pending edit: { file, done, dir = notes folder or nil, started =
+-- Unix time, buf, tab = edit tab, prev_tab = the tab it came from,
+-- showtabline = value before, shown = FocusGained since } or nil.
 M.state = { edit = nil }
 
 -- Required at call time: ferry-host may reload the note module (and with
@@ -77,6 +88,56 @@ local function write_done(done, code)
   return os.rename(tmp, done) ~= nil
 end
 
+-- --- history -------------------------------------------------------------
+
+local function repo_root()
+  local src = debug.getinfo(1, "S").source:sub(2)
+  return vim.fn.fnamemodify(src, ":p:h:h:h")
+end
+
+-- Local time as ISO 8601 with its offset, as note.lua writes it.
+local function iso(t)
+  local z = os.date("%z", t)
+  return os.date("%Y-%m-%dT%H:%M:%S", t) .. z:sub(1, 3) .. ":" .. z:sub(4, 5)
+end
+
+-- Background `ferry-notes index` jobs still running, for M.wait_index.
+local indexing, index_n = {}, 0
+
+-- Record a finished edit's text (lines) as a sent note. Raises on failure.
+local function record(e, lines)
+  if not (lines and table.concat(lines, "\n"):find("%S")) then return end
+  local store = require("ferry.store")
+  local dir = (e.dir and e.dir ~= "") and e.dir or note().dir()
+  local id = note().uuid()
+  local started, now = e.started or os.time(), os.time()
+  local meta = {}
+  store.set(meta, "id", id)
+  store.set(meta, "state", "sent")
+  store.set(meta, "created", iso(started))
+  store.set(meta, "updated", iso(now))
+  store.set(meta, "sent", iso(now))
+  local name = vim.fn.fnamemodify(e.file, ":t"):gsub("[\r\n]", " ")
+  store.set(meta, "target", "editor:" .. name)
+  pcall(vim.fn.mkdir, dir, "p")
+  local path = dir .. "/" .. store.name(started, id)
+  local ok, err = store.write(path, meta, lines)
+  if not ok then error(tostring(err), 0) end
+  index_n = index_n + 1
+  local n = index_n
+  local sok, obj = pcall(vim.system, { repo_root() .. "/bin/ferry-notes", "index", path },
+    { text = true, env = { FERRY_NOTES_DIR = dir } }, function() indexing[n] = nil end)
+  if sok then indexing[n] = obj end
+end
+
+-- Wait (up to ms each) for the background index jobs (tests).
+function M.wait_index(ms)
+  for n, obj in pairs(indexing) do
+    pcall(obj.wait, obj, ms or 3000)
+    indexing[n] = nil
+  end
+end
+
 local function tab_ok(tab) return tab and vim.api.nvim_tabpage_is_valid(tab) end
 
 -- Close the edit tab (back to the tab it came from), drop the buffer and
@@ -100,6 +161,7 @@ end
 -- End the pending edit with code 0 (write the file) or 1 (leave it).
 -- Returns false when the write failed: the edit stays pending and shown.
 local function finish(e, code)
+  local lines = code == 0 and vim.api.nvim_buf_is_valid(e.buf) and vim.api.nvim_buf_get_lines(e.buf, 0, -1, false)
   if code == 0 and vim.api.nvim_buf_is_valid(e.buf) and vim.bo[e.buf].modified then
     local ok, err
     vim.api.nvim_buf_call(e.buf, function() ok, err = pcall(vim.cmd, "silent keepalt write!") end)
@@ -112,6 +174,10 @@ local function finish(e, code)
   M.state.edit = nil
   if not write_done(e.done, code) then alert("ferry: could not write " .. e.done) end
   teardown(e)
+  if lines then
+    local ok, err = pcall(record, e, lines)
+    if not ok then alert("ferry: the edit was saved, but not kept in history: " .. tostring(err)) end
+  end
   return true
 end
 
@@ -200,7 +266,8 @@ local function absolute(p) return type(p) == "string" and p:sub(1, 1) == "/" end
 
 -- Start editing opts.file (absolute path; a missing file starts empty and
 -- is created on Submit). opts.done (absolute path) gets the exit code when
--- the edit ends. Returns "ok", "busy", or "error <why>".
+-- the edit ends. opts.dir: the notes folder a Submit is recorded in
+-- (default note.dir()). Returns "ok", "busy", or "error <why>".
 function M.start(opts)
   opts = opts or {}
   if not (absolute(opts.file) and absolute(opts.done)) then
@@ -215,7 +282,8 @@ function M.start(opts)
   -- A buffer left over for the same file would show stale text.
   if old ~= -1 then pcall(vim.api.nvim_buf_delete, old, { force = true }) end
   local e = { file = opts.file, done = opts.done, prev_tab = vim.api.nvim_get_current_tabpage(),
-    showtabline = vim.o.showtabline, shown = false }
+    showtabline = vim.o.showtabline, shown = false, started = os.time(),
+    dir = type(opts.dir) == "string" and opts.dir ~= "" and opts.dir or nil }
   local ok, err = pcall(vim.cmd, "silent noswapfile tabedit " .. vim.fn.fnameescape(opts.file))
   if not ok then return "error " .. tostring(err) end
   e.tab, e.buf = vim.api.nvim_get_current_tabpage(), vim.api.nvim_get_current_buf()

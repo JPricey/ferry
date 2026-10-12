@@ -247,7 +247,7 @@ edit.api = 2
 local shown = note.show({ target = "com.other", window = "7", seed = "" })
 local edit3 = package.loaded["ferry.edit"]
 check("show with an api-2 edit module and an edit pending: reloaded, edit kept and shown",
-  file .. " 3 true hot", shown .. " " .. tostring(edit3.api) .. " " .. tostring(edit3.pending()) .. " " .. lines())
+  file .. " 4 true hot", shown .. " " .. tostring(edit3.api) .. " " .. tostring(edit3.pending()) .. " " .. lines())
 check("release --force with Flow idle in the edit: forced, waiting on the edit buffer",
   "forced true", note.release({ force = "1" }) .. " " .. tostring(flow.state.waiting
     and flow.state.waiting.buf == vim.fn.bufnr(file)))
@@ -258,6 +258,117 @@ check("the forced stop's paste ended the wait in the edit", "true nil",
 edit3.abort({ done = done })
 check("with no edit pending, show is the note again", npath, note.show({ target = "com.example.app", window = "4242", seed = "" }))
 evs()
+
+-- --- E5: a finished edit is kept in history ---------------------------------
+-- The module the server runs now (reloaded above).
+edit = require("ferry.edit")
+local notes_dir = os.getenv("FERRY_NOTES_DIR")
+-- Note files in dir whose target is an editor: spec, as a set of paths.
+local function records(dir)
+  local out = {}
+  for _, p in ipairs(vim.fn.glob((dir or notes_dir) .. "/*.md", false, true)) do
+    local m = store.read(p)
+    if m and tostring(rawget(m, "target")):match("^editor:") then out[p] = true end
+  end
+  return out
+end
+-- The paths in records(dir) not in before.
+local function new_records(before, dir)
+  local out = {}
+  for p in pairs(records(dir)) do if not before[p] then out[#out + 1] = p end end
+  table.sort(out)
+  return out
+end
+
+local before = records()
+file, done = files("old text\n")
+edit.start({ file = file, done = done })
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { "kept in history", "second line" })
+vim.cmd("Submit")
+check("E5 Submit: file written, done=0", "kept in history\nsecond line\n|0\n",
+  tostring(readfile(file)) .. "|" .. tostring(ended(done)))
+local got = new_records(before)
+check("E5 Submit: one new note file", 1, #got)
+local m, body = store.read(got[1] or "")
+check("E5 record: frontmatter keys in note.lua's order", "id,state,created,updated,sent,target",
+  m and table.concat(store.keys(m), ",") or "none")
+check("E5 record: state sent, target editor:<basename>, body is the text",
+  "sent|editor:" .. vim.fn.fnamemodify(file, ":t") .. "|kept in history|second line",
+  m and (m.state .. "|" .. m.target .. "|" .. table.concat(body, "|")) or "none")
+check("E5 record: file named as store.name(created, id)", store.name(m and m.created or "", m and m.id or "x"),
+  got[1] and vim.fn.fnamemodify(got[1], ":t") or "none")
+check("E5 record: created, updated and sent are ISO times", "true",
+  tostring(m ~= nil and (m.created .. m.updated .. m.sent):match("^%d%d%d%d%-%d%d%-%d%dT.*[+-]%d%d:%d%d$") ~= nil))
+edit.wait_index(5000)
+local listed = vim.system({ root .. "/bin/ferry-notes", "list" }, { text = true }):wait()
+local row
+for _, r in ipairs(vim.json.decode(listed.stdout ~= "" and listed.stdout or "[]")) do
+  if m and r.id == m.id then row = r end
+end
+check("E5 record: indexed, ferry-notes list shows it as sent to editor", "sent editor kept in history",
+  row and (row.state .. " " .. row.app .. " " .. row.preview) or "not listed")
+evs()
+-- The browser's <CR> and s (note.open, then submit) never deliver to
+-- editor:, they take the latest show's target like any opened note.
+local rbuf = note.open(got[1])
+check("E5 record opened from the browser: the latest show's target", "com.example.app 4242",
+  rbuf and (vim.b[rbuf].ferry.target .. " " .. vim.b[rbuf].ferry.window) or "not opened")
+local sent_to
+local host_submit = note.host.submit
+note.host.submit = function(p) sent_to = p.target .. "#" .. p.window end
+note.submit(rbuf)
+vim.wait(1000, function() return sent_to ~= nil end, 10)
+note.host.submit = host_submit
+local rm = store.read(got[1])
+check("E5 record sent again (s): to that target, the file now says it", "com.example.app#4242|sent|app:com.example.app#4242",
+  tostring(sent_to) .. "|" .. tostring(rm and rm.state) .. "|" .. tostring(rm and rm.target))
+evs()
+
+before = records()
+file, done = files("cancel me\n")
+edit.start({ file = file, done = done })
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { "typed then cancelled" })
+vim.cmd("Cancel")
+ended(done)
+check("E5 Cancel: no note file", 0, #new_records(before))
+file, done = files("abort me\n")
+edit.start({ file = file, done = done })
+edit.abort({ done = done })
+check("E5 abort: no note file", 0, #new_records(before))
+file, done = files("blank me\n")
+edit.start({ file = file, done = done })
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { "  ", "" })
+vim.cmd("Submit")
+check("E5 blank Submit: file written, done=0, no note file", "  \n\n|0\n|0",
+  tostring(readfile(file)) .. "|" .. tostring(ended(done)) .. "|" .. #new_records(before))
+evs()
+
+-- opts.dir names the notes folder; a folder that cannot be made fails the
+-- record only: the edit still ends with 0, one notice.
+local dir2 = work .. "/notes-e5"
+file, done = files("x\n")
+edit.start({ file = file, done = done, dir = dir2 })
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { "to dir2" })
+vim.cmd("Submit")
+ended(done)
+check("E5 start{dir}: the note goes in that folder", 1, #new_records({}, dir2))
+evs()
+writefile(work .. "/not-a-dir", "")
+local notices, notify = {}, vim.notify
+vim.notify = function(msg) notices[#notices + 1] = msg end
+before = records()
+file, done = files("y\n")
+edit.start({ file = file, done = done, dir = work .. "/not-a-dir/sub" })
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { "unrecorded" })
+vim.cmd("Submit")
+check("E5 failed record: file written, done=0, edit over, one hide", "unrecorded\n|0\n|false|hide",
+  tostring(readfile(file)) .. "|" .. tostring(ended(done)) .. "|" .. tostring(edit.pending()) .. "|" .. evs())
+vim.wait(500, function() return #notices > 0 end, 10)
+vim.wait(100)
+vim.notify = notify
+check("E5 failed record: one notice, no note file", "1 true 0",
+  #notices .. " " .. tostring((notices[1] or ""):find("not kept in history", 1, true) ~= nil) .. " "
+  .. #new_records(before))
 
 say(fail == 0 and "edit_spec: all ok" or "edit_spec: FAILED")
 os.exit(fail)

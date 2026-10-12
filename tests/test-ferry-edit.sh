@@ -104,6 +104,9 @@ sleep 0.3
 send 'typed <C-x>'
 check "FocusGained + Ctrl-X: exit 0, file edited" "0 typed hello" "$(code) $(cat "$f")"
 check "no fallback ran, no done files left" "|" "$(fallback_log)|$(ls "$FERRY_EDIT_DIR")"
+records() { grep -l '^target: editor:' "${1:-$FERRY_NOTES_DIR}"/*.md 2>/dev/null; }
+check "Ctrl-X: the edit is kept as a sent note (target editor:a.txt)" "state: sent|target: editor:a.txt" \
+  "$(grep -h '^state:' $(records))|$(grep -h '^target:' $(records))"
 
 # --- Ctrl-Q -------------------------------------------------------------------
 f=$work/b.txt
@@ -112,7 +115,7 @@ printf 'keep\n# no newline' >"$f"; cp "$f" "$work/b.orig"
 ask "luaeval('(function() require\"ferry.edit\".api = 1; return 1 end)()')" >/dev/null
 run "$f"
 started
-check "an older loaded edit module is reloaded (api 3), the edit in its state" "3 true" \
+check "an older loaded edit module is reloaded (api 4), the edit in its state" "4 true" \
   "$(ask "luaeval('require\"ferry.edit\".api')") $(pending)"
 focus; sleep 0.3
 send 'junk<C-q>'
@@ -123,12 +126,14 @@ check "Ctrl-Q: exit 1, file unchanged" "1 same" \
 f=$work/c.txt
 printf 'front\n' >"$f"
 echo local.ferry >"$work/front"
-run "$f"
+FERRY_NOTES_DIR=$work/notes2 run "$f"
 started; sleep 0.5
 check "ferry frontmost (lsappinfo), no FocusGained: shown, no fallback" "running shown" \
   "$(running) $(ask "luaeval('require\"ferry.edit\".state.edit.shown and \"shown\" or \"pending\"')")"
 send 'x<C-x>'
 check "then Ctrl-X: exit 0" "0 xfront" "$(code) $(cat "$f")"
+check "FERRY_NOTES_DIR of ferry-edit (not the server's) holds the record" "1 1" \
+  "$(records | grep -c .) $(records "$work/notes2" | grep -c .)"
 rm -f "$work/front"
 
 # --- fallbacks ------------------------------------------------------------------

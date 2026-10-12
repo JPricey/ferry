@@ -33,6 +33,8 @@ roundTrip("clipboard", { kind = "clipboard" })
 roundTrip("tmux:default:%12", { kind = "tmux", server = "default", pane = "%12" })
 roundTrip("tmux:ferry-test:%3", { kind = "tmux", server = "ferry-test", pane = "%3" })
 roundTrip("fleet:task:jpX", { kind = "fleet", id = "task:jpX" })
+roundTrip("editor:COMMIT_EDITMSG", { kind = "editor", name = "COMMIT_EDITMSG" })
+roundTrip("editor:my notes: v2.md", { kind = "editor", name = "my notes: v2.md" })
 
 -- Legacy history rows: a bare bundle id is an app target.
 local t = T.parse("com.example.app")
@@ -44,12 +46,14 @@ check("whitespace trimmed", "clipboard", (T.parse("  clipboard  ") or {}).kind)
 -- Bad specs: nil plus an error message.
 for _, spec in ipairs({ "app:", "app:x#abc", "app:x#", "tmux:", "tmux:s:",
                         "tmux::%1", "foo:bar", "fleet:", "clipboard:x", "app",
+                        "editor:", "editor",
                         "", "   ", "nodot" }) do
   local r, err = T.parse(spec)
   check("reject '" .. spec .. "'", "nil+err",
     (r == nil and type(err) == "string") and "nil+err" or tostring(r))
 end
 check("reject non-string", nil, (T.parse(nil)))
+check("reject editor name with a line break", nil, (T.parse("editor:a\nb")))
 
 -- Kinds live in a table; render/label refuse unknown kinds.
 check("kinds table", "table", type(T.kinds.tmux))
@@ -62,6 +66,7 @@ check("label clipboard", "clipboard", T.label(T.parse("clipboard")))
 check("label tmux default", "tmux %12", T.label(T.parse("tmux:default:%12")))
 check("label tmux server", "tmux ferry-test %3", T.label(T.parse("tmux:ferry-test:%3")))
 check("label fleet", "fleet task:jpX", T.label(T.parse("fleet:task:jpX")))
+check("label editor", "editor COMMIT_EDITMSG", T.label(T.parse("editor:COMMIT_EDITMSG")))
 
 -- split / join between buffer lines and (spec, body).
 local spec, body = T.split({ "to: clipboard", "hi" })

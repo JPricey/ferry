@@ -39,6 +39,8 @@ perl -e 'alarm 60; exec @ARGV' nvim --headless --clean -l "$root/tests/edit_spec
 echo
 
 # --- keys on a real ferry-host server --------------------------------------
+# A notes folder and index of its own (the spec kept its edits in history).
+rm -rf "$FERRY_NOTES_DIR" "$FERRY_INDEX"*
 host="$root/bin/ferry-host"
 ask() { nvim --server "$FERRY_SOCK" --remote-expr "$1" 2>&1; }
 send() { nvim --server "$FERRY_SOCK" --remote-send "$1"; }
@@ -74,6 +76,16 @@ send 'typed <C-x>'
 check "Ctrl-X after typing: file holds the text, done=0, one hide" "typed hello|0|1" \
   "$(cat "$f")|$(done_code "$d")|$(hides)"
 check "after Ctrl-X the note is back with its draft" "note text" "$(ask 'getline(1)')"
+# E5: the finished edit is a sent note in the notes folder, indexed.
+records() { grep -l '^target: editor:' "$FERRY_NOTES_DIR"/*.md 2>/dev/null; }
+rec=$(records)
+check "Ctrl-X: one new note file, state sent, target editor:k1.txt" "1|state: sent|target: editor:k1.txt" \
+  "$(printf '%s\n' "$rec" | grep -c .)|$(grep '^state:' "$rec")|$(grep '^target:' "$rec")"
+ask "luaeval('require\"ferry.edit\".wait_index(5000)')" >/dev/null
+check "ferry-notes list shows it (sent, editor, the text)" "sent editor typed hello" \
+  "$("$root/bin/ferry-notes" list | python3 -c 'import json,sys
+for r in json.load(sys.stdin):
+    if r["app"] == "editor": print(r["state"], r["app"], r["preview"])')"
 
 rm -f "$work/open.log"
 f=$work/k2.txt d=$work/done/k2
@@ -82,6 +94,7 @@ edit start "$f" "$d" >/dev/null
 send 'junk<C-q>'
 check "Ctrl-Q: file bytes unchanged, done=1, one hide" "same|1|1" \
   "$(cmp -s "$f" "$work/k2.orig" && echo same || echo changed)|$(done_code "$d")|$(hides)"
+check "Ctrl-Q: no new note file" "$rec" "$(records)"
 
 rm -f "$work/open.log"
 f=$work/k3.txt d=$work/done/k3

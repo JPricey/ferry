@@ -278,7 +278,19 @@ recording in the edit and waits for its paste) and exit 130. Each remote
 call is cut off after 3 s; two unanswered status calls in a row count as
 the server gone: it tries `abort`, then exits 1 (falls back before
 shown). Every failure before shown runs `${FERRY_EDIT_FALLBACK:-nvim}` in
-the terminal.
+the terminal. A Submit with non-blank text is also recorded (edit api 4,
+E5): after the done file and teardown, `edit.lua` writes a new note file
+through `store.lua` (named and keyed as `note.lua`'s: id, `state: sent`,
+created = edit start, updated and sent = now,
+`target: editor:<basename>`; the body is the final text) in `start`'s `dir`
+(`ferry-edit` passes `FERRY_NOTES_DIR` or `~/notes/scratchpads`; else
+`note.dir()`), then runs `ferry-notes index` in the background. Cancel,
+abort, a wiped buffer and blank text record nothing; a failed record is
+one notice and never fails the edit. `editor:` is only a record
+(`target.lua` parses and labels it; nothing delivers to it): the
+browser's app column shows `editor`, `note.open` and `s` take the latest
+show's target as for any note, and `ferry-corrections` counts these sent
+notes like any other.
 
 **History.** The note files and their index are the only record (H5):
 each note is a file in the notes folder (`lua/ferry/store.lua`) and
