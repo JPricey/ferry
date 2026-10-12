@@ -28,6 +28,8 @@
 --   rec.moves        {win, point} for win:setTopLeft(point)
 --   rec.tasks        {path, args, cb, started} for hs.task.new (never run;
 --                    finish one with rec:finishTask(i, code, out, err))
+--   rec.seq          counter; each executes and tasks entry gets the next
+--                    value as .seq (task: when started), so tests can order them
 --
 -- Controls (set on rec before or between calls):
 --   rec.hotkeyBind     nil, or function(mods, key, fn) whose result is returned
@@ -45,6 +47,8 @@
 --                      hs.timer.absoluteTime, in ns); usleep and timers advance it
 --   rec.screen         {x, y, w, h} of the one screen (hs.screen.mainScreen,
 --                      allScreens, win:screen; default 0,0 1440x900)
+--   rec.modifiers      table returned by hs.eventtap.checkKeyboardModifiers
+--                      (default {}: no modifier down)
 --   rec.execStatus     true: hs.execute returns the command's real exit
 --                      status (and records rc); default: success unless
 --                      popen close fails, which LuaJIT never reports
@@ -239,7 +243,12 @@ function S.install()
     unminimizes = {},
     pasteboard = { contents = nil, changeCount = 0 },
     clock = 1000, screen = { x = 0, y = 0, w = 1440, h = 900 },
+    seq = 0, modifiers = {},
   }
+  local function nextSeq()
+    rec.seq = rec.seq + 1
+    return rec.seq
+  end
 
   function rec:app(opts) return S.app(self, opts) end
   function rec:window(opts) return S.window(self, opts) end
@@ -331,13 +340,13 @@ function S.install()
       if p then p:close() end
       local out, rc = raw:match("^(.-)\n__hs_stub_rc=(%d+)$")
       out, rc = out or raw, tonumber(rc) or 1
-      rec.executes[#rec.executes + 1] = { cmd = cmd, out = out, rc = rc }
+      rec.executes[#rec.executes + 1] = { cmd = cmd, out = out, rc = rc, seq = nextSeq() }
       return out, rc == 0 and true or nil, "exit", rc
     end
     local p = io.popen(cmd .. " 2>/dev/null")
     local out = p and p:read("*a") or ""
     local ok = p and p:close()
-    rec.executes[#rec.executes + 1] = { cmd = cmd, out = out }
+    rec.executes[#rec.executes + 1] = { cmd = cmd, out = out, seq = nextSeq() }
     return out, ok and true or nil, "exit", ok and 0 or 1
   end
 
@@ -400,6 +409,7 @@ function S.install()
       rec.keyStrokes[#rec.keyStrokes + 1] = { mods = copy(mods), key = key, delay = delay, app = app }
       if rec.onKeyStroke then rec.onKeyStroke(mods, key, delay, app) end
     end,
+    checkKeyboardModifiers = function() return copy(rec.modifiers) end,
   }
 
   hs.pasteboard = {
@@ -460,7 +470,7 @@ function S.install()
       local args = a4 or a3
       if type(args) ~= "table" then args = {} end
       local t = { path = path, args = copy(args), cb = cb, started = false, finished = false }
-      function t:start() self.started = true; return self end
+      function t:start() self.started = true; self.seq = nextSeq(); return self end
       function t:terminate() self.finished = true; return self end
       function t:isRunning() return self.started and not self.finished end
       rec.tasks[#rec.tasks + 1] = t

@@ -64,9 +64,38 @@
 -- the next press launches the host again instead of waiting out
 -- launchGrace.
 --
+-- Hold to talk (the talk hotkey: pressed talkDown, released talkUp):
+--   talkDown()  start Flow at once (cfg.startFlow; default `/usr/bin/open -g
+--               wispr-flow://start-hands-free` as an hs.task), before
+--               anything waits on nvim, so the first word is not clipped.
+--               Host not focused: the show path above with
+--               `voice-vim-host show --talk ...` (captures the target, waits
+--               for the pre-warm, launches the host). Host focused:
+--               `voice-vim-host talk` (insert at the cursor; never hides,
+--               never re-captures the target). A second down before up is
+--               ignored. A down while the last key up still waits to
+--               release takes that release over (one recording, released at
+--               this hold's key up).
+--   talkUp()    polls every pollInterval until the start task has exited,
+--               the host is focused and no modifier is down (Flow pastes
+--               with Cmd+V; a held Ctrl+Option would make it
+--               Ctrl+Option+Cmd+V), then runs `voice-vim-host release` once:
+--               nvim stops Flow and waits for its paste (flow.release).
+--               Modifiers still down talkModsTimeout after the host was
+--               ready: release anyway. Host not focused talkStopTimeout
+--               after key up: no release (Flow's paste would land in
+--               whatever is in front), one alert; Flow records on until
+--               Ctrl-S in the note. A talk press's failed show does not
+--               alert itself; this one does.
+--   Logs: `talk: down focused=<b> -> show|more`, `talk: flow start task
+--   started after N ms`, `talk: flow start exited after N ms`, `talk: up
+--   after N ms held`, `talk: release after N ms (waited focus N ms, mods
+--   N ms)`, `talk: stop withheld ...`.
+--
 -- disable(): stop for good (a new start() replaced it, or its setup failed):
 -- drops a show waiting for the pre-warm, stops the poll, unbinds the URL
--- handlers bindURLs() made, and makes toggle/show/hide no-ops.
+-- handlers bindURLs() made, and makes toggle/show/hide/talkDown/talkUp
+-- no-ops.
 --
 -- captureSelection (default off): Cmd+C and a wait of up to 0.4 s for the
 -- clipboard before every show, which breaks the ~150 ms show target.
@@ -116,6 +145,14 @@ end
 --                     taken as the UI still starting (default 5)
 --   hostName          name of the host window in alerts (default
 --                     "the voice-vim window")
+--   startFlow         function(onExit) that starts Wispr Flow recording and
+--                     returns true once started; onExit(code) when done
+--                     (default: `/usr/bin/open -g wispr-flow://start-hands-free`
+--                     as an hs.task)
+--   talkModsTimeout   seconds talkUp waits for modifiers to come up once the
+--                     host is focused (default 1)
+--   talkStopTimeout   seconds after key up before talkUp gives up on the host
+--                     getting focus (default 5)
 function I.new(cfg)
   cfg = cfg or {}
   local c = {
@@ -130,6 +167,9 @@ function I.new(cfg)
       selectionTimeout = cfg.selectionTimeout or 0.4,
       launchGrace = cfg.launchGrace or 5,
       hostName = cfg.hostName or "the voice-vim window",
+      startFlow = cfg.startFlow,
+      talkModsTimeout = cfg.talkModsTimeout or 1,
+      talkStopTimeout = cfg.talkStopTimeout or 5,
     },
     host = cfg.host,
     deliver = cfg.deliver,
@@ -142,6 +182,8 @@ function I.new(cfg)
     _launchedAt = nil, -- nowMs() of the last host.launch (nil: none pending)
     _disabled = false, -- disable() was called
     _boundURLs = false, -- bindURLs() bound voicevim-submit / voicevim-hide
+    _talk = nil,       -- the talk hold: { t0, up, upAt, startExited, press }
+    _talkTimer = nil,  -- talkUp's poll timer
   }
   local log = hs.logger.new("voice-vim", "info")
   c.log = log
@@ -370,6 +412,10 @@ function I.new(cfg)
     c._launchedAt = nil
     if press.alerted then return end
     press.alerted = true
+    if press.talk then
+      log.w("show: failed (" .. tostring(why) .. "); the talk key-up check alerts, the next press relaunches")
+      return
+    end
     log.w("show: failed (" .. tostring(why) .. "); alerting, the next press relaunches")
     alert("voice-vim: " .. c.config.hostName .. " did not appear — check the Hammerspoon console")
   end
@@ -439,7 +485,10 @@ function I.new(cfg)
   -- retry after the server was down.
   local function showRest(press, again)
     if c._disabled then return end
-    local args = { "show", c.target.bundle or "", c.target.winId and tostring(c.target.winId) or "" }
+    local args = { "show" }
+    if press.talk then args[#args + 1] = "--talk" end
+    args[#args + 1] = c.target.bundle or ""
+    args[#args + 1] = c.target.winId and tostring(c.target.winId) or ""
     local seed
     if again then seed = again.seed else seed = seedFile() end
     if seed then args[#args + 1] = seed end
@@ -466,19 +515,21 @@ function I.new(cfg)
     pollShow(press)
   end
 
-  -- Show the host with the note. t0: the key press (default now).
-  function c.show(t0)
+  -- Show the host with the note. t0: the key press (default now). opts.talk:
+  -- hold to talk (`show --talk`). Returns the press.
+  function c.show(t0, opts)
     if c._disabled then return end
-    local press = { t0 = t0 or nowMs(), alerted = false }
+    local press = { t0 = t0 or nowMs(), alerted = false, talk = opts ~= nil and opts.talk == true }
     stopPoll()
     captureTarget()
     if c._warming then
       -- A synchronous show now would find no server; wait for the ensure.
       log.i("show: waiting for the pre-warm ensure to finish")
       c._afterWarm = function() showRest(press) end
-      return
+      return press
     end
     showRest(press)
+    return press
   end
 
   -- Hide the host, then run after() (once) when host.hide reports back.
@@ -524,6 +575,145 @@ function I.new(cfg)
     log.i(string.format("toggle: focused=%s (%s) -> %s; shown=%s %s", tostring(focused),
       tostring(why), focused and "hide" or "show", tostring(c.shown), describeFocus()))
     if focused then c.hide(t0) else c.show(t0) end
+  end
+
+  -- -------------------------------------------------------------------------
+  -- Hold to talk (see the header)
+
+  local FLOW_START = "wispr-flow://start-hands-free"
+
+  local function forgetTask(task)
+    for i, t in ipairs(c._tasks) do
+      if t == task then table.remove(c._tasks, i); break end
+    end
+  end
+
+  -- Default startFlow: `open -g` the start link as an hs.task.
+  local function openStartTask(onExit)
+    local task
+    task = try(hs.task.new, "/usr/bin/open", function(code)
+      forgetTask(task)
+      onExit(code)
+    end, { "-g", FLOW_START })
+    if not task then return false end
+    c._tasks[#c._tasks + 1] = task
+    if not try(task.start, task) then
+      forgetTask(task)
+      return false
+    end
+    return true
+  end
+
+  local function startFlow(talk)
+    local function onExit(code)
+      if talk.startExited then return end
+      talk.startExited = true
+      local m = string.format("talk: flow start exited after %d ms (exit %s)", ms(nowMs() - talk.t0), tostring(code))
+      if code == nil or code == 0 then log.i(m) else log.w(m) end
+    end
+    local ok = try(c.config.startFlow or openStartTask, onExit)
+    if ok then
+      log.i(string.format("talk: flow start task started after %d ms", ms(nowMs() - talk.t0)))
+    else
+      log.e("talk: could not start Flow (" .. FLOW_START .. "); the note still opens")
+      talk.startExited = true
+    end
+  end
+
+  local function stopTalkPoll()
+    if c._talkTimer then try(c._talkTimer.stop, c._talkTimer) end
+    c._talkTimer = nil
+  end
+
+  -- Modifiers held down now (only those that change Flow's Cmd+V).
+  local function modsDown()
+    local m = hs.eventtap and hs.eventtap.checkKeyboardModifiers and try(hs.eventtap.checkKeyboardModifiers)
+    local down = {}
+    if type(m) ~= "table" then return down end
+    for _, k in ipairs({ "cmd", "alt", "ctrl", "shift" }) do
+      if m[k] then down[#down + 1] = k end
+    end
+    return down
+  end
+
+  function c.talkDown()
+    if c._disabled then log.w("talk: down ignored, the controller is disabled"); return end
+    local prev = c._talk
+    if prev and not prev.up then log.i("talk: down ignored, the talk key is already down"); return end
+    if prev then
+      log.i("talk: down while the last key up still waits to release; this hold releases")
+      stopTalkPoll()
+    end
+    local talk = { t0 = nowMs(), up = false, startExited = false }
+    c._talk = talk
+    startFlow(talk)  -- first: nothing below may delay Flow
+    local focused, why = try(h.isFocused)
+    focused = focused == true
+    log.i(string.format("talk: down focused=%s -> %s (%s); shown=%s %s", tostring(focused),
+      focused and "more" or "show", tostring(why), tostring(c.shown), describeFocus()))
+    if not focused then
+      talk.press = c.show(talk.t0, { talk = true })
+      return
+    end
+    local ok, out = runSync("talk", { "talk" })
+    if ok and out:find("no note", 1, true) and c.target then
+      log.w("talk: the server has no note; show --talk with the last target")
+      talk.press = { t0 = talk.t0, alerted = false, talk = true }
+      showRest(talk.press)
+    elseif not ok then
+      alert("voice-vim: could not open the note (see console)")
+    end
+  end
+
+  function c.talkUp()
+    if c._disabled then log.w("talk: up ignored, the controller is disabled"); return end
+    local talk = c._talk
+    if not talk or talk.up then log.i("talk: up ignored, the talk key was not down"); return end
+    talk.up, talk.upAt = true, nowMs()
+    log.i(string.format("talk: up after %d ms held", ms(talk.upAt - talk.t0)))
+    local focusAt, readyAt
+
+    local function release(now, mods)
+      c._talk = nil
+      if #mods > 0 then
+        log.w("talk: " .. table.concat(mods, "+") .. " still down after " .. c.config.talkModsTimeout
+          .. " s; releasing anyway")
+      end
+      log.i(string.format("talk: release after %d ms (waited focus %d ms, mods %d ms)",
+        ms(now - talk.upAt), ms(focusAt - talk.upAt), ms(now - readyAt)))
+      runSync("talk", { "release" })
+    end
+
+    local function step()
+      c._talkTimer = nil
+      if c._disabled or c._talk ~= talk then return end
+      local now = nowMs()
+      local focused = hostFocused()
+      if focused then focusAt = focusAt or now end
+      if focused and talk.startExited then
+        readyAt = readyAt or now
+        local mods = modsDown()
+        if #mods == 0 or now - readyAt >= c.config.talkModsTimeout * 1000 then return release(now, mods) end
+      else
+        readyAt = nil
+      end
+      if now - talk.upAt >= c.config.talkStopTimeout * 1000 then
+        if focused then
+          log.w("talk: flow start task still running " .. c.config.talkStopTimeout
+            .. " s after key up; releasing anyway")
+          readyAt = readyAt or now
+          return release(now, {})
+        end
+        c._talk = nil
+        log.w(string.format("talk: stop withheld: %s not focused %d ms after key up (%s); Flow keeps recording",
+          c.config.hostName, ms(now - talk.upAt), describeFocus()))
+        alert("voice-vim: note did not appear — Flow is still recording; open the note and press Ctrl-S")
+        return
+      end
+      c._talkTimer = try(hs.timer.doAfter, c.config.pollInterval, step)
+    end
+    stopTalkPoll()
+    step()
   end
 
   -- Start the server off the main thread. A show pressed meanwhile waits.
@@ -581,6 +771,8 @@ function I.new(cfg)
     c._disabled = true
     c._afterWarm = nil
     stopPoll()
+    stopTalkPoll()
+    c._talk = nil
     if c._boundURLs and hs.urlevent and hs.urlevent.bind then
       try(hs.urlevent.bind, "voicevim-submit", nil)
       try(hs.urlevent.bind, "voicevim-hide", nil)

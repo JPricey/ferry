@@ -255,5 +255,85 @@ check("release while idle returns false", false, flow.release(buf))
 check("release while idle: no wait", nil, flow.state.waiting)
 check("release while idle logs nothing", "", opened(1, 300))
 
+-- A quick second hold while the first release still waits for its paste
+-- (down/up/down/up). Second key up before the first paste: the second stop
+-- goes out at once and the wait also waits for the second paste.
+-- (Each first stop is let finish first, so adopt_start queues no start.)
+local function idle() vim.wait(1000, function() return not flow.busy() end, 10) end
+reset_buf()
+flow.adopt_start()
+flow.release(buf)
+opened(1)
+idle()
+flow.adopt_start()  -- second key down during the wait
+check("second hold during a release wait: recording", true, flow.recording())
+check("second hold during a release wait: no URL", "", opened(1, 300))
+check("second key up during the wait: release returns true", true, flow.release(buf))
+check("second key up during the wait: one more stop at once", "-g wispr-flow://stop-hands-free", opened(1))
+vim.paste({ "one" }, -1)
+vim.wait(300, function() return false end, 10)
+check("first paste: the wait goes on for the second", true, flow.state.waiting ~= nil)
+vim.paste({ " two" }, -1)
+vim.wait(1000, function() return flow.state.waiting == nil end, 10)
+check("second paste ends the wait, not recording", "nil false",
+  tostring(flow.state.waiting) .. " " .. tostring(flow.recording()))
+check("both pastes landed", "one two", text())
+check("no further URL", "", opened(1, 300))
+
+-- First paste before the second key up: the paste ends the first wait but
+-- leaves the second recording, so the second key up still stops Flow.
+reset_buf()
+flow.adopt_start()
+flow.release(buf)
+opened(1)
+idle()
+flow.adopt_start()
+vim.paste({ "one" }, -1)
+vim.wait(1000, function() return flow.state.waiting == nil end, 10)
+check("paste during a wait keeps the second recording", "nil true",
+  tostring(flow.state.waiting) .. " " .. tostring(flow.recording()))
+check("second key up after the first paste: one stop", "true|-g wispr-flow://stop-hands-free",
+  tostring(flow.release(buf)) .. "|" .. opened(1))
+vim.paste({ " two" }, -1)
+vim.wait(1000, function() return flow.state.waiting == nil end, 10)
+check("second paste ends its own wait", "nil false one two",
+  tostring(flow.state.waiting) .. " " .. tostring(flow.recording()) .. " " .. text())
+
+-- Ctrl-X during the second hold (finish_then takes over the release wait):
+-- the second recording is stopped too and the fn runs after both pastes.
+reset_buf()
+flow.adopt_start()
+flow.release(buf)
+opened(1)
+idle()
+flow.adopt_start()
+after = nil
+flow.finish_then(buf, function() after = text() end)
+check("finish_then during a second hold: stops it", "-g wispr-flow://stop-hands-free", opened(1))
+vim.paste({ "one" }, -1)
+vim.wait(300, function() return false end, 10)
+check("finish_then during a second hold: not run after the first paste", nil, after)
+vim.paste({ " two" }, -1)
+vim.wait(1000, function() return after ~= nil end, 10)
+check("finish_then during a second hold: runs after both pastes", "one two", after)
+
+-- One paste reported twice (two paste hooks after a live module reload)
+-- counts once.
+reset_buf()
+flow.adopt_start()
+flow.release(buf)
+opened(1)
+idle()
+flow.adopt_start()
+flow.release(buf)
+opened(1)
+vim.paste({ "one" }, -1)
+flow.on_paste(buf)  -- the same paste, from a second hook
+vim.wait(300, function() return false end, 10)
+check("a paste reported twice counts once", true, flow.state.waiting ~= nil)
+vim.paste({ " two" }, -1)
+vim.wait(1000, function() return flow.state.waiting == nil end, 10)
+check("then the second paste ends the wait", nil, flow.state.waiting)
+
 say(fail == 0 and "flow_spec: all ok" or "flow_spec: FAILED")
 os.exit(fail)

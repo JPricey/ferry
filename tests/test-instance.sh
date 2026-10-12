@@ -489,6 +489,218 @@ do
   stop(sock)
 end
 
+-- --- hold to talk: talkDown / talkUp -----------------------------------------
+
+-- Run a Lua file in the server; its return value comes back as a string.
+local function luaRun(sock, name, body)
+  local f = assert(io.open(work .. "/" .. name, "w"))
+  f:write(body)
+  f:close()
+  return ask(sock, 'luaeval("dofile(\\"' .. work .. "/" .. name .. '\\")")')
+end
+-- Record Flow URLs in g:vv_flow instead of running `open`.
+local function recordFlow(sock)
+  luaRun(sock, "talkrec.lua", [[
+    require("voice-vim.flow").open = function(u) vim.g.vv_flow = (vim.g.vv_flow or "") .. u .. " " end
+    return 1
+  ]])
+end
+local function urls(sock) return ask(sock, 'get(g:, "vv_flow", "")') end
+local function stops(sock)
+  local k = 0
+  for _ in urls(sock):gmatch("stop%-hands%-free") do k = k + 1 end
+  return k
+end
+local function recording(sock)
+  return luaRun(sock, "talkq.lua", 'return tostring(require("voice-vim.flow").recording())')
+end
+local function waiting(sock)
+  return luaRun(sock, "talkw.lua", 'return tostring(require("voice-vim.flow").state.waiting ~= nil)')
+end
+-- Flow's paste into the note (a bracketed paste reaches nvim as vim.paste).
+local function paste(sock, text)
+  luaRun(sock, "talkp.lua", 'vim.paste({ "' .. text .. '" }, -1) return 1')
+  sh("sleep 0.1")
+end
+-- Fire the timers pending now once (not the ones they schedule).
+local function tick(rec)
+  local k = #rec.timers
+  for i = 1, k do
+    local t = rec.timers[i]
+    if not t.fired then
+      t.fired = true
+      rec.clock = rec.clock + t.delay
+      t.fn()
+    end
+  end
+end
+local function startTasks(rec)
+  local out = {}
+  for i, t in ipairs(rec.tasks) do
+    if t.path == "/usr/bin/open" then out[#out + 1] = i end
+  end
+  return out
+end
+local function finishStart(rec, k) rec:finishTask(startTasks(rec)[k or #startTasks(rec)], 0, "", "") end
+
+-- talkDown from window 4242 with the host slow to get focus: Flow's start
+-- task goes first, then show --talk; talkUp holds the release until the
+-- host is focused, the start task has exited and no modifier is down.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  recordFlow(sock)
+  t.host.show = function(cb) t.order[#t.order + 1] = "host.show"; cb(true) end  -- no focus yet
+  c.talkDown()
+  local st = rec.tasks[startTasks(rec)[1] or 0]
+  check("talkDown: Flow start task is open -g wispr-flow://start-hands-free", "-g wispr-flow://start-hands-free",
+    st and table.concat(st.args, " "))
+  check("talkDown: start task started", true, st ~= nil and st.started)
+  local shows = execs(rec, "'show' '--talk' 'com.example.target' '4242'")
+  check("talkDown from 4242: show --talk com.example.target 4242", 1, #shows)
+  check("talkDown: start task before the show execute", true, st ~= nil and shows[1] ~= nil and st.seq < shows[1].seq)
+  check("talkDown: server reports recording, no URL", "true ", recording(sock) .. " " .. urls(sock))
+  check("talkDown: note in insert mode with target 4242", "i com.example.target 4242",
+    ask(sock, 'mode()." ".b:voicevim.target." ".b:voicevim.window'))
+  check("talkDown logs focused=false -> show", true, rec:hasLog("i", "talk: down focused=false -> show"))
+  check("talkDown logs the start task", true, rec:hasLog("i", "talk: flow start task started after"))
+
+  c.talkUp()
+  check("talkUp logs up after N ms held", true, rec:hasLog("i", "talk: up after"))
+  tick(rec)
+  check("talkUp before focus: no release", 0, #execs(rec, "'release'"))
+  rec.frontmost, rec.focusedWindow = rec.apps["com.example.host"], t.hostWin
+  tick(rec)
+  check("focused but the start task still running: no release", 0, #execs(rec, "'release'"))
+  rec.modifiers = { ctrl = true, alt = true }
+  finishStart(rec)
+  check("start task exit logged", true, rec:hasLog("i", "talk: flow start exited after"))
+  tick(rec)
+  tick(rec)
+  check("modifiers down: release held", 0, #execs(rec, "'release'"))
+  rec.modifiers = {}
+  tick(rec)
+  check("modifiers up: exactly one release", 1, #execs(rec, "'release'"))
+  check("release printed released", "released", (execs(rec, "'release'")[1].out:gsub("%s+$", "")))
+  check("server URLs end in one stop", "wispr-flow://stop-hands-free", urls(sock))
+  check("release logged with its waits", true, rec:hasLog("i", "talk: release after"))
+  rec:runTimers()
+  check("no second release, no alert", "1 0", #execs(rec, "'release'") .. " " .. #rec.alerts)
+  paste(sock, "talked")
+  check("after Flow's paste: not recording, no wait", "false false", recording(sock) .. " " .. waiting(sock))
+  stop(sock)
+end
+
+-- Modifiers that never come up: release anyway talkModsTimeout after the
+-- host was ready.
+do
+  local t = setup({ talkModsTimeout = 0.2 })
+  local rec, c, sock = t.rec, t.c, t.sock
+  recordFlow(sock)
+  c.talkDown()
+  finishStart(rec)
+  rec.modifiers = { ctrl = true }
+  c.talkUp()
+  check("modifiers stuck: no release at once", 0, #execs(rec, "'release'"))
+  rec:runTimers()
+  check("modifiers stuck: one release after talkModsTimeout, warned", "1 true",
+    #execs(rec, "'release'") .. " " .. tostring(rec:hasLog("w", "still down after")))
+  check("modifiers stuck: one stop", 1, stops(sock))
+  stop(sock)
+end
+
+-- Never focused: no release, one alert, Flow still recording.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  recordFlow(sock)
+  t.host.show = function(cb) t.order[#t.order + 1] = "host.show"; cb(true) end
+  c.talkDown()
+  finishStart(rec)
+  c.talkUp()
+  rec:runTimers()
+  check("never focused: no release", 0, #execs(rec, "'release'"))
+  check("never focused: one alert", 1, #rec.alerts)
+  check("never focused: alert says Flow is still recording", true,
+    has(rec.alerts[1], "note did not appear") and has(rec.alerts[1], "Ctrl-S"))
+  check("never focused: stop withheld logged", true, rec:hasLog("w", "talk: stop withheld"))
+  check("never focused: server still recording, no URL", "true ", recording(sock) .. " " .. urls(sock))
+  c.talkUp()
+  check("never focused: a later up does nothing", 0, #execs(rec, "'release'"))
+  stop(sock)
+end
+
+-- Note already focused: talk, no hide, no new target; then release.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  recordFlow(sock)
+  c.toggle()
+  rec:runTimers()
+  ask(sock, 'nvim_buf_set_lines(0, 1, -1, v:false, ["hello world"])')
+  local captures = #rec:findLogs("i", "show: target")
+  c.talkDown()
+  check("talkDown while focused: talk, logged -> more", "1 true",
+    #execs(rec, "'talk'") .. " " .. tostring(rec:hasLog("i", "talk: down focused=true -> more")))
+  check("talkDown while focused: no show, no host.hide, target not re-captured", "1 0 " .. captures,
+    #execs(rec, "'show'") .. " " .. count(t.order, "host.hide") .. " " .. #rec:findLogs("i", "show: target"))
+  check("talkDown while focused: mode i, recording", "i true", ask(sock, "mode()") .. " " .. recording(sock))
+  c.talkDown()
+  check("double down: one start task", 1, #startTasks(rec))
+  check("double down: logged, no second talk", "true 1",
+    tostring(rec:hasLog("i", "already down")) .. " " .. #execs(rec, "'talk'"))
+  finishStart(rec)
+  c.talkUp()
+  check("focused talk: one release at key up, one stop", "1 1", #execs(rec, "'release'") .. " " .. stops(sock))
+  check("focused talk: never hidden", 0, count(t.order, "host.hide"))
+  paste(sock, " more")
+
+  -- A quick second hold while the first release still waits for Flow's
+  -- paste: down/up/down/up, then both pastes.
+  c.talkDown(); finishStart(rec); c.talkUp()
+  check("quick second hold: first release sent one stop", 2, stops(sock))
+  c.talkDown()
+  check("quick second hold: second down during the wait runs talk, recording", "3 true",
+    #execs(rec, "'talk'") .. " " .. recording(sock))
+  finishStart(rec)
+  c.talkUp()
+  check("quick second hold: its own key up sends exactly one more stop", 3, stops(sock))
+  paste(sock, " one")
+  check("quick second hold: still waiting after the first paste", "true", waiting(sock))
+  paste(sock, " two")
+  check("quick second hold: second paste ends the wait, Flow idle", "false false",
+    waiting(sock) .. " " .. recording(sock))
+  check("quick second hold: no further stop", 3, stops(sock))
+
+  -- Same, but the first paste lands before the second key up.
+  c.talkDown(); finishStart(rec); c.talkUp()
+  c.talkDown(); finishStart(rec)
+  paste(sock, " a")
+  check("first paste before the second up: still recording", "true", recording(sock))
+  c.talkUp()
+  check("first paste before the second up: its key up stops once", 5, stops(sock))
+  paste(sock, " b")
+  check("then Flow idle", "false false", waiting(sock) .. " " .. recording(sock))
+  check("the pastes landed in the note, in order", true, has(ask(sock, "getline(2)"), " more one two a b"))
+  check("talk session: never hidden", 0, count(t.order, "host.hide"))
+  stop(sock)
+end
+
+-- Up without down, and a disabled controller: nothing.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  c.talkUp()
+  check("up without down: no release, logged", "0 true",
+    #execs(rec, "'release'") .. " " .. tostring(rec:hasLog("i", "talk: up ignored")))
+  c.disable()
+  c.talkDown()
+  c.talkUp()
+  check("disabled: talkDown starts no Flow task and runs nothing", "0 0",
+    #startTasks(rec) .. " " .. #execs(rec, "'show'"))
+  stop(sock)
+end
+
 os.exit(fail)
 LUA
 

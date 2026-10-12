@@ -32,30 +32,36 @@ local M = {}
 
 -- A module note.lua needs at api `want` or later. A running server can hold
 -- one loaded before that (api lower or unset); reload it, keeping its
--- M.state, as voice-vim-host does for this module. If the reload fails or
+-- M.state, as voice-vim-host does for this module, then run adopt(old, new)
+-- for anything else the old module must hand over. If the reload fails or
 -- is no newer, the loaded one stays.
-local function current(name, want)
+local function current(name, want, adopt)
   local old = require(name)
   if (old.api or 0) >= want then return old end
   package.loaded[name] = nil
   local ok, m = pcall(require, name)
   if ok and type(m) == "table" and (m.api or 0) >= want then
     m.state = old.state
+    if adopt then adopt(old, m) end
     return m
   end
   package.loaded[name] = old
   return old
 end
 
--- flow api 2: adopt_start, release. Its state keeps a recording and the
--- pending wait across the reload.
-local flow = current("voice-vim.flow", 2)
+-- flow api 3: adopt_start, release, a quick second hold during a release
+-- wait. Its state keeps a recording and the pending wait across the reload.
+-- The old module's vim.paste hook stays installed, so its on_paste forwards
+-- to the new one (which counts a paste reported by both hooks once).
+local flow = current("voice-vim.flow", 3, function(old, new)
+  old.on_paste = function(b) return new.on_paste(b) end
+end)
 local target = require("voice-vim.target")
 
 -- Bumped when the module changes in a way an already-running server must
 -- pick up: bin/voice-vim-host reloads the module (keeping M.state and a
 -- swapped M.host) when the loaded one reports a different api.
-M.api = 5
+M.api = 6
 
 -- history api 1: open() binds the note keys on the sidebar. Reloaded now
 -- when already loaded, so a sidebar opened from a :History command an older

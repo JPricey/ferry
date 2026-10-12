@@ -159,10 +159,10 @@ check "an existing Normal guibg is left alone" "#123456" "$(bg)"
 
 # --- a server started before this change gets layout and GUI on show ---------
 g=$("$host" show com.example.app 4242)
-ask "luaeval('(function() local n = require\"voice-vim.note\"; n.api = 4; n.old = true; vim.g.voicevim_gui = nil; vim.cmd(\"vsplit | split\"); return 1 end)()')" >/dev/null
+ask "luaeval('(function() local n = require\"voice-vim.note\"; n.api = 5; n.old = true; vim.g.voicevim_gui = nil; vim.cmd(\"vsplit | split\"); return 1 end)()')" >/dev/null
 "$host" draft >/dev/null
 h=$("$host" show com.example.app 4242)
-check "old server (note api 4): show reloads the note module to 5 and keeps the draft" "5 true $g" \
+check "old server (note api 5): show reloads the note module to 6 and keeps the draft" "6 true $g" \
   "$(ask 'luaeval("require\"voice-vim.note\".api")') $(ask 'luaeval("require\"voice-vim.note\".old == nil")') $h"
 check "old server: show applies the layout" "history $(basename "$g")" "$(wins)"
 check "old server: show loads the GUI settings" "{'bg': '#001e27', 'font': 'Test Mono:h13'}" "$(ask 'string(g:voicevim_gui)')"
@@ -218,13 +218,77 @@ u=$("$host" show com.example.app 4242)
 ask "nvim_buf_set_lines(0, 1, -1, v:false, ['upgrade draft'])" >/dev/null
 "$host" draft >/dev/null
 ask "luaeval('(function() require\"voice-vim.note\".api = 3; local f = require\"voice-vim.flow\"; f.api = nil; f.adopt_start = nil; return 1 end)()')" >/dev/null
-check "API-3 server: talk reloads note (api 5) and flow, keeps the draft and its target" \
-  "talk $u 5 2 to: app:com.example.app#4242|upgrade draft com.example.app 4242 true" \
+check "API-3 server: talk reloads note (api 6) and flow (api 3), keeps the draft and its target" \
+  "talk $u 6 3 to: app:com.example.app#4242|upgrade draft com.example.app 4242 true" \
   "$("$host" talk) $(lua 'require"voice-vim.note".api') $(lua 'require"voice-vim.flow".api') $(ask 'join(getline(1, "$"), "|")') $(ask 'b:voicevim.target." ".b:voicevim.window') $(rec)"
 check "API-3 server: release after the upgrade sends one stop" "released|-g wispr-flow://stop-hands-free" \
   "$("$host" release)|$(sleep 0.3; opened)"
 paste " done"
 "$host" stop
+
+# Live upgrade from main 54d10b6 (note api 5, flow api 2, history api 1): a
+# server started from that code keeps running while the repo under it moves
+# to this code (note 6, flow 3). The next host call reloads both modules.
+# Draft, target and to: line are kept, a recording in progress and a pending
+# release wait survive, each release sends exactly one stop, and a paste the
+# old and the new paste hook both report counts once.
+waiting() { lua 'require"voice-vim.flow".state.waiting ~= nil'; }
+vpaste() { ask "luaeval('vim.paste({\"$1\"}, -1)')" >/dev/null; sleep 0.4; }
+apis() { echo "$(lua 'require"voice-vim.note".api') $(lua 'require"voice-vim.flow".api')"; }
+body() { ask 'join(getline(1, "$"), "|")'; }
+old_server() { # dir: 54d10b6's tree there, its host shows a note with a draft
+  mkdir -p "$1"; git -C "$root" archive 54d10b6 | tar -x -C "$1"
+  "$1/bin/voice-vim-host" ensure >/dev/null
+  "$1/bin/voice-vim-host" show com.example.app 4242 >/dev/null
+  ask "nvim_buf_set_lines(0, 1, -1, v:false, ['live draft'])" >/dev/null
+  "$1/bin/voice-vim-host" draft >/dev/null
+  check "54d10b6 server: note api 5, flow api 2" "5 2" "$(apis)"
+}
+upgrade() { cp -R "$root/lua" "$root/bin" "$1/"; }
+opened >/dev/null
+
+# A recording in progress at the upgrade.
+live=$work/live1; old_server "$live"
+"$live/bin/voice-vim-host" talk >/dev/null
+upgrade "$live"
+check "upgrade with a recording: release reloads to note 6, flow 3, keeps draft, to: line and target, one stop" \
+  "released 6 3 to: app:com.example.app#4242|live draft com.example.app 4242 true|-g wispr-flow://stop-hands-free" \
+  "$("$live/bin/voice-vim-host" release) $(apis) $(body) $(ask 'b:voicevim.target." ".b:voicevim.window') $(waiting)|$(sleep 0.3; opened)"
+# A quick second hold during that wait: the new talk adds the new paste hook
+# beside the old one, so the first paste is reported twice.
+"$live/bin/voice-vim-host" talk >/dev/null
+check "upgrade: a quick second hold's release sends one stop" "released|-g wispr-flow://stop-hands-free" \
+  "$("$live/bin/voice-vim-host" release)|$(sleep 0.3; opened)"
+vpaste " one"
+check "upgrade: the first paste, reported by both hooks, counts once (still waiting for the second)" \
+  "true false" "$(waiting) $(rec)"
+# A third hold before the second paste: that paste ends the wait but must
+# not clear the new recording (the old hook forwards to the new module).
+"$live/bin/voice-vim-host" talk >/dev/null
+vpaste " two"
+check "upgrade: the second paste ends the wait and keeps the third hold recording" \
+  "false true" "$(waiting) $(rec)"
+check "upgrade: the third hold's release sends one stop" "released|-g wispr-flow://stop-hands-free" \
+  "$("$live/bin/voice-vim-host" release)|$(sleep 0.3; opened)"
+vpaste " three"
+check "upgrade: the last paste ends its wait, each paste in the note once" \
+  "false false 1 1 1" "$(waiting) $(rec) $(echo $(for w in one two three; do body | grep -o $w | grep -c .; done))"
+"$live/bin/voice-vim-host" stop
+
+# A pending release wait (the old module already sent its stop) at the upgrade.
+live=$work/live2; old_server "$live"
+"$live/bin/voice-vim-host" talk >/dev/null
+"$live/bin/voice-vim-host" release >/dev/null
+check "54d10b6 server: release sends one stop and waits" "true -g wispr-flow://stop-hands-free" \
+  "$(waiting) $(sleep 0.3; opened)"
+upgrade "$live"
+check "upgrade with a pending release wait: release reloads, keeps draft and target, the wait, sends no second stop" \
+  "released 6 3 to: app:com.example.app#4242|live draft com.example.app 4242 true " \
+  "$("$live/bin/voice-vim-host" release) $(apis) $(body) $(ask 'b:voicevim.target." ".b:voicevim.window') $(waiting) $(sleep 0.3; opened)"
+vpaste " landed"
+check "upgrade: Flow's paste ends the old wait, lands once, recording off" \
+  "false false 1" "$(waiting) $(rec) $(body | grep -o landed | grep -c .)"
+"$live/bin/voice-vim-host" stop
 
 # --- overrides and a missing or hung ghostty ------------------------------------
 VOICE_VIM_GUI_FONT='Other Font:h15' VOICE_VIM_GUI_BG='#112233' "$host" ensure >/dev/null

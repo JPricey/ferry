@@ -169,7 +169,7 @@ check "<C-s> in the sidebar starts Flow from the note, in insert mode at the end
 send '<C-s>'; opened >/dev/null
 
 # Live upgrade: a server running the note at api 4 with 4f113ac's history
-# module (sidebar without note keys). show reloads the note to api 5; the
+# module (sidebar without note keys). show reloads the note to api 6; the
 # sidebar reopened with q then :History or <leader>h has the note keys.
 old=$work/old; mkdir -p "$old/lua/voice-vim"; ln -s "$root/bin" "$old/bin"
 for m in note history; do
@@ -198,7 +198,7 @@ upgrade_key() { # reopen: keys that reopen the sidebar from the note
 }
 upgrade_key ':History<CR>'
 check "after upgrade: q then :History, <C-x> in the sidebar sends the note" \
-  "5 2 voice-vim://history submit submitted " \
+  "6 2 voice-vim://history submit submitted " \
   "$(ask 'luaeval("require\"voice-vim.note\".api")') $side $(url_kind "$(opened)") $(outcome "$id") $(ask 'v:errmsg')"
 upgrade_key '\h'
 check "after upgrade: q then <leader>h, <C-x> in the sidebar sends the note" \
