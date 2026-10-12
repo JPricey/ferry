@@ -24,6 +24,7 @@ module="$root/hammerspoon/ferry.lua"
 link="$hsdir/ferry.lua"
 bundle="${FERRY_BUNDLE_DIR:-$HOME/Applications}/ferry.app"
 icon="$root/assets/ferry.png"
+icns="$root/assets/ferry.icns"
 
 check=0
 case "${1:-}" in
@@ -272,8 +273,11 @@ fi
 # executable is a symlink to Neovide's binary, so our window shows up as
 # "ferry" with its own icon (the host launches it by direct exec). The
 # binary is found like hammerspoon/hosts/neovide.lua finds it: PATH, the
-# usual bin dirs, then Neovide.app. A right bundle is left alone; a missing
-# or wrong part (Info.plist, symlink, icon) is rewritten.
+# usual bin dirs, then Neovide.app, and the link points at its real path
+# (Homebrew's bin/neovide is itself a link into Neovide.app). ferry.icns is
+# the bundle icon Finder and the Dock show before launch; ferry.png is
+# what the host passes to Neovide's --icon. A right bundle is left alone; a
+# missing or wrong part (Info.plist, symlink, icon, icns) is rewritten.
 find_neovide() {
   local d dirs="$PATH"
   # Tests (FERRY_APPS_DIR set) never look in the real Homebrew dirs.
@@ -301,7 +305,7 @@ bundle_plist() {
 	<key>CFBundleExecutable</key>
 	<string>ferry</string>
 	<key>CFBundleIconFile</key>
-	<string>ferry.png</string>
+	<string>ferry</string>
 	<key>CFBundleIdentifier</key>
 	<string>local.ferry</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -316,12 +320,19 @@ bundle_plist() {
 </plist>
 PLIST
 }
-plist="$bundle/Contents/Info.plist" exe="$bundle/Contents/MacOS/ferry" bicon="$bundle/Contents/Resources/ferry.png"
+plist="$bundle/Contents/Info.plist" exe="$bundle/Contents/MacOS/ferry"
+bicon="$bundle/Contents/Resources/ferry.png" bicns="$bundle/Contents/Resources/ferry.icns"
 nbin=$(find_neovide || true)
+# The real path of the found binary; the found path when that fails.
+if [ -n "$nbin" ]; then
+  real=$(realpath "$nbin" 2>/dev/null || true)
+  if [ -n "$real" ] && [ -f "$real" ] && [ -x "$real" ]; then nbin=$real; fi
+fi
 wrong=""
 { [ -f "$plist" ] && [ "$(cat "$plist")" = "$(bundle_plist)" ]; } || wrong+=" Info.plist"
 { [ -n "$nbin" ] && [ -L "$exe" ] && [ "$(readlink "$exe")" = "$nbin" ]; } || wrong+=" executable"
 cmp -s "$icon" "$bicon" || wrong+=" icon"
+cmp -s "$icns" "$bicns" || wrong+=" icns"
 if [ -z "$wrong" ]; then
   say ok "ferry.app $bundle"
 elif [ -z "$nbin" ]; then
@@ -339,7 +350,10 @@ else
     else bundle_plist > "$plist.tmp" && mv -f "$plist.tmp" "$plist"; fi ;;
   esac
   case "$wrong" in *executable*) run rm -rf "$exe"; run ln -s "$nbin" "$exe" ;; esac
-  case "$wrong" in *icon*) run cp "$icon" "$bicon" ;; esac
+  case "$wrong" in *" icon"*) run cp "$icon" "$bicon" ;; esac
+  case "$wrong" in *icns*) run cp "$icns" "$bicns" ;; esac
+  # A new mtime tells Finder and the Dock to read the bundle again.
+  run touch "$bundle"
   say installed "ferry.app $bundle (wrote$wrong; runs $nbin)"
 fi
 

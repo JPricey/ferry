@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """Draw ferry's app icon once: a white ferry on blue water in a rounded
 square, 512x512 RGBA. Standard library only; the output is deterministic.
+Then build the macOS icon from it: an .iconset with every standard size
+made by sips, packed by iconutil into a .icns next to the PNG.
 
-    python3 assets/make-icon.py            # writes assets/ferry.png
-    python3 assets/make-icon.py out.png
+    python3 assets/make-icon.py             # writes assets/ferry.png and ferry.icns
+    python3 assets/make-icon.py out.png     # writes out.png and out.icns
+    python3 assets/make-icon.py --icns      # only rebuilds ferry.icns from ferry.png
 
-The PNG is committed; install.sh copies it and never runs this script.
+Both files are committed; install.sh copies them and never runs this script.
 """
 import math
 import os
+import shutil
 import struct
+import subprocess
 import sys
+import tempfile
 import zlib
 
 SIZE = 512
@@ -116,11 +122,38 @@ def png(raw):
             + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
 
 
+# Every size of a standard macOS .iconset: icon_<n>x<n>[@2x].png.
+ICONSET = [(n, scale) for n in (16, 32, 128, 256, 512) for scale in (1, 2)]
+
+
+def icns(src, out):
+    """Pack src (a square PNG) into out (.icns) with sips and iconutil."""
+    work = tempfile.mkdtemp(prefix="ferry-icon.")
+    try:
+        iconset = os.path.join(work, "ferry.iconset")
+        os.mkdir(iconset)
+        for n, scale in ICONSET:
+            px = n * scale
+            name = "icon_%dx%d%s.png" % (n, n, "@2x" if scale == 2 else "")
+            subprocess.run(["sips", "-z", str(px), str(px), src, "--out", os.path.join(iconset, name)],
+                           check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(["iconutil", "-c", "icns", iconset, "-o", out], check=True)
+    finally:
+        shutil.rmtree(work)
+
+
 def main():
-    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "ferry.png")
-    with open(out, "wb") as f:
-        f.write(png(render()))
-    print(out)
+    args = sys.argv[1:]
+    only_icns = "--icns" in args
+    args = [a for a in args if a != "--icns"]
+    out = args[0] if args else os.path.join(os.path.dirname(os.path.abspath(__file__)), "ferry.png")
+    if not only_icns:
+        with open(out, "wb") as f:
+            f.write(png(render()))
+        print(out)
+    out_icns = os.path.splitext(out)[0] + ".icns"
+    icns(out, out_icns)
+    print(out_icns)
 
 
 if __name__ == "__main__":

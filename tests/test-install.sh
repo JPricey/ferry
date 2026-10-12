@@ -7,7 +7,9 @@
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 install="$root/install.sh"
-tmp=$(mktemp -d -t ferry-install-test)
+# The physical path (TMPDIR is under the /var -> /private/var link), so
+# expected link targets match install.sh's resolved Neovide path.
+tmp=$(cd "$(mktemp -d -t ferry-install-test)" && pwd -P)
 trap 'rm -rf "$tmp"' EXIT
 export FERRY_DB="$tmp/history.sqlite"
 real_nvim=$(command -v nvim || true)
@@ -113,12 +115,13 @@ check "fresh: Ghostty ok as optional" 1 "$(grep -c '^ok  *Ghostty (optional' <<<
 # ferry.app: Info.plist keys, executable symlinked to Neovide's binary, icon.
 fapp="$s/home/Applications/ferry.app"
 plist_key() { plutil -extract "$2" raw -o - "$1/Contents/Info.plist" 2>&1; }
-check "fresh: ferry.app Info.plist keys" "ferry ferry local.ferry ferry APPL" \
-  "$(for k in CFBundleName CFBundleDisplayName CFBundleIdentifier CFBundleExecutable CFBundlePackageType; do plist_key "$fapp" $k; done | tr '\n' ' ' | sed 's/ $//')"
+check "fresh: ferry.app Info.plist keys" "ferry ferry local.ferry ferry APPL ferry" \
+  "$(for k in CFBundleName CFBundleDisplayName CFBundleIdentifier CFBundleExecutable CFBundlePackageType CFBundleIconFile; do plist_key "$fapp" $k; done | tr '\n' ' ' | sed 's/ $//')"
 check "fresh: ferry.app Info.plist is valid" 0 "$(plutil -lint -s "$fapp/Contents/Info.plist" >/dev/null 2>&1; echo $?)"
 check "fresh: ferry.app executable links to Neovide's binary" "$s/apps/Neovide.app/Contents/MacOS/neovide" \
   "$(readlink "$fapp/Contents/MacOS/ferry")"
 check "fresh: ferry.app icon is the repo's" same "$(cmp -s "$root/assets/ferry.png" "$fapp/Contents/Resources/ferry.png" && echo same)"
+check "fresh: ferry.app icns is the repo's" same "$(cmp -s "$root/assets/ferry.icns" "$fapp/Contents/Resources/ferry.icns" && echo same)"
 check "fresh: ferry.app reported installed" 1 "$(grep -c "^installed  *ferry.app $fapp " <<<"$out")"
 # The block is valid Lua and passes no settings, so the module defaults apply.
 if [ -n "$real_nvim" ]; then
@@ -260,9 +263,36 @@ out=$(bash "$install" 2>&1)
 check "bundle: edited Info.plist and icon rewritten" "local.ferry same 1" \
   "$(plist_key "$fapp" CFBundleIdentifier) $(cmp -s "$root/assets/ferry.png" "$fapp/Contents/Resources/ferry.png" && echo same) \
 $(grep -c '^installed  *ferry.app .*(wrote Info.plist icon;' <<<"$out")"
+echo "not an icns" > "$fapp/Contents/Resources/ferry.icns"
+out=$(bash "$install" 2>&1)
+check "bundle: changed icns rewritten" "same 1" \
+  "$(cmp -s "$root/assets/ferry.icns" "$fapp/Contents/Resources/ferry.icns" && echo same) \
+$(grep -c '^installed  *ferry.app .*(wrote icns;' <<<"$out")"
 before=$(snapshot)
 out=$(bash "$install" 2>&1)
 check "bundle: then a run changes nothing" "$before 1" "$(snapshot) $(grep -cxF "$(say_line ok "ferry.app $fapp")" <<<"$out")"
+
+# A neovide on PATH that is a link into Neovide.app (as Homebrew's is): the
+# wrapper links to the resolved binary. A wrapper from before, linked to
+# the unresolved path, is rewritten once; then a run changes nothing.
+setup resolve; apps_ghostty_flow
+bash "$install" >/dev/null 2>&1
+fapp="$s/home/Applications/ferry.app" nbin="$s/apps/Neovide.app/Contents/MacOS/neovide"
+ln -s "$nbin" "$s/bin/neovide"
+rm "$fapp/Contents/MacOS/ferry"; ln -s "$s/bin/neovide" "$fapp/Contents/MacOS/ferry"
+out=$(bash "$install" 2>&1)
+check "resolve: link to the unresolved path rewritten to Neovide.app's binary" "$nbin 1" \
+  "$(readlink "$fapp/Contents/MacOS/ferry") $(grep -cxF "$(say_line installed "ferry.app $fapp (wrote executable; runs $nbin)")" <<<"$out")"
+before=$(snapshot)
+out=$(bash "$install" 2>&1)
+check "resolve: then a run changes nothing" "$before 1" "$(snapshot) $(grep -cxF "$(say_line ok "ferry.app $fapp")" <<<"$out")"
+setup resolvefresh; apps_ghostty_flow
+mkdir -p "$s/apps/Neovide.app/Contents/MacOS"
+printf '#!/bin/sh\nexit 0\n' > "$s/apps/Neovide.app/Contents/MacOS/neovide"; chmod +x "$s/apps/Neovide.app/Contents/MacOS/neovide"
+ln -s "$s/apps/Neovide.app/Contents/MacOS/neovide" "$s/bin/neovide"
+bash "$install" >/dev/null 2>&1
+check "resolve: a fresh wrapper links to Neovide.app's binary" "$s/apps/Neovide.app/Contents/MacOS/neovide" \
+  "$(readlink "$s/home/Applications/ferry.app/Contents/MacOS/ferry")"
 
 # FERRY_BUNDLE_DIR builds ferry.app there instead of ~/Applications.
 setup bundledir; apps_ghostty_flow
