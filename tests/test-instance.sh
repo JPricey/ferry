@@ -566,9 +566,10 @@ do
   stop(sock)
 end
 
--- browse (the browse hotkey): a stub ferry-host (H7's `browse` lives in
--- bin/ferry-host) records each call with its FERRY_NOTES_DIR; status says
--- a UI is attached.
+-- browse (the browse hotkey): a stub ferry-host records each call with its
+-- FERRY_NOTES_DIR; status says a UI is attached. Its browse answers like
+-- bin/ferry-host's (one line, the note's path; exit 0); the real command is
+-- checked below.
 local fakeRoot = work .. "/fakeroot"
 sh("mkdir -p '" .. fakeRoot .. "/bin'")
 do
@@ -577,7 +578,7 @@ do
     .. "echo \"$* notes=$FERRY_NOTES_DIR\" >> '" .. fakeRoot .. "/calls'\n"
     .. "case \"$1\" in\n"
     .. "  status) echo 'up uis=1' ;;\n"
-    .. "  browse) echo \"browse $2 $3\" ;;\n"
+    .. "  browse) echo \"$FERRY_NOTES_DIR/stub-note.md\" ;;\n"
     .. "  draft) echo 'draft kept' ;;\n"
     .. "esac\n")
   f:close()
@@ -631,6 +632,42 @@ do
   rec:finishTask(#rec.tasks, 0, "", "")
   check("browse after pre-warm: browse com.example.target 4242, host.show", "true host.show",
     tostring(has(fakeCalls(), "browse com.example.target 4242")) .. " " .. table.concat(t.order, ","))
+end
+
+-- browse against the real bin/ferry-host: the args the stub was given, one
+-- line back (the note's path, logged), exit 0; the note takes target 4242 and
+-- the sidebar is current in normal mode.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  c.browse()
+  local path = ask(sock, [[luaeval("require(\"ferry.note\").current().path")]])
+  check("real browse: one `browse com.example.target 4242`, no show", "1 0",
+    #execs(rec, "'browse' 'com.example.target' '4242'") .. " " .. #execs(rec, "'show'"))
+  check("real browse: prints the note's path (logged); no UI attached, so launch, then show", "true true host.launch,host.show",
+    tostring(has(path, work .. "/notes/")) .. " " .. tostring(rec:hasLog("i", "show: browse took"))
+      .. " " .. table.concat(t.order, ","))
+  check("real browse: the logged output is exactly that path", true, rec:hasLog("i", "(" .. path .. ")"))
+  check("real browse: sidebar current, normal mode, note target 4242", "history n com.example.target 4242",
+    ask(sock, [[expand("%:t")." ".mode()." ".getbufvar(luaeval("require(\"ferry.note\").current().buf"), "ferry").target." ".getbufvar(luaeval("require(\"ferry.note\").current().buf"), "ferry").window]]))
+  stop(sock)
+end
+
+-- Server down: the real browse fails with `no server on` (exit 1), ensure
+-- runs, browse is retried once (still no seed).
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  stop(sock)
+  c.browse()
+  check("browse, server down: logged, ensure task, no alert", "true true 0", tostring(rec:hasLog("w", "show: server down"))
+    .. " " .. tostring(has(rec.tasks[#rec.tasks].args[2], "'ensure'")) .. " " .. #rec.alerts)
+  runTask(rec, #rec.tasks)
+  local b = execs(rec, "'browse' 'com.example.target' '4242'")
+  check("browse, server down: retried once, no seed argument", "2 true", #b .. " "
+    .. tostring(b[2] ~= nil and b[2].cmd:find("'4242'%s*2>&1$") ~= nil))
+  check("browse, restarted server: sidebar current, normal mode", "history n", ask(sock, [[expand("%:t")." ".mode()]]))
+  stop(sock)
 end
 
 -- --- hold to talk: talkDown / talkUp -----------------------------------------

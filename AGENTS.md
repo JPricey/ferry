@@ -245,8 +245,9 @@ never starts Flow.
 the same combo as `hotkey` or `talkHotkey`; a failed bind logs and alerts
 with ` (browse)`) and `ferry-browse` call `M.browse` → `c.browse`: like
 `toggle`, but the show runs `ferry-host browse <bundle> <window>` (no
-seed; the note with the sidebar focused on the newest note, normal mode)
-and from the note it runs `draft` and hides. Config `notesDir` reaches
+seed; the note with the sidebar focused on the newest note, normal mode;
+a pending $EDITOR edit is re-shown instead, as by `show`) and from the
+note it runs `draft` and hides. Config `notesDir` reaches
 the controller as `FERRY_NOTES_DIR` for every `ferry-host` call (nil:
 ferry-host's default).
 
