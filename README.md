@@ -19,9 +19,9 @@ New here? Read `USER_GUIDE.md`. See `motivations.md` for the why.
 4. The hotkey (or `:q`) from the note hides it and keeps it as a draft; the
    next press brings it back.
 
-Every note is recorded in a local SQLite database, and a history sidebar
-on the left of the note lets past dictations be inserted, re-submitted,
-copied, or deleted. Without Neovide, ferry alerts at load and on each
+Every note is a markdown file in `~/notes/scratchpads`, and a sidebar on
+the left of the note lists and searches them, so past notes can be opened,
+sent again, copied, pinned, inserted or deleted. Without Neovide, ferry alerts at load and on each
 press, and does nothing else.
 
 ## Install
@@ -94,9 +94,11 @@ commands live in `lua/ferry/note.lua`.
 - `lua/ferry/edit.lua` — that edit inside the server: its tab, keys, and
   the done file the client polls.
 - `lua/ferry/gui.lua` — makes Neovide look like the terminal.
-- `lua/ferry/history.lua` — the history sidebar.
-- `bin/ferry-db` — owns the SQLite history database (start, finish,
-  list, get, delete).
+- `lua/ferry/history.lua` — the notes browser sidebar (list, search,
+  open, send again, pin, delete).
+- `lua/ferry/store.lua` — reads and writes note files (frontmatter, body).
+- `bin/ferry-notes` — the search index over the notes folder (index, sync,
+  list with `--query`, pin, delete); only a cache of the files.
 - `bin/ferry-migrate-history` — one-off: turns the old history
   database's rows into note files (reads the database only; safe to rerun).
 - `bin/ferry-corrections` — prints the word fixes you keep making after

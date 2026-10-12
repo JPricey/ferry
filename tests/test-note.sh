@@ -2,15 +2,14 @@
 # Submit, Cancel and Hide in lua/ferry/note.lua: tests/note_spec.lua under
 # headless nvim (--clean) with a recording stub host, then :q against a real
 # ferry-host server. A recording fake `open` is first on PATH, so nothing
-# reaches Hammerspoon. Temp history database, notes folder, index and
-# outbox only.
+# reaches Hammerspoon. Temp notes folder, index and outbox only.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # macOS socket paths max out at 104 bytes, so keep the folder short.
 work=$(mktemp -d /tmp/ferryn.XXXX)
 [ -n "$work" ] && [ -d "$work" ] || { echo "mktemp failed" >&2; exit 1; }
 export FERRY_SOCK=$work/host.sock FERRY_NOTES_DIR=$work/notes \
-  FERRY_DB=$work/history.sqlite FERRY_HOST_NVIM_FLAGS=--clean \
+  FERRY_HOST_NVIM_FLAGS=--clean \
   FERRY_INDEX=$work/index.sqlite FERRY_OUTBOX=$work/outbox
 cleanup() {
   pkill -f -- "--listen $work/" 2>/dev/null
@@ -33,7 +32,7 @@ export PATH="$work/bin:$PATH"
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: want '$2' got '$3'"; fail=1; fi; }
 
-# --- spec: stub host, temp DB --------------------------------------------
+# --- spec: stub host, temp notes folder --------------------------------------------
 # nvim -l prints to stderr and leaves the last line unterminated.
 perl -e 'alarm 60; exec @ARGV' nvim --headless --clean -l "$root/tests/note_spec.lua" "$root" "$work" 2>&1
 [ $? -eq 0 ] || fail=1
@@ -42,20 +41,20 @@ echo
 # --- keys on a real ferry-host server --------------------------------
 # Typed input (--remote-send) goes through the main loop, as in real use.
 host="$root/bin/ferry-host"
-db="$root/bin/ferry-db"
 ask() { nvim --server "$FERRY_SOCK" --remote-expr "$1" 2>&1; }
 send() { nvim --server "$FERRY_SOCK" --remote-send "$1"; }
-outcome() { "$db" get "$1" 2>/dev/null | python3 -c 'import json,sys;print(json.load(sys.stdin)["outcome"])' 2>/dev/null || echo none; }
 # Wait for the fake open to log a line, then print it and clear the log.
 opened() {
   for _ in $(seq 100); do [ -s "$work/open.log" ] && break; sleep 0.05; done
   cat "$work/open.log" 2>/dev/null; rm -f "$work/open.log"
 }
-waitrow() { for _ in $(seq 100); do [ "$(outcome "$1")" = "$2" ] && break; sleep 0.05; done; }
 # A note file's frontmatter value for a key, and its body joined by |.
 fkey() { sed -n "/^$2: /{s/^$2: //p;q;}" "$1" 2>/dev/null; }
 fbody() { awk 'NR == 1 && $0 == "---" { f = 1; next } f && $0 == "---" { f = 0; next } !f' "$1" 2>/dev/null | paste -sd'|' -; }
 exists() { test -e "$1" && echo yes || echo no; }
+# The note file whose frontmatter id is $1, and its state (none: no file).
+idfile() { grep -l -x "id: $1" "$FERRY_NOTES_DIR"/*.md 2>/dev/null | head -1; }
+state() { local f; f=$(idfile "$1"); if [ -n "$f" ]; then fkey "$f" state; else echo none; fi; }
 listed() { # id: "<state> <preview>" from ferry-notes list, or none
   "$root/bin/ferry-notes" list 2>/dev/null | python3 -c 'import json,sys
 r=[x for x in json.load(sys.stdin) if x["id"]==sys.argv[1]]
@@ -73,72 +72,72 @@ clipped() { ask "luaeval('table.concat(_G.ferryclip[\"+\"] or {}, \"|\")')"; }
 "$host" show com.example.app 4242 >/dev/null
 check "after show: no to: line (one empty line), insert mode on row 1" "1  i 1" \
   "$(ask 'line("$")." ".getline(1)." ".mode()." ".line(".")')"
-id=$(ask 'b:ferry.id'); waitrow "$id" open
+id=$(ask 'b:ferry.id')
 send 'server draft<Esc>:q<CR>'
 check ":q hides via ferry-hide" hide "$(url_kind "$(opened)")"
 check ":q leaves the server running" "$pid" "$(ask 'getpid()')"
 d=$(ask 'g:ferry_draft')
-check ":q keeps the draft file (target in the frontmatter), row stays open" \
-  "draft app:com.example.app#4242 server draft open" "$(fkey "$d" state) $(fkey "$d" target) $(fbody "$d") $(outcome "$id")"
+check ":q keeps the draft file (target in the frontmatter), under the note's id" \
+  "draft app:com.example.app#4242 server draft $d" "$(fkey "$d" state) $(fkey "$d" target) $(fbody "$d") $(idfile "$id")"
 
 "$host" show com.example.app 4242 >/dev/null
 send '<Esc>:wq<CR>'
-check ":wq submits the resumed draft" "submit submitted" "$(url_kind "$(opened)") $(outcome "$id")"
+check ":wq submits the resumed draft" "submit sent" "$(url_kind "$(opened)") $(state "$id")"
 
 "$host" show com.example.app 4242 >/dev/null
-id=$(ask 'b:ferry.id'); waitrow "$id" open
+id=$(ask 'b:ferry.id')
 send 'by keys<CR>to: app:com.other#7<C-x>'
 url=$(opened)
 file=$(python3 -c 'import sys, urllib.parse as u; print(u.parse_qs(u.urlsplit(sys.argv[1]).query)["file"][0])' "${url#-g }")
 check "<C-x> in insert mode submits the whole buffer to the captured target" \
-  "submit submitted by keys|to: app:com.other#7" "$(url_kind "$url") $(outcome "$id") $(paste -sd'|' - <"$file")"
-check "the history row's target is the captured spec" "app:com.example.app#4242" \
-  "$("$db" get "$id" | python3 -c 'import json,sys;print(json.load(sys.stdin)["target"])')"
+  "submit sent by keys|to: app:com.other#7" "$(url_kind "$url") $(state "$id") $(paste -sd'|' - <"$file")"
+check "the note file's target is the captured spec" "app:com.example.app#4242" \
+  "$(fkey "$(idfile "$id")" target)"
 
 "$host" show com.example.app 4242 >/dev/null
-id=$(ask 'b:ferry.id'); waitrow "$id" open
+id=$(ask 'b:ferry.id')
 send 'via x<Esc>:x<CR>'
-check ":x submits" "submit submitted" "$(url_kind "$(opened)") $(outcome "$id")"
+check ":x submits" "submit sent" "$(url_kind "$(opened)") $(state "$id")"
 
 "$host" show com.example.app 4242 >/dev/null
-id=$(ask 'b:ferry.id'); waitrow "$id" open
+id=$(ask 'b:ferry.id')
 send 'via ZZ<Esc>ZZ'
-check "ZZ submits" "submit submitted" "$(url_kind "$(opened)") $(outcome "$id")"
+check "ZZ submits" "submit sent" "$(url_kind "$(opened)") $(state "$id")"
 
 "$host" show com.example.app 4242 >/dev/null
-id=$(ask 'b:ferry.id'); waitrow "$id" open
+id=$(ask 'b:ferry.id')
 send 'drop me<Esc>ZQ'
-check "ZQ cancels" "hide cancelled" "$(url_kind "$(opened)") $(outcome "$id")"
+check "ZQ cancels" "hide cancelled" "$(url_kind "$(opened)") $(state "$id")"
 
 # Voice keys: <C-q> cancels from insert mode; <C-s> toggles Flow (the fake
 # `open` logs its URL) and stays in insert mode.
 "$host" show com.example.app 4242 >/dev/null
-id=$(ask 'b:ferry.id'); waitrow "$id" open
+id=$(ask 'b:ferry.id')
 send 'x<C-q>'
-check "<C-q> in insert mode cancels" "hide cancelled" "$(url_kind "$(opened)") $(outcome "$id")"
+check "<C-q> in insert mode cancels" "hide cancelled" "$(url_kind "$(opened)") $(state "$id")"
 
 "$host" show com.example.app 4242 >/dev/null
-id=$(ask 'b:ferry.id'); waitrow "$id" open
+id=$(ask 'b:ferry.id')
 send '<C-s>'
 check "<C-s> starts Flow and stays in insert mode" "-g wispr-flow://start-hands-free i" "$(opened) $(ask 'mode()')"
 send '<C-s>'
 check "<C-s> again stops Flow, still in insert mode" "-g wispr-flow://stop-hands-free i" "$(opened) $(ask 'mode()')"
 send 'words<Esc><C-q>'
-check "<C-q> in normal mode cancels" "hide cancelled" "$(url_kind "$(opened)") $(outcome "$id")"
+check "<C-q> in normal mode cancels" "hide cancelled" "$(url_kind "$(opened)") $(state "$id")"
 check "server still running after all keys" "$pid" "$(ask 'getpid()')"
 
 # Copy and hide: <C-y> in insert mode copies the body, whatever the header.
 "$host" show com.example.app 4242 >/dev/null
-id=$(ask 'b:ferry.id'); waitrow "$id" open
+id=$(ask 'b:ferry.id')
 send 'copied<C-y>'
-check "<C-y> in insert mode copies the body and hides" "hide submitted copied" \
-  "$(url_kind "$(opened)") $(outcome "$id") $(clipped)"
-check "<C-y>: the history row's target is clipboard" clipboard \
-  "$("$db" get "$id" | python3 -c 'import json,sys;print(json.load(sys.stdin)["target"])')"
+check "<C-y> in insert mode copies the body and hides" "hide sent copied" \
+  "$(url_kind "$(opened)") $(state "$id") $(clipped)"
+check "<C-y>: the note file's target is clipboard" clipboard \
+  "$(fkey "$(idfile "$id")" target)"
 
 # Submit file in the outbox; after Submit, :q in that window still hides.
 "$host" show com.example.app 4242 >/dev/null
-id=$(ask 'b:ferry.id'); waitrow "$id" open
+id=$(ask 'b:ferry.id')
 send 'to outbox<Esc>ZZ'
 url=$(opened)
 file=$(python3 -c 'import sys, urllib.parse as u; print(u.parse_qs(u.urlsplit(sys.argv[1]).query)["file"][0])' "${url#-g }")
@@ -151,7 +150,7 @@ check "after Submit, :q in that window leaves the server running" "$pid" "$(ask 
 
 # --- note files: autosave, :w, Submit, Cancel ----------------------------
 "$host" show com.example.app 4242 >/dev/null
-id=$(ask 'b:ferry.id'); waitrow "$id" open
+id=$(ask 'b:ferry.id')
 nf=$(ask 'expand("%:p")')
 check "a fresh note has no file yet" no "$(exists "$nf")"
 send 'typed by keys'
@@ -165,20 +164,20 @@ for _ in $(seq 40); do [ "$(fbody "$nf")" = "typed by keys and saved" ] && break
 check ":w writes the frontmatter, then the body" "---|id: $id|typed by keys and saved|" \
   "$(sed -n 1p "$nf")|$(sed -n 2p "$nf")|$(fbody "$nf")|$(ask 'v:errmsg')"
 send 'ZZ'
-check "Submit keeps the file: state sent, a sent time, the body" "submit submitted sent yes typed by keys and saved" \
-  "$(url_kind "$(opened)") $(outcome "$id") $(fkey "$nf" state) $(test -n "$(fkey "$nf" sent)" && echo yes) $(fbody "$nf")"
+check "Submit keeps the file: state sent, a sent time, the body" "submit sent sent yes typed by keys and saved" \
+  "$(url_kind "$(opened)") $(state "$id") $(fkey "$nf" state) $(test -n "$(fkey "$nf" sent)" && echo yes) $(fbody "$nf")"
 for _ in $(seq 100); do [ "$(listed "$id")" != none ] && break; sleep 0.05; done
 check "ferry-notes list shows the sent note" "sent typed by keys and saved" "$(listed "$id")"
 
 "$host" show com.example.app 4242 >/dev/null
-id=$(ask 'b:ferry.id'); waitrow "$id" open
+id=$(ask 'b:ferry.id')
 nf=$(ask 'expand("%:p")')
 send 'not wanted<Esc>ZQ'
 check "Cancel keeps the file as cancelled" "hide cancelled cancelled not wanted" \
-  "$(url_kind "$(opened)") $(outcome "$id") $(fkey "$nf" state) $(fbody "$nf")"
+  "$(url_kind "$(opened)") $(state "$id") $(fkey "$nf" state) $(fbody "$nf")"
 
 "$host" show com.example.app 4242 >/dev/null
-id=$(ask 'b:ferry.id'); waitrow "$id" open
+id=$(ask 'b:ferry.id')
 nf=$(ask 'expand("%:p")')
 send 'gone soon'
 sleep 1.5
@@ -200,7 +199,7 @@ to_sidebar() {
 }
 side_key() { # keys text: show a note, type text, press keys in the sidebar
   "$host" show com.example.app 4242 >/dev/null
-  id=$(ask 'b:ferry.id'); waitrow "$id" open
+  id=$(ask 'b:ferry.id')
   send "$2"; to_sidebar
   side=$(ask 'bufname()')
   send "$1"
@@ -214,26 +213,26 @@ check "sidebar without its <C-x> map: global :write fails (Joe's report)" \
   "$(ask 'bufname()') $(ask 'v:errmsg' | head -1)"
 sleep 0.3; rm -f "$work/open.log"
 side_key '<C-x>' 'from sidebar'
-check "<C-x> in the sidebar sends the note" "ferry://history submit submitted" \
-  "$side $(url_kind "$(opened)") $(outcome "$id")"
+check "<C-x> in the sidebar sends the note" "ferry://history submit sent" \
+  "$side $(url_kind "$(opened)") $(state "$id")"
 check "<C-x> in the sidebar: no error, focus on the note" " 1" "$(ask 'v:errmsg') $(ask 'exists("b:ferry")')"
 side_key ZZ 'zz'
-check "ZZ in the sidebar sends the note" "submit submitted" "$(url_kind "$(opened)") $(outcome "$id")"
+check "ZZ in the sidebar sends the note" "submit sent" "$(url_kind "$(opened)") $(state "$id")"
 side_key ':wq<CR>' 'wq'
-check ":wq in the sidebar sends the note" "submit submitted" "$(url_kind "$(opened)") $(outcome "$id")"
+check ":wq in the sidebar sends the note" "submit sent" "$(url_kind "$(opened)") $(state "$id")"
 side_key ':x<CR>' 'x'
-check ":x in the sidebar sends the note" "submit submitted" "$(url_kind "$(opened)") $(outcome "$id")"
+check ":x in the sidebar sends the note" "submit sent" "$(url_kind "$(opened)") $(state "$id")"
 side_key '<C-q>' 'drop'
-check "<C-q> in the sidebar cancels the note" "hide cancelled" "$(url_kind "$(opened)") $(outcome "$id")"
+check "<C-q> in the sidebar cancels the note" "hide cancelled" "$(url_kind "$(opened)") $(state "$id")"
 side_key ZQ 'drop'
-check "ZQ in the sidebar cancels the note" "hide cancelled" "$(url_kind "$(opened)") $(outcome "$id")"
+check "ZQ in the sidebar cancels the note" "hide cancelled" "$(url_kind "$(opened)") $(state "$id")"
 side_key '<C-y>' 'side copy'
-check "<C-y> in the sidebar copies the note and hides" "hide submitted side copy" \
-  "$(url_kind "$(opened)") $(outcome "$id") $(clipped)"
+check "<C-y> in the sidebar copies the note and hides" "hide sent side copy" \
+  "$(url_kind "$(opened)") $(state "$id") $(clipped)"
 side_key ':q<CR>' 'kept'
 d=$(ask 'g:ferry_draft')
-check ":q in the sidebar hides and keeps the draft, target and all" "hide app:com.example.app#4242 kept open 2" \
-  "$(url_kind "$(opened)") $(fkey "$d" target) $(fbody "$d") $(outcome "$id") $(ask 'winnr("$")')"
+check ":q in the sidebar hides and keeps the draft, target and all" "hide app:com.example.app#4242 kept draft 2" \
+  "$(url_kind "$(opened)") $(fkey "$d" target) $(fbody "$d") $(state "$id") $(ask 'winnr("$")')"
 side_key '<C-s>' ' more'
 # Joe stays in insert mode (GT requirement 7), at the end of the body.
 check "<C-s> in the sidebar starts Flow from the note, in insert mode at the end of the body" \

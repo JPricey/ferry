@@ -20,7 +20,7 @@ fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: want '$2' got '$3'"; fail=1; fi; }
 py() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
 
-# --- fixture: the `sessions` schema of bin/ferry-db, five rows -------
+# --- fixture: the old history database's `sessions` schema, five rows ---
 mkdir -p "$work/src"
 python3 - "$db" <<'PY'
 import sqlite3, sys

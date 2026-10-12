@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # bin/ferry-host and lua/ferry/note.lua against headless nvim
 # servers on a temp socket (--clean). Never touches Joe's server, the real
-# history database or the real notes folder.
+# notes folder or index, or the old history database (FERRY_DB stays a temp
+# path: servers started from old trees still write it).
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 host="$root/bin/ferry-host"
@@ -387,12 +388,22 @@ check "upgrade from api 11: Submit sends the whole buffer to the captured target
 "$live/bin/ferry-host" stop
 
 # Live upgrade from af9efd3 with the history sidebar open (history api 2:
-# ferry-db rows, <CR> inserts, p sends): the reload to history api 3
-# rebinds the open sidebar's keys and lists it again from the notes index,
-# so <CR> opens a note file.
-printf 'hist one\nhist two\n' >"$work/hist.txt"
-"$root/bin/ferry-db" start hist-row com.example.app "$work/hist.txt" >/dev/null
-"$root/bin/ferry-db" finish hist-row submitted "$work/hist.txt" >/dev/null
+# rows of the old history database, <CR> inserts, p sends): the reload to
+# the current history api rebinds the open sidebar's keys and lists it
+# again from the notes index, so <CR> opens a note file.
+# One row in the old database (its sessions table), which the af9efd3
+# sidebar lists.
+python3 - "$FERRY_DB" <<'PY'
+import sqlite3, sys
+from datetime import datetime, timezone
+con = sqlite3.connect(sys.argv[1])
+con.execute("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, started_at TEXT NOT NULL,"
+            " ended_at TEXT, target TEXT, seed_text TEXT, final_text TEXT, outcome TEXT NOT NULL)")
+now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+con.execute("INSERT INTO sessions VALUES (?,?,?,?,?,?,?)",
+            ("hist-row", now, now, "com.example.app", "", "hist one\nhist two\n", "submitted"))
+con.commit()
+PY
 mkdir -p "$FERRY_NOTES_DIR"
 hfile=$FERRY_NOTES_DIR/2026-10-01-090000-0f0f0f0f.md
 printf -- '---\nid: 0f0f0f0f-0000-4000-8000-000000000000\nstate: sent\nupdated: 2026-10-01T09:00:00-07:00\ntarget: app:com.example.app\n---\nhist file\n' >"$hfile"
@@ -402,7 +413,8 @@ printf -- '---\nid: 0f0f0f0f-0000-4000-8000-000000000000\nstate: sent\nupdated: 
 cat >"$work/hkeys.lua" <<'EOF'
 local h = require("ferry.history")
 local want = { ["<CR>"] = h.open_note, s = h.send, y = h.yank, P = h.pin, d = h.delete, K = h.preview,
-  i = h.insert, R = h.refresh, ["<Tab>"] = h.focus_main, q = h.close, ["<Esc>"] = h.close_preview }
+  i = h.insert, ["/"] = h.search, R = h.reset, ["<Tab>"] = h.focus_main, q = h.close,
+  ["<Esc>"] = h.close_preview }
 local n, p = 0, 0
 for _, m in ipairs(vim.api.nvim_buf_get_keymap(h.state.buf, "n")) do
   if want[m.lhs] and m.callback == want[m.lhs] then n = n + 1 end
@@ -423,12 +435,12 @@ EOF
 live=$work/live-hist; old_tree af9efd3 "$live"
 "$live/bin/ferry-host" ensure >/dev/null
 "$live/bin/ferry-host" show com.example.app 4242 >/dev/null
-check "af9efd3 server: the sidebar is open under history api 2, listing ferry-db rows" "2 true true" \
+check "af9efd3 server: the sidebar is open under history api 2, listing the old database's rows" "2 true true" \
   "$(lua 'require"ferry.history".api') $(lua 'require"ferry.history".is_open()') $(lua 'vim.fn.join(vim.api.nvim_buf_get_lines(require"ferry.history".state.buf, 0, -1, false)):find("hist one", 1, true) ~= nil')"
 upgrade "$live"
 "$live/bin/ferry-host" show com.example.app 4242 >/dev/null
 ask "nvim_input('<Esc>')" >/dev/null; sleep 0.3
-check "upgrade from history api 2: the open sidebar's 11 keys call history api 3, no p" "3 11 p=0" \
+check "upgrade from history api 2: the open sidebar's 12 keys call history api 4, no p" "4 12 p=0" \
   "$(lua 'require"ferry.history".api') $(ask "luaeval('dofile(\"$work/hkeys.lua\")')")"
 check "upgrade from history api 2: the open sidebar lists the notes index" "true false" \
   "$(lua 'vim.fn.join(vim.api.nvim_buf_get_lines(require"ferry.history".state.buf, 0, -1, false)):find("hist file", 1, true) ~= nil') $(lua 'vim.fn.join(vim.api.nvim_buf_get_lines(require"ferry.history".state.buf, 0, -1, false)):find("hist one", 1, true) ~= nil')"
@@ -436,6 +448,44 @@ check "upgrade from history api 2: <CR> opens the note file as the current note"
   "$(basename "$hfile") hist file" "$(ask "luaeval('dofile(\"$work/hopen.lua\")')")"
 "$live/bin/ferry-host" stop
 rm -f "$hfile"; "$root/bin/ferry-notes" index "$hfile"
+
+# Live upgrade from 20f9461 (H4: note api 13, history api 3, the old
+# history database still written) with the sidebar open and unsaved typing,
+# as Joe's server runs: the next show reloads note and history, keeps the
+# text, rebinds the sidebar's keys (/ searches), and nothing writes the old
+# database from then on.
+kfile=$FERRY_NOTES_DIR/2026-10-02-090000-0e0e0e0e.md
+printf -- '---\nid: 0e0e0e0e-0000-4000-8000-000000000000\nstate: sent\nupdated: 2026-10-02T09:00:00-07:00\ntarget: app:com.example.app\n---\nkubernetes upgrade note\n' >"$kfile"
+"$root/bin/ferry-notes" index "$kfile"
+live=$work/live-h4; old_tree 20f9461 "$live"
+"$live/bin/ferry-host" ensure >/dev/null
+p13=$("$live/bin/ferry-host" show com.example.app 4242)
+ask "nvim_input('typed under api 13')" >/dev/null
+sleep 0.5
+check "20f9461 server: note api 13, history api 3, the sidebar open, the typing in the note" \
+  "13 3 true typed under api 13" \
+  "$(lua 'require"ferry.note".api') $(lua 'require"ferry.history".api') $(lua 'require"ferry.history".is_open()') $(body)"
+dbsum=$(shasum "$FERRY_DB" | cut -d' ' -f1)
+upgrade "$live"
+check "upgrade from note api 13: show reloads note and history, same note, the typing kept" \
+  "$p13 $napi 4 typed under api 13" \
+  "$("$live/bin/ferry-host" show com.example.app 4242) $(lua 'require"ferry.note".api') $(lua 'require"ferry.history".api') $(body)"
+ask "nvim_input('<Esc>')" >/dev/null; sleep 0.3
+check "upgrade from history api 3: the open sidebar's 12 keys call history api 4, no error" "12 p=0 " \
+  "$(ask "luaeval('dofile(\"$work/hkeys.lua\")')") $(ask 'v:errmsg')"
+ask "nvim_input('<Cmd>lua vim.api.nvim_set_current_win(require\"ferry.history\".state.win)<CR>/kubernetes<CR>')" >/dev/null
+sleep 0.3
+check "upgrade from history api 3: / in the open sidebar lists only the matching note" \
+  "/kubernetes 1 kubernetes upgrade" \
+  "$(lua 'vim.api.nvim_buf_get_lines(require"ferry.history".state.buf, 0, 1, false)[1]') $(lua 'vim.tbl_count(require"ferry.history".state.map)') $(lua 'require"ferry.history".state.rows[1].preview:sub(1, 18)')"
+ask "luaeval('(function() require\"ferry.note\".host = { submit = function(p) vim.g.ferry_sub = table.concat(vim.fn.readfile(p.file), \"|\") end, hide = function() end }; return 1 end)()')" >/dev/null
+ask "luaeval('require\"ferry.note\".submit(require\"ferry.note\".current().buf)')" >/dev/null
+sleep 0.5
+check "upgrade from note api 13: Submit sends the typing, the file says sent, the old database is unchanged" \
+  "typed under api 13 sent typed under api 13 $dbsum" \
+  "$(ask 'get(g:, "ferry_sub", "")') $(fkey "$p13" state) $(fbody "$p13") $(shasum "$FERRY_DB" | cut -d' ' -f1)"
+"$live/bin/ferry-host" stop
+rm -f "$kfile"; "$root/bin/ferry-notes" index "$kfile"
 
 # --- overrides and a missing or hung ghostty ------------------------------------
 FERRY_GUI_FONT='Other Font:h15' FERRY_GUI_BG='#112233' "$host" ensure >/dev/null

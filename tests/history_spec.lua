@@ -1,8 +1,8 @@
 -- The notes browser (lua/ferry/history.lua) on a fixture notes folder, with
 -- a recording stub host and a fake clipboard.
 -- Run by tests/test-history.sh: nvim --headless --clean -l tests/history_spec.lua <root> <work>
--- The shell sets FERRY_NOTES_DIR, FERRY_INDEX, FERRY_OUTBOX and FERRY_DB to
--- temp paths.
+-- The shell sets FERRY_NOTES_DIR, FERRY_INDEX and FERRY_OUTBOX to temp
+-- paths.
 local root, work = arg[1], arg[2]
 vim.opt.rtp:prepend(root)
 local note = require("ferry.note")
@@ -94,6 +94,8 @@ local function press(text, keys)
   end
   vim.v.errmsg = ""
   local ok, err = pcall(vim.api.nvim_feedkeys, vim.keycode(keys), "xt", false)
+  -- The search prompt is echoed without a newline: end its line.
+  if keys:sub(1, 1) == "/" then io.stderr:write("\n") end
   return ok and vim.v.errmsg == "" and "" or ("error: " .. tostring(err) .. vim.v.errmsg)
 end
 local function fmeta(path, k) local m = store.read(path); return m and tostring(rawget(m, k)) or "none" end
@@ -192,6 +194,42 @@ vim.fn.system({ root .. "/bin/ferry-notes", "index", paths.echo })
 press("alpha sent", "R")
 check("R refreshes", true, rows():find("echo outside", 1, true) ~= nil)
 
+-- /: search with list --query; an empty search or R lists all again.
+fixture("kube1", "abababab-0000-4000-8000-000000000006", "sent", at(6), { "kubernetes rollout notes" })
+fixture("kube2", "acacacac-0000-4000-8000-000000000007", "draft", at(5), { "first line", "about Kubernetes pods" })
+vim.fn.system({ root .. "/bin/ferry-notes", "index", paths.kube1, paths.kube2 })
+h.refresh()
+local function listed(text) return rows():find(text, 1, true) ~= nil end
+local function n_rows() return vim.tbl_count(h.state.map) end
+local all = n_rows()
+check("/ runs without error", "", press("alpha sent", "/kubernetes<CR>"))
+check("/ kubernetes: only the two matching notes, the search on the first line",
+  "2 true true false false /kubernetes", n_rows() .. " " .. tostring(listed("kubernetes rollout"))
+  .. " " .. tostring(listed("first line")) .. " " .. tostring(listed("alpha sent")) .. " "
+  .. tostring(listed("delta pinned")) .. " " .. vim.api.nvim_buf_get_lines(h.state.buf, 0, 1, false)[1])
+check("the search stays across a refresh", 2, (function() h.refresh(); return n_rows() end)())
+press("first line", "/<Esc>")
+check("/ then Esc: the search is kept", "2 kubernetes", n_rows() .. " " .. tostring(h.state.query))
+press("first line", "/<C-u><CR>")
+check("/ with an empty search lists every note again", all .. " nil true",
+  n_rows() .. " " .. tostring(h.state.query) .. " " .. tostring(listed("alpha sent")))
+press("first line", "/zzzz-nothing<CR>")
+check("/ with no match: says so", "0 /zzzz-nothing|  no notes match", n_rows() .. " " .. rows())
+press("", "R")
+check("R clears the search", all .. " nil", n_rows() .. " " .. tostring(h.state.query))
+-- A file edited outside ferry: the sidebar shows its new first line once
+-- it is opened again (opening syncs the index).
+vim.fn.system({ "sed", "-i", "", "s/^kubernetes rollout notes$/edited by sed/", paths.kube1 })
+check("before reopening the sidebar still shows the old first line", "true false",
+  tostring(listed("kubernetes rollout")) .. " " .. tostring(listed("edited by sed")))
+h.close(); h.open()
+check("reopened: the sed edit's first line is listed", "true false",
+  tostring(listed("edited by sed")) .. " " .. tostring(listed("kubernetes rollout")))
+press("first line", "/kubernetes<CR>")
+check("... and searched: only the note that still says kubernetes", "1 true", n_rows() .. " " .. tostring(listed("first line")))
+h.close(); h.open()
+check("reopening clears the search", all .. " nil", n_rows() .. " " .. tostring(h.state.query))
+
 -- Cancel on a note opened unchanged: its file (state sent) is left as is.
 local alpha_bytes = table.concat(vim.fn.readfile(paths.alpha, "b"), "\n")
 press("alpha sent", "<CR>")
@@ -214,5 +252,7 @@ check("<CR> with an unwritable notes folder: refused, the previous note still cu
   .. tostring(vim.api.nvim_win_get_buf(h.state.main_win) == keep) .. " " .. buflines(keep) .. " "
   .. tostring(table.concat(notices, "|"):find("could not save", 1, true) ~= nil))
 
+-- Background index runs end before the shell removes the folder.
+note.wait_index(3000)
 io.stdout:write("RESULT=" .. fail .. "\n")
 vim.cmd("qall!")

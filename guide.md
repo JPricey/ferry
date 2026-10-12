@@ -152,9 +152,16 @@ empty note, or one unchanged from its starting text, also cancels.
 `:History` or `<leader>h` toggles a sidebar on the left (it opens with the
 note) listing every note file but the current one, drafts included: pinned
 first, then newest first by day, marked `★` pinned, `●` draft, `~`
-cancelled, with the target app and first line; `<Tab>` jumps back. The note
+cancelled, with the target app and first line; `<Tab>` jumps back. Opening
+it first catches up with files changed outside ferry. The note
 keys work there too and act on the note: `<C-x>`, `ZZ`, `:wq` and `:x` send
 it, `<C-q>` and `ZQ` cancel, `:q` hides and `<C-s>` toggles Flow.
+
+## Search notes
+
+In the sidebar, `/` asks for words and lists only the notes whose text has
+them all (each word also matches as a prefix, any case). An empty search,
+`R` or reopening the sidebar lists every note again.
 
 ## Reuse a past note
 
@@ -163,7 +170,8 @@ as a draft; the opened one goes to the app of the latest show, and once
 edited is a draft until sent again), `s` opens
 it and sends it again, `y` copies it, `P` pins or unpins it, `d` deletes it
 after a confirm (to `.trash`), `K` previews it (`Esc` closes), `i` inserts
-it into the current note, `R` refreshes and `q` closes the sidebar.
+it into the current note, `R` catches up with the folder and refreshes,
+and `q` closes the sidebar.
 
 ## Notes are files
 
@@ -184,7 +192,8 @@ open and a copy waits in the outbox.
 
 `bin/ferry-migrate-history` turns each row of the old history database into
 a note file (`--dry-run` first lists what it would write). It only reads
-the database, and a second run writes nothing new.
+the database, and a second run writes nothing new. ferry itself no longer
+writes or reads that database; the file stays where it was.
 
 ## Words you keep correcting
 
@@ -232,10 +241,10 @@ require("ferry").start({
 no longer used: each logs a warning and is ignored. The server socket
 defaults to `$TMPDIR/ferry.sock` (`sock` or `FERRY_SOCK` move it).
 
-`FERRY_HISTORY=0` stops recording, `FERRY_SIDEBAR=0` stops the
-sidebar opening automatically, and `FERRY_DB` moves the database from
-`~/Library/Application Support/ferry/history.sqlite`. `FERRY_NOTES_DIR`
-moves the notes folder. Note settings and
+`FERRY_SIDEBAR=0` stops the sidebar opening automatically,
+`FERRY_NOTES_DIR` moves the notes folder, and `FERRY_INDEX` moves its
+search index from `~/Library/Application Support/ferry/index.sqlite`
+(only a cache of the files). Note settings and
 mappings live in `lua/ferry/note.lua`.
 
 ## Install and permissions
@@ -257,7 +266,6 @@ be opened once by hand.
 logger in the Hammerspoon console shows the mode at load (`mode: …`), each
 press (`show:`/`hide:` with timings) and each submit's steps (target, focus,
 frontmost checks, keystroke, clipboard). Run
-`bash tests/test-history.sh` after editing the database helper or the
-sidebar, and `bash tests/test-delivery.sh` and
+`bash tests/test-history.sh` after editing the sidebar, and `bash tests/test-delivery.sh` and
 `bash tests/test-hammerspoon.sh` after editing the delivery core or the
 Hammerspoon module.

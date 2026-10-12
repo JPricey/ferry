@@ -41,8 +41,8 @@ defines the loop that moves the milestones forward with subagents.
 
 Layout is in `README.md`. User-facing usage is in `USER_GUIDE.md` (walkthrough)
 and `guide.md` (terse feature reference). Run
-`bash tests/test-history.sh` after touching the database helper or the
-sidebar (`lua/ferry/history.lua`),
+`bash tests/test-history.sh` after touching the notes browser sidebar
+(`lua/ferry/history.lua`),
 `bash tests/test-delivery.sh` and `bash tests/test-hammerspoon.sh` after
 touching `lua/ferry/delivery.lua` or the Hammerspoon module,
 `bash tests/test-migrate.sh` after touching `bin/ferry-migrate-init`,
@@ -97,7 +97,11 @@ land in the main checkout.
   does these as Joe checks.
 - Do not trigger the real hotkey, open ferry windows, or send
   keystrokes or pastes to other apps.
-- Tests use a temp `FERRY_DB`, never the real history database at
+- Tests use a temp `FERRY_NOTES_DIR` and `FERRY_INDEX`, never `~/notes`
+  or the real index at `~/Library/Application Support/ferry/index.sqlite`,
+  and a temp `FERRY_DB` wherever something still reads or writes the old
+  history database (`ferry-migrate-history`, servers started from old
+  trees in the upgrade tests); never the real
   `~/Library/Application Support/ferry/history.sqlite`.
 - Tests use their own nvim servers (`nvim --headless --listen <temp sock>`)
   and their own tmux server (`tmux -L ferry-test`), never Joe's.
@@ -265,14 +269,19 @@ the server gone: it tries `abort`, then exits 1 (falls back before
 shown). Every failure before shown runs `${FERRY_EDIT_FALLBACK:-nvim}` in
 the terminal.
 
-**History.** The note calls `bin/ferry-db start` when a note gets
-going and `finish` on submit or cancel, recording target, seed, final
-text, and outcome in
-`~/Library/Application Support/ferry/history.sqlite`. Empty cancels
-are dropped and drafts stay `open` rows (ferry-db goes in H5).
-`lua/ferry/history.lua` (api 3) renders the notes browser from
-`bin/ferry-notes list` (JSON over the notes index), every note but the
-current one; the note layout opens it on the left. `<CR>` and `s` go
+**History.** The note files and their index are the only record (H5):
+each note is a file in the notes folder (`lua/ferry/store.lua`) and
+`bin/ferry-notes` keeps a search index of them
+(`~/Library/Application Support/ferry/index.sqlite`, `FERRY_INDEX`; a
+cache, rebuilt from the files). The old history database
+(`~/Library/Application Support/ferry/history.sqlite`) is no longer
+written or read by ferry; only `bin/ferry-migrate-history` reads it, and
+the file stays on disk. `lua/ferry/history.lua` (api 4) renders the notes
+browser from `bin/ferry-notes list` (JSON over the notes index), every
+note but the current one; the note layout opens it on the left. Opening
+the sidebar runs `ferry-notes sync` first (and `R` syncs, clears the
+search and refreshes); `/` prompts with `vim.ui.input` and filters with
+`list --query` (an empty answer clears, a cancelled prompt keeps it). `<CR>` and `s` go
 through `note.open(path)`, which saves the current note as a draft and
 makes the file current with the latest show's target.
 

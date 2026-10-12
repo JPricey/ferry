@@ -99,7 +99,8 @@ Prompts from before notes were files live in the old history database. To
 bring them over, run `~/Code/ferry/bin/ferry-migrate-history --dry-run` to
 see what it would write, then run it without `--dry-run`. It prints
 `wrote N, skipped M`; rows with no text and notes already in the folder are
-skipped, so running it twice is safe. The database itself is only read.
+skipped, so running it twice is safe. The database itself is only read;
+ferry no longer writes to it, and the file stays where it was.
 
 ## Keys
 
@@ -220,7 +221,8 @@ On a note in the sidebar:
 | `d` | Delete it, after you confirm (the file moves to `.trash` in the notes folder) |
 | `K` | Preview the full text |
 | `i` | Insert its text into the note you are writing |
-| `R` | Refresh the list |
+| `/` | Search: type words and press Enter to list only the notes that contain them all (a word also matches the start of a longer word, any case). Search with nothing typed to list every note again |
+| `R` | Clear the search and refresh the list, picking up files changed outside ferry |
 | `q` | Close the sidebar (`:q` hides the whole window) |
 | `Esc` | Close the preview |
 
@@ -235,7 +237,9 @@ insert mode at the end of the text).
 
 The list comes from a search index of the notes folder
 (`~/Library/Application Support/ferry/index.sqlite`, rebuilt from the files
-whenever needed).
+whenever needed). Opening the sidebar first catches the index up with the
+folder, so a note you edited in another editor shows its new text; closing
+and reopening it also clears a search.
 
 ## Teach Flow the words you keep fixing
 
@@ -315,9 +319,9 @@ require("ferry").start({
 Older settings (`mode`, `terminal`, `autoStartFlow`, `windowTitle`) are no
 longer used; ferry logs a warning for each and ignores it.
 
-Environment variables: `FERRY_HISTORY=0` stops saving history,
-`FERRY_SIDEBAR=0` keeps the sidebar closed, `FERRY_DB` moves the
-history database, and `FERRY_NOTES_DIR` moves the notes folder.
+Environment variables: `FERRY_SIDEBAR=0` keeps the sidebar closed,
+`FERRY_NOTES_DIR` moves the notes folder, and `FERRY_INDEX` moves its
+search index.
 
 If `~/Applications/ferry.app` exists (a small wrapper around Neovide),
 the window runs as that app: the Dock, Cmd-Tab and the menu bar show

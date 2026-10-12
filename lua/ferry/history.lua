@@ -4,14 +4,18 @@
 -- index (`bin/ferry-notes list`): every note but the current one, drafts
 -- included, pinned first, then newest first. Each row: ★ pinned, then
 -- ● draft or ~ cancelled (blank: sent), the time, the target app and the
--- first line. Keys:
+-- first line. Opening the sidebar runs `ferry-notes sync` first, so files
+-- changed outside ferry show as they are now. Keys:
 --   <CR>  open the note for editing (note.open: the current note is saved
 --         as a draft; the opened one takes the target of the latest show)
 --   s     open it and send it again (same file, state sent)
 --   y     copy it to the clipboard      P  pin or unpin it
 --   d     delete it (after a confirm; the file moves to <notes>/.trash)
 --   K     preview it in a float         i  insert it into the current note
---   R     refresh        <Tab> back to the note        q  close
+--   /     search: list only notes with every word (`list --query`); an
+--         empty search lists all again
+--   R     sync and refresh, clearing the search
+--   <Tab> back to the note        q  close
 -- The note keys (<C-x>, ZZ, :wq, :x send; <C-q>, ZQ cancel; :q hides; <C-s>
 -- toggles Flow) act on the tab's note, as in the note (note.bind_note_keys).
 local M = {}
@@ -20,13 +24,17 @@ local M = {}
 -- the note module reloads an older one (keeping M.state). 1: open() binds
 -- the note keys on the sidebar. 2: <CR> and p take the whole note as its
 -- body (no `to:` header); bind_keys rebinds an open sidebar's keys.
--- 3: rows come from the notes index (ferry-notes), not ferry-db; new keys
--- (<CR> open, s send, P pin, i insert); the note module refreshes an open
--- sidebar after the reload, since its rows are ferry-db rows.
-M.api = 3
+-- 3: rows come from the notes index (ferry-notes), not the old history
+-- database; new keys (<CR> open, s send, P pin, i insert); the note module
+-- refreshes an open sidebar after the reload, since its rows came from
+-- that database.
+-- 4: / searches (state.query), open and R sync the index first; the old
+-- history database is no longer written or read.
+M.api = 4
 
 M.width = 38
-M.state = { win = nil, buf = nil, main_win = nil, rows = {}, preview_win = nil }
+-- query: the active search ("" or nil: none).
+M.state = { win = nil, buf = nil, main_win = nil, rows = {}, preview_win = nil, query = nil }
 
 local function root()
   local src = debug.getinfo(1, "S").source:sub(2)
@@ -77,10 +85,17 @@ local function excluded()
   return set
 end
 
+local function query()
+  local q = M.state.query
+  return type(q) == "string" and q:find("%S") and q or nil
+end
+
 function M.load()
   -- Note files written a moment ago are indexed in the background.
   pcall(function() note().wait_index(3000) end)
-  local out = notes_cmd({ "list", "--limit", "200" })
+  local args = { "list", "--limit", "200" }
+  if query() then vim.list_extend(args, { "--query", query() }) end
+  local out = notes_cmd(args)
   if not out or out == "" then return {} end
   local ok, rows = pcall(vim.json.decode, out)
   if not ok or type(rows) ~= "table" then return {} end
@@ -104,19 +119,24 @@ end
 M.marks = { pinned = "★", draft = "●", cancelled = "~" }
 
 -- Build display lines, a line -> row index map and highlights. Pinned
--- notes go under "── Pinned", the rest under their date.
-function M.render(rows, width)
+-- notes go under "── Pinned", the rest under their date. With a search
+-- (q), its words come first.
+function M.render(rows, width, q)
   local lines, map, hl = {}, {}, {}
   local last_label
+  if q then
+    lines[1] = truncate("/" .. q, width)
+    hl[1] = { 0, "Search", 0, -1 }
+  end
   if #rows == 0 then
-    lines[1] = "  no notes yet"
-    hl[#hl + 1] = { 0, "Comment", 0, -1 }
+    lines[#lines + 1] = q and "  no notes match" or "  no notes yet"
+    hl[#hl + 1] = { #lines - 1, "Comment", 0, -1 }
     return lines, map, hl
   end
   for i, r in ipairs(rows) do
     local label = r.pinned and "Pinned" or r.date_label
     if label ~= last_label then
-      if #lines > 0 then lines[#lines + 1] = "" end
+      if last_label then lines[#lines + 1] = "" end
       lines[#lines + 1] = "── " .. label
       hl[#hl + 1] = { #lines - 1, "Title", 0, -1 }
       last_label = label
@@ -145,7 +165,7 @@ local function current_row()
   local ln = vim.api.nvim_win_get_cursor(st.win)[1]
   local idx = (st.map or {})[ln]
   local r = idx and st.rows[idx] or nil
-  -- Rows a ferry-db sidebar (history api 2 and older) listed have no path.
+  -- Rows a history api 2 (or older) sidebar listed have no path.
   return r and r.path and r or nil
 end
 
@@ -293,7 +313,7 @@ function M.refresh(keep_path)
   local st = M.state
   if not (st.buf and vim.api.nvim_buf_is_valid(st.buf)) then return end
   st.rows = M.load()
-  local lines, map, hl = M.render(st.rows, M.width)
+  local lines, map, hl = M.render(st.rows, M.width, query())
   st.map = map
   vim.bo[st.buf].modifiable = true
   vim.api.nvim_buf_set_lines(st.buf, 0, -1, false, lines)
@@ -313,6 +333,30 @@ function M.refresh(keep_path)
     end
     if want or first then vim.api.nvim_win_set_cursor(st.win, { want or first, 0 }) end
   end
+end
+
+-- Bring the index up to date with the folder (files edited, added or
+-- removed outside ferry).
+function M.sync()
+  pcall(function() note().wait_index(3000) end)
+  notes_cmd({ "sync" })
+end
+
+-- /: ask for words and list only the notes that have them all (an empty
+-- answer lists every note; a cancelled prompt changes nothing).
+function M.search()
+  vim.ui.input({ prompt = "search notes: ", default = M.state.query or "" }, function(q)
+    if q == nil or not M.is_open() then return end
+    M.state.query = q:find("%S") and vim.trim(q) or nil
+    M.refresh()
+  end)
+end
+
+-- R: sync, clear the search, list again.
+function M.reset()
+  M.state.query = nil
+  M.sync()
+  M.refresh()
 end
 
 function M.close()
@@ -349,7 +393,8 @@ function M.bind_keys(buf)
   map("d", M.delete, "delete (to .trash)")
   map("K", M.preview, "preview")
   map("i", M.insert, "insert into the current note")
-  map("R", M.refresh, "refresh")
+  map("/", M.search, "search")
+  map("R", M.reset, "sync, clear the search, refresh")
   map("<Tab>", M.focus_main, "back to the note")
   map("q", M.close, "close sidebar")
   map("<Esc>", M.close_preview, "close preview")
@@ -383,6 +428,8 @@ function M.open()
     M.close_preview(); st.win, st.buf = nil, nil
   end })
 
+  st.query = nil
+  M.sync()
   M.refresh()
   vim.api.nvim_set_current_win(st.main_win)
 end

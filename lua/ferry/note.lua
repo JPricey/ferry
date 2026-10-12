@@ -16,8 +16,10 @@
 -- file on its first change (an untouched blank note leaves nothing);
 -- drafts autosave about 1 s after a change, and on draft and Hide. Submit
 -- marks the file `sent`, Cancel `cancelled`; a blank Cancel deletes it.
--- The history database (ferry-db) is still written alongside; the browser
+-- The files and their index are the only record; the browser
 -- (lua/ferry/history.lua) lists the index and opens a note with M.open.
+-- (Note api 13 and older also wrote the old history database, which is
+-- left on disk untouched.)
 --
 -- In a note, :Submit (ZZ, <C-x>, :wq, :x), :Cancel (ZQ) and :Hide (:q)
 -- call M.host instead of exiting. Hide keeps the note as the draft.
@@ -86,14 +88,14 @@ local store = require("ferry.store")
 -- Bumped when the module changes in a way an already-running server must
 -- pick up: bin/ferry-host reloads the module (keeping M.state and a
 -- swapped M.host) when the loaded one reports a different api.
-M.api = 13
+M.api = 14
 
--- history api 3: the browser on the notes index (open, send, pin, ...).
--- A sidebar the old module opened keeps its keys bound to the old
--- functions and lists ferry-db rows, so rebind its keys to the new ones
--- and list it again.
+-- history api 4: the browser on the notes index (open, send, pin, ...,
+-- / search; opening syncs). A sidebar the old module opened keeps its
+-- keys bound to the old functions (and, before api 3, lists rows of the
+-- old database), so rebind its keys to the new ones and list it again.
 local function history()
-  return current("ferry.history", 3, function(_, new)
+  return current("ferry.history", 4, function(_, new)
     if new.is_open() then
       new.bind_keys(new.state.buf)
       vim.schedule(function() pcall(new.refresh) end)
@@ -103,8 +105,8 @@ end
 
 -- The current (unfinished) note: { id = uuid, path = file, buf = bufnr,
 -- created = Unix time its file name was stamped with (nil: a note from
--- before note files, see adopt()), unstarted = true while it has no
--- history row (see blank()) }.
+-- before note files, see adopt()), unstarted = true for the blank note
+-- after a finish until a show resumes it (see blank()) }.
 -- dir: the notes folder of the last call that named one (ferry-host
 -- passes it on every call).
 M.state = { note = nil, cursor = nil, dir = nil }
@@ -287,7 +289,7 @@ end
 -- the fork's id and conflict_of (b:ferry.file_id, .conflict_of), so a
 -- conflict file that is never written or is deleted later is recreated
 -- as the fork, never under the original's id. b:ferry.id and note.id
--- stay: they key the note's history row (note.file_id names the file).
+-- stay (note.file_id names the file).
 local function fork(buf, path)
   local meta = store.read(path) or {}
   local b = vim.b[buf].ferry or {}
@@ -521,36 +523,6 @@ local function note_buf(note)
   return note.buf
 end
 
--- History: `ferry-db start` runs in the background when a fresh note
--- opens, so show stays fast; finish waits for it, then runs to completion
--- before the host is called (Hammerspoon deletes the submit file).
-local db_starts = {}
-
-local function db(args, on_exit)
-  local cmd = { repo_root() .. "/bin/ferry-db" }
-  vim.list_extend(cmd, args)
-  local ok, obj = pcall(vim.system, cmd, { text = true }, on_exit)
-  if not ok then
-    vim.notify("ferry: history unavailable: " .. tostring(obj), vim.log.levels.WARN)
-    return nil
-  end
-  return obj
-end
-
-local function history_start(id, target, seed)
-  local seedfile = vim.fn.tempname()
-  vim.fn.writefile(seed ~= "" and vim.split(seed, "\n", { plain = true }) or {}, seedfile)
-  db_starts[id] = db({ "start", id, target or "", seedfile }, function() os.remove(seedfile) end)
-end
-
-local function history_finish(id, outcome, file, spec)
-  local pending = db_starts[id]
-  db_starts[id] = nil
-  if pending then pcall(pending.wait, pending, 5000) end
-  local obj = db({ "finish", id, outcome, file, spec or "" })
-  if obj then pcall(obj.wait, obj, 5000) end
-end
-
 -- Percent-encode a URL query value.
 local function enc(s)
   return (tostring(s or ""):gsub("[^%w%-%._~]", function(c)
@@ -750,7 +722,8 @@ local function new_note(dir)
   return note
 end
 
--- Drop a note that never got a history row and was never edited.
+-- Drop the blank note left by a finish if no show resumed it and it was
+-- never edited.
 local function discard_unstarted(note)
   if not (note and note.unstarted) then return false end
   local buf = note.buf
@@ -776,7 +749,6 @@ local function fresh(opts, seed)
   vim.api.nvim_win_set_cursor(0, { 1, 0 })
   M.state.note, M.state.cursor = note, nil
   vim.b[note.buf].ferry = meta
-  history_start(id, captured_spec(meta), seed)
   vim.cmd("startinsert")
   return note
 end
@@ -792,10 +764,7 @@ local function resume(opts)
   local meta = vim.b[buf].ferry or { id = note.id, seed = "", created = note.created }
   meta.target, meta.window = opts.target or "", opts.window or ""
   vim.b[buf].ferry = meta
-  if note.unstarted then
-    note.unstarted = nil
-    history_start(meta.id or note.id, captured_spec(meta), "")
-  end
+  note.unstarted = nil
   -- Put the cursor back where draft() found it. In insert mode it may sit
   -- just past the end of the line, which normal mode cannot hold.
   local cur = M.state.cursor
@@ -1010,7 +979,7 @@ end
 
 -- An empty note that takes the place of a finished one, so :q in its
 -- window hides rather than quitting the server. It is the current note
--- (the next unseeded show resumes it) but gets its history row only then.
+-- (the next unseeded show resumes it).
 local function blank(wins)
   local cur = vim.api.nvim_get_current_win()
   local win = wins[1] or cur
@@ -1028,14 +997,16 @@ local function blank(wins)
   return note
 end
 
--- End a note: record the outcome, write its file as sent (submitted) or
--- cancelled, with spec as its target, and drop its buffer. The file is
--- kept, except a blank Cancel's, which is deleted (unless it was changed
--- outside ferry). A Cancel of a note opened from the browser whose text
--- is unchanged since (and saved) leaves its file and history row alone. If it was the current note, a blank note replaces it in
--- its windows. Returns true; false when a Cancel could not write the file,
--- which leaves the note as it was (buffer, history row, current note).
-local function finish(buf, outcome, file, spec)
+-- End a note: write its file as sent (submitted) or cancelled, with spec
+-- as its target, and drop its buffer. The file is kept, except a blank
+-- Cancel's, which is deleted (unless it was changed outside ferry). A
+-- Cancel of a note opened from the browser whose text is unchanged since
+-- (and saved) leaves its file alone. If it was the current note, a blank
+-- note replaces it in its windows. Returns true; false when a Cancel could
+-- not write the file, which leaves the note as it was (buffer, current
+-- note). _file (the outbox copy) is unused since the old history database
+-- went.
+local function finish(buf, outcome, _file, spec)
   local meta = vim.b[buf].ferry or {}
   local note = M.state.note
   local current = note and note.buf == buf
@@ -1046,7 +1017,7 @@ local function finish(buf, outcome, file, spec)
   local untouched = outcome == "cancelled" and meta.opened ~= nil and not vim.bo[buf].modified
     and meta.opened == body_sum(buf)
   if untouched then
-    -- Nothing to write or record.
+    -- Nothing to write.
   elseif outcome == "cancelled" and is_blank(select(2, parts(buf))) then
     if readable(path) and ours(buf, path) then
       os.remove(path)
@@ -1056,11 +1027,6 @@ local function finish(buf, outcome, file, spec)
     local ok = write_note(buf, { state = outcome == "submitted" and "sent" or "cancelled",
       sent = outcome == "submitted", target = spec })
     if not ok and outcome == "cancelled" then return false end
-  end
-  if meta.id and not untouched then
-    -- A blank note submitted before any show has no row yet.
-    if current and note.unstarted then history_start(meta.id, spec, "") end
-    history_finish(meta.id, outcome, file, spec)
   end
   if current then M.forget() end
   vim.g.ferry_draft = nil
@@ -1103,8 +1069,8 @@ local function after_flow(buf, fn)
   end)
 end
 
--- Cancel: record the text as cancelled (blank notes are dropped from
--- history) and hide. If the note file cannot be written, nothing is
+-- Cancel: mark the note's file cancelled (a blank note's file is deleted)
+-- and hide. If the note file cannot be written, nothing is
 -- dropped: the note stays shown and current, its copy stays in the outbox,
 -- and an alert names it.
 local function cancel_now(buf)
@@ -1165,7 +1131,7 @@ local function copy_now(buf)
   copy_body(buf, body, text)
 end
 
--- Hide: keep the note as the draft (history row stays open) and hide.
+-- Hide: keep the note as the draft (its file stays a draft) and hide.
 local function hide_now(buf)
   local note = M.state.note
   if note and note.buf == buf then

@@ -102,7 +102,7 @@ else
   say missing: "Wispr Flow: get it from https://wisprflow.ai"
 fi
 
-# 5. Tools the scripts use: python3 and sqlite3 (history database).
+# 5. Tools the scripts use: python3 and sqlite3.
 for tool in python3 sqlite3; do
   if command -v "$tool" >/dev/null 2>&1; then
     say ok "$tool"
