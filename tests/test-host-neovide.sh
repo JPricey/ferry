@@ -46,7 +46,8 @@ ps_ours=$!
 perl -e 'sleep 60' neovide --server "$work/other.sock" </dev/null >/dev/null 2>&1 &
 ps_other=$!
 export FERRY_PS_OURS=$ps_ours FERRY_PS_OTHER=$ps_other
-export PATH="$work/fakes:$PATH" FERRY_DB="$work/history.sqlite"
+export PATH="$work/fakes:$PATH" FERRY_DB="$work/history.sqlite" \
+  FERRY_INDEX="$work/index.sqlite" FERRY_OUTBOX="$work/outbox"
 unset FERRY_SOCK FERRY_NOTES_DIR FERRY_HOST_NVIM_FLAGS
 
 cat > "$work/spec.lua" <<'LUA'

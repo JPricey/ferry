@@ -45,7 +45,9 @@ clipboard — note kept" and the note stays open.
 
 Hiding the note (the hotkey, or `:q`) keeps it as a draft, and the next
 press brings the same note back, aimed at the window you pressed from (an
-unedited `to:` line follows; one you edited is kept). If
+unedited `to:` line follows; one you edited is kept). Drafts also save
+themselves about a second after you stop typing, so nothing is lost if
+Neovim quits. If
 Flow is still recording from `Ctrl-S`, the note stays up until Flow's text
 lands, then hides; `Ctrl-X` or `Ctrl-Q` pressed meanwhile send or cancel
 instead, still after the text lands.
@@ -169,12 +171,19 @@ In the sidebar, `<CR>` inserts the entry into your buffer, `p` replaces the
 note's text with it (keeping the `to:` line) and sends it, `y` copies it to the clipboard, `K` previews the
 full text, and `d` deletes it. Cancelled notes with text show a `~`.
 
+## Notes are files
+
+Every note is a markdown file in `~/notes/scratchpads`, named
+`<date>-<time>-<id>.md`, with its state (draft, sent or cancelled), target
+and times in frontmatter above the text. The note window shows only the
+`to:` line and the text; `:w` saves the file. A note gets its file on its
+first change, sent and cancelled notes keep theirs, and only cancelling a
+blank note deletes its file.
+
 ## Edit the buffer
 
 It is a normal Neovim buffer with your config, plus markdown filetype, soft
-wrap, spell check on, and no swap or undo files. A note's file lives in
-`$TMPDIR/ferry-notes` until it is sent or cancelled; only the history
-database keeps the text.
+wrap, spell check on, and no swap or undo files.
 
 ## Configure
 
@@ -198,7 +207,8 @@ defaults to `$TMPDIR/ferry.sock` (`sock` or `FERRY_SOCK` move it).
 
 `FERRY_HISTORY=0` stops recording, `FERRY_SIDEBAR=0` stops the
 sidebar opening automatically, and `FERRY_DB` moves the database from
-`~/Library/Application Support/ferry/history.sqlite`. Note settings and
+`~/Library/Application Support/ferry/history.sqlite`. `FERRY_NOTES_DIR`
+moves the notes folder. Note settings and
 mappings live in `lua/ferry/note.lua`.
 
 ## Install and permissions

@@ -86,7 +86,7 @@ out[#out + 1] = "SIDEKEY=" .. tostring(sent) .. " err=" .. vim.v.errmsg
 io.stdout:write(table.concat(out, "\n"), "\n")
 vim.cmd("qall!")
 LUA
-out=$(FERRY_NOTES_DIR="$notes/n" FERRY_SIDEBAR=1 perl -e "alarm 20; exec @ARGV" nvim --headless --clean -l "$notes/spec.lua" "$root" 2>&1 | tr -d '\r')
+out=$(FERRY_NOTES_DIR="$notes/n" FERRY_INDEX="$notes/index.sqlite" FERRY_OUTBOX="$notes/outbox" FERRY_SIDEBAR=1 perl -e "alarm 20; exec @ARGV" nvim --headless --clean -l "$notes/spec.lua" "$root" 2>&1 | tr -d '\r')
 check "note opens the sidebar, focus stays on the note" "WINS=2 ROWS=1 CUR=main" "$(grep -o 'WINS=[0-9]* ROWS=[0-9]* CUR=[a-z]*' <<<"$out")"
 check "sidebar is on the left" "LEFT=true" "$(grep -o 'LEFT=[a-z]*' <<<"$out")"
 check "sidebar shows date header" "LINE1=── Today" "$(grep '^LINE1=' <<<"$out" | sed 's/ *$//')"

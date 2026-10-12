@@ -28,7 +28,8 @@ mkdir -p "$swork/ferry.app/Contents/MacOS" "$swork/ferry.app/Contents/Resources"
 : > "$swork/ferry.app/Contents/Info.plist"
 ln -s "$swork/fakes/neovide" "$swork/ferry.app/Contents/MacOS/ferry"
 : > "$swork/calls"
-export PATH="$swork/fakes:$PATH" FERRY_NOTES_DIR="$swork/notes" FERRY_HOST_NVIM_FLAGS=--clean
+export PATH="$swork/fakes:$PATH" FERRY_NOTES_DIR="$swork/notes" FERRY_HOST_NVIM_FLAGS=--clean \
+  FERRY_INDEX="$swork/index.sqlite" FERRY_OUTBOX="$swork/outbox"
 unset FERRY_SOCK
 
 cat > "$tmp/spec.lua" <<'LUA'

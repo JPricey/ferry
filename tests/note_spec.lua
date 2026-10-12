@@ -3,12 +3,14 @@
 -- Key-driven cases (:q, :wq, <C-x>, ZQ) run against a real server in
 -- tests/test-note.sh, where typed input goes through the main loop.
 -- Run by tests/test-note.sh: nvim --headless --clean -l tests/note_spec.lua <root> <work>
--- The shell sets FERRY_DB, FERRY_NOTES_DIR and puts a recording
--- fake `open` first on PATH (it fails while <work>/open.fail exists).
+-- The shell sets FERRY_DB, FERRY_NOTES_DIR, FERRY_INDEX, FERRY_OUTBOX and
+-- puts a recording fake `open` first on PATH (it fails while
+-- <work>/open.fail exists).
 local root, work = arg[1], arg[2]
 vim.opt.rtp:prepend(root)
 local note = require("ferry.note")
 local flow = require("ferry.flow")
+local store = require("ferry.store")
 local db = root .. "/bin/ferry-db"
 
 -- Never touch the system clipboard: a fake + and * provider.
@@ -77,6 +79,14 @@ local function row(id)
 end
 local function outcome(id) local r = row(id); return r and r.outcome or "none" end
 
+-- A note file as "state|target|sent?|body lines joined by |", or "none".
+local function nfile(path)
+  local m, body = store.read(path)
+  if not m then return "none" end
+  return table.concat({ tostring(rawget(m, "state")), tostring(rawget(m, "target")),
+    tostring(rawget(m, "sent") ~= nil), table.concat(body, "|") }, "|")
+end
+
 local function show(seedtext)
   local seed = ""
   if seedtext then
@@ -110,9 +120,12 @@ check("host.submit gets target and window", "com.example.app 4242", tostring(c[2
 check("submit file holds the text", "hello world\nsecond line\n", c[3])
 check("Submit records a submitted row with the text", "submitted hello world",
   outcome(id1) .. " " .. ((row(id1) or {}).preview or ""))
-check("Submit drops the note file", 0, vim.fn.filereadable(p1))
+check("Submit keeps the note file: sent, sent time, target, the body only",
+  "sent|app:com.example.app#4242|true|hello world|second line", nfile(p1))
+check("the note file is named <date>-<time>-<id8>.md", true,
+  vim.fs.basename(p1):match("^%d%d%d%d%-%d%d%-%d%d%-%d%d%d%d%d%d%-" .. id1:sub(1, 8) .. "%.md$") ~= nil)
 check("Submit leaves the server running", vim.NIL, vim.v.exiting)
-check("submit file is <notes>/outbox/<id>.md", vim.env.FERRY_NOTES_DIR .. "/outbox/" .. id1 .. ".md", c[2].file)
+check("submit file is $FERRY_OUTBOX/<id>.md", vim.env.FERRY_OUTBOX .. "/" .. id1 .. ".md", c[2].file)
 local blank_id = (vim.b.ferry or {}).id
 check("after Submit the window shows a new empty note with :Hide and the :q abbreviation",
   "markdown 2 true ",
@@ -120,7 +133,9 @@ check("after Submit the window shows a new empty note with :Hide and the :q abbr
     tostring(blank_id ~= nil and blank_id ~= id1 and vim.fn.maparg("q", "c", true) ~= ""),
     table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|") }, " "))
 check("the blank note has no history row before show", "none", outcome(blank_id))
+local blank_path = vim.api.nvim_buf_get_name(0)
 local p2, id2 = show()
+check("an untouched blank note leaves no file", "0 0", vim.fn.filereadable(blank_path) .. " " .. vim.fn.filereadable(p2))
 check("after Submit the next show is fresh", true, p2 ~= p1 and id2 ~= id1)
 check("next show resumes the blank note", blank_id, id2)
 check("fresh note is only the target header", "to: app:com.example.app#4242|", table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|"))
@@ -134,7 +149,8 @@ set({ "not this one" })
 vim.cmd("Cancel")
 check("Cancel calls host.hide only", "hide", kinds())
 check("Cancel records a cancelled row", "cancelled", outcome(id2))
-local _, id3 = show()
+check("Cancel keeps the note file as cancelled", "cancelled|app:com.example.app#4242|false|not this one", nfile(p2))
+local p3, id3 = show()
 check("after Cancel the next show is fresh", true, id3 ~= id2)
 
 -- --- blank Submit ---------------------------------------------------------
@@ -143,6 +159,7 @@ set({ "  ", "" })
 vim.cmd("Submit")
 check("blank Submit calls host.hide only", "hide", kinds())
 check("blank Submit drops the row", "none", outcome(id3))
+check("blank Submit leaves no note file", "none", nfile(p3))
 
 -- --- unchanged-seed Submit -----------------------------------------------
 reset()
@@ -167,7 +184,8 @@ local p5, id5 = show()
 set({ "keep me" })
 vim.cmd("Hide")
 check("Hide calls host.hide only", "hide", kinds())
-check("Hide writes the draft", "keep me\n", readfile(p5))
+check("Hide writes the draft file, the captured target with it", "draft|app:com.example.app#4242|false|keep me",
+  nfile(p5))
 check("Hide sets g:ferry_draft", p5, vim.g.ferry_draft)
 -- history start runs in the background.
 vim.wait(3000, function() return outcome(id5) == "open" end, 20)
@@ -408,6 +426,74 @@ vim.cmd("Copy")
 check("after the fake copy works again, :Copy copies and hides", "hide works again submitted",
   kinds() .. " " .. clipped() .. " " .. outcome(idw))
 
+-- --- note files (H3) -------------------------------------------------------
+reset()
+local pa, ida, ba = show()
+check("a fresh note has no file until it changes", 0, vim.fn.filereadable(pa))
+body({ "autosaved text" })
+vim.api.nvim_exec_autocmds("TextChanged", { buffer = ba })
+vim.wait(500)
+check("autosave waits about 1 s", 0, vim.fn.filereadable(pa))
+vim.wait(3000, function() return vim.fn.filereadable(pa) == 1 end, 20)
+check("autosave after a change: draft, target, text; the buffer has no frontmatter",
+  "draft|app:com.example.app#4242|false|autosaved text to: app:com.example.app#4242|autosaved text",
+  nfile(pa) .. " " .. lines())
+local fm = store.read(pa)
+check("the file has id, created and updated", true,
+  rawget(fm, "id") == ida and rawget(fm, "created") ~= nil and rawget(fm, "updated") ~= nil)
+check("autosave leaves the buffer unmodified", false, vim.bo[ba].modified)
+-- :w writes through the note file format.
+body({ "written by :w" })
+vim.cmd("write")
+check(":w writes the frontmatter and the body", "---|draft|written by :w",
+  (readfile(pa) or ""):match("^[^\n]*") .. "|" .. nfile(pa):match("^[^|]*") .. "|" .. nfile(pa):match("[^|]*$"))
+-- Unknown keys and pinned survive a save.
+local m2, b2 = store.read(pa)
+store.set(m2, "pinned", true); store.set(m2, "mood", "calm")
+store.write(pa, m2, b2)
+body({ "after pin" })
+vim.cmd("write")
+local m3 = store.read(pa)
+check("a save keeps pinned and unknown keys", "true calm", tostring(rawget(m3, "pinned")) .. " " .. tostring(rawget(m3, "mood")))
+-- A body line starting with to: stays body on reload (fixture body-to.md:
+-- no target in the file, so the captured target becomes the header).
+local fx = io.open(root .. "/tests/fixtures/notes/body-to.md"):read("a")
+local f = io.open(pa, "w"); f:write(fx); f:close()
+vim.cmd("edit!")
+check(":e! of a file without a target: captured header, body line to: x stays body",
+  "to: app:com.example.app#4242|to: x|The first body line looks like a header but is body.", lines())
+vim.cmd("write")
+vim.cmd("edit!")
+check("... saved and read again: target stored, to: x still body",
+  "draft|app:com.example.app#4242|false|to: x|The first body line looks like a header but is body. "
+  .. "to: app:com.example.app#4242|to: x|The first body line looks like a header but is body.",
+  nfile(pa) .. " " .. lines())
+-- No to: line in the buffer: the captured target is stored.
+set({ "to: y is not line 1", "plain" })
+set({ "plain", "to: y" })
+vim.cmd("write")
+check("no header in the buffer: the file stores the captured target", "draft|app:com.example.app#4242|false|plain|to: y",
+  nfile(pa))
+-- A blank Cancel deletes the file; nothing else is ever deleted.
+set({ "to: app:com.example.app#4242", "" })
+vim.cmd("Cancel")
+check("blank Cancel deletes the note file", 0, vim.fn.filereadable(pa))
+-- The index sees the files (ferry-notes index runs in the background).
+local _, idx, bx = show()
+body({ "indexed and sent" })
+vim.cmd("Submit")
+local function listed_state(id)
+  local out = vim.fn.system({ root .. "/bin/ferry-notes", "list" })
+  for _, r in ipairs(vim.v.shell_error == 0 and vim.json.decode(out) or {}) do
+    if r.id == id then return r.state .. " " .. r.preview end
+  end
+  return "none"
+end
+vim.wait(5000, function() return listed_state(idx) ~= "none" end, 50)
+check("ferry-notes list shows the sent note", "sent indexed and sent", listed_state(idx))
+check("ferry-notes list leaves out deleted blank cancels", "none", listed_state(ida))
+local _ = bx
+
 -- --- voice keys: Flow toggle and the wait for its last paste -------------
 -- Flow pastes into the note as a bracketed paste, i.e. a vim.paste call.
 local function paste_later(text, ms)
@@ -475,7 +561,8 @@ paste_later(" words", 200)
 vim.wait(3000, function() return #calls > 0 end, 10)
 vim.wait(100)
 check("draft during a release wait: one host.hide after the paste", "paste,hide hide", flow_events() .. " " .. kinds())
-check("draft during a release wait: the file holds the paste", "to: app:com.example.app#4242\nspoken words\n", readfile(pt))
+check("draft during a release wait: the file holds the paste", "draft|app:com.example.app#4242|false|spoken words",
+  nfile(pt))
 check("release while idle prints idle, sends nothing", "idle ", note.release() .. " " .. flow_events())
 
 reset(); events = {}

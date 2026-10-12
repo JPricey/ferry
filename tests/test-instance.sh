@@ -25,7 +25,8 @@ done
 # A failing ghostty: ferry-host ensure finds no GUI settings.
 printf '#!/bin/sh\nexit 1\n' > "$work/fakes/ghostty"; chmod +x "$work/fakes/ghostty"
 : > "$work/calls"
-export PATH="$work/fakes:$PATH" FERRY_DB="$work/history.sqlite"
+export PATH="$work/fakes:$PATH" FERRY_DB="$work/history.sqlite" \
+  FERRY_INDEX="$work/index.sqlite" FERRY_OUTBOX="$work/outbox"
 # The controller must pass these itself.
 unset FERRY_SOCK FERRY_NOTES_DIR FERRY_HOST_NVIM_FLAGS
 
@@ -190,7 +191,7 @@ do
   local path = ask(sock, "expand(\"%:p\")")
   c.toggle()
   check("toggle while focused runs draft", 1, #execs(rec, "'draft'"))
-  check("draft wrote the note", "draft words", sh("cat '" .. path .. "'"))
+  check("draft wrote the note file (body after the frontmatter)", "draft words", sh("sed '1,/^---$/d' '" .. path .. "'"))
   check("toggle while focused calls host.hide", 1, count(t.order, "host.hide"))
   check("toggle while focused focuses 4242", 4242, lastFocusId(rec))
   rec:runTimers()
@@ -347,7 +348,9 @@ do
   end
   check("Ctrl-Q during the hide wait: after the paste, cancelled and hidden once", "1 0",
     hidden() .. " " .. ask(sock, 'get(g:, "ferry_submitted", 0)'))
-  check("Ctrl-Q during the hide wait: the note file (with the paste) is gone", nil, io.open(path, "r"))
+  local kept = sh("cat '" .. path .. "'")
+  check("Ctrl-Q during the hide wait: the note file is kept as cancelled, with the paste", true,
+    has(kept, "state: cancelled") and has(kept, "draft words") and has(kept, "late"))
   stop(sock)
 end
 

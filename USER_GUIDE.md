@@ -71,6 +71,23 @@ back, and Ctrl-X then sends it to the window you pressed from that time
 `:q` in the note also hides it; it never quits ferry. After you send or
 cancel, the next press starts a fresh note.
 
+Drafts save themselves: about a second after you stop typing, and again
+whenever the note hides. `:w` saves at once.
+
+## Where notes live
+
+Each note is a markdown file in `~/notes/scratchpads` (ferry creates the
+folder), named after the time it started, like
+`2026-10-12-091502-3f9a1c2e.md`. The top of the file holds the note's
+details (state: draft, sent or cancelled; where it goes; when it was
+written and sent), then your text. In ferry you only see the `to:` line
+and your text, never those details.
+
+Nothing is deleted: sent and cancelled notes keep their files. The one
+exception is cancelling a note with no text, which leaves no file. A note
+you open and never type in leaves no file either. Set `FERRY_NOTES_DIR` to
+keep notes somewhere else.
+
 ## Keys
 
 All of these work in insert mode, so you never have to leave it.
@@ -169,8 +186,8 @@ the app (its bundle id) and window you pressed the hotkey from. It reads
 
 ## Cancelling
 
-Ctrl-Q hides the window, sends nothing, throws the note away, and puts you
-back in the window you started from. Sending an empty note, or one you did
+Ctrl-Q hides the window, sends nothing, puts the note away (its file is
+kept, marked cancelled), and puts you back in the window you started from. Sending an empty note, or one you did
 not change, also counts as a cancel. If Flow is still recording when you
 cancel, ferry waits for Flow to finish and throws that text away, so it
 never lands in your app.
@@ -244,8 +261,8 @@ Older settings (`mode`, `terminal`, `autoStartFlow`, `windowTitle`) are no
 longer used; ferry logs a warning for each and ignores it.
 
 Environment variables: `FERRY_HISTORY=0` stops saving history,
-`FERRY_SIDEBAR=0` keeps the sidebar closed, and `FERRY_DB` moves the
-history database.
+`FERRY_SIDEBAR=0` keeps the sidebar closed, `FERRY_DB` moves the
+history database, and `FERRY_NOTES_DIR` moves the notes folder.
 
 If `~/Applications/ferry.app` exists (a small wrapper around Neovide),
 the window runs as that app: the Dock, Cmd-Tab and the menu bar show

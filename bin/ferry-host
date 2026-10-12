@@ -21,15 +21,21 @@
 #                                   (--force: stop even when nvim knows of no
 #                                   recording, prints `forced`)
 #   flow-state                      print `recording`, `waiting` or `idle`
-#   draft                          write the note and set g:ferry_draft;
-#                                   prints its path
+#   draft                           save the note's file and set
+#                                   g:ferry_draft; prints its path
 #   attach-cmd                      print the command a UI runs to attach
 #   status                          print `up uis=N` or `down`
 #   stop                            quit the server and remove the socket
 #
 # Environment:
 #   FERRY_SOCK              socket (default ${TMPDIR}/ferry.sock)
-#   FERRY_NOTES_DIR         note folder (default ${TMPDIR}/ferry-notes)
+#   FERRY_NOTES_DIR         notes folder, one markdown file per note
+#                           (default ~/notes/scratchpads)
+#   FERRY_OUTBOX            submit files for Hammerspoon, read by the server
+#                           (default ${TMPDIR}/ferry-outbox)
+#   FERRY_INDEX             notes search index, read by the server through
+#                           bin/ferry-notes (default in ~/Library/Application
+#                           Support/ferry)
 #   FERRY_HOST_NVIM_FLAGS   extra flags for the server nvim (tests: --clean)
 #   FERRY_SIDEBAR           0: show opens the note without the history sidebar
 #   FERRY_GUI_FONT          Neovide font (e.g. "Menlo:h14"); default: Ghostty's
@@ -50,7 +56,7 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(dirname "$here")
 tmp=${TMPDIR:-/tmp}; tmp=${tmp%/}
 sock=${FERRY_SOCK:-$tmp/ferry.sock}
-notes=${FERRY_NOTES_DIR:-$tmp/ferry-notes}
+notes=${FERRY_NOTES_DIR:-$HOME/notes/scratchpads}
 nvim_bin=$(command -v nvim) || { echo "ferry-host: nvim not found" >&2; exit 1; }
 
 # Quote a string as a Vim script literal.
@@ -70,7 +76,7 @@ rtp_fix="local ferryr = $(luastr "$root"); if not vim.tbl_contains(vim.opt.rtp:g
 # The note module, as a Lua expression (repo put on rtp first). A server
 # started before the module last changed (note.api differs) reloads it,
 # keeping its state and host.
-note_api=8
+note_api=9
 note_mod="(function(want) $rtp_fix; local n = require(\"ferry.note\"); if n.api == want then return n end; package.loaded[\"ferry.note\"] = nil; local ok, m = pcall(require, \"ferry.note\"); if not ok then package.loaded[\"ferry.note\"] = n; return n end; m.state = n.state; if n.host ~= n.default_host then m.host = n.host end; return m end)($note_api)"
 
 # The GUI module, as a Lua expression (rtp fixed by the caller). A server
@@ -183,11 +189,12 @@ stop() {
 case ${1:-} in
   ensure)     ensure ;;
   show)       shift; show "$@" ;;
-  talk)       need_server; call talk '{}' ;;
+  talk)       need_server; call talk "{'dir': $(vimstr "$notes")}" ;;
   release)    need_server
-              if [ "${2:-}" = --force ]; then call release "{'force': 1}"; else call release '{}'; fi ;;
+              force=''; [ "${2:-}" = --force ] && force=1
+              call release "{'force': $(vimstr "$force"), 'dir': $(vimstr "$notes")}" ;;
   flow-state) need_server; call flow_state '{}' ;;
-  draft)      need_server; call draft '{}' ;;
+  draft)      need_server; call draft "{'dir': $(vimstr "$notes")}" ;;
   attach-cmd) printf '%q --server %q --remote-ui\n' "$nvim_bin" "$sock" ;;
   status)     status ;;
   stop)       stop ;;
