@@ -66,6 +66,13 @@
 --   window opts.fullScreen      initial win:isFullScreen() (default false)
 --   window opts.stayFullScreen  setFullScreen(false) is recorded but ignored
 --   hs.uielement.watcher.windowMoved / windowResized / elementDestroyed
+--
+-- Session window additions (close on submit / cancel):
+--   rec.closes         {win, keyStrokes} for win:close(); keyStrokes is
+--                      #rec.keyStrokes at the time of the close
+--   window opts.closeError   win:close() raises this message
+--   window opts.closeResult  win:close() returns this (default true; a
+--                            true close acts like rec:closeWindow(id))
 
 local S = {}
 
@@ -175,6 +182,14 @@ function S.window(rec, opts)
     rec.watchers[#rec.watchers + 1] = wt
     return wt
   end
+  function w:close()
+    rec.closes[#rec.closes + 1] = { win = self, keyStrokes = #rec.keyStrokes }
+    if opts.closeError then error(opts.closeError) end
+    local res = opts.closeResult
+    if res == nil then res = true end
+    if res and self._id then rec:closeWindow(self._id) end
+    return res
+  end
   function w:focus()
     rec.focuses[#rec.focuses + 1] = self
     if opts.focusOnFocus ~= false then
@@ -195,7 +210,7 @@ function S.install()
     pasteboardSets = {}, activations = {}, focuses = {}, timers = {},
     apps = {}, windows = {}, windowGets = 0, accessibility = true,
     hides = {}, unhides = {}, moves = {}, tasks = {},
-    settings = {}, setFrames = {}, fullScreenSets = {}, watchers = {},
+    settings = {}, setFrames = {}, fullScreenSets = {}, watchers = {}, closes = {},
     pasteboard = { contents = nil, changeCount = 0 },
     clock = 1000, screen = { x = 0, y = 0, w = 1440, h = 900 },
   }

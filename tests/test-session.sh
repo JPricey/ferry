@@ -38,6 +38,27 @@ url_case() { # name window-arg expect-substring|"!"absent-substring
 url_case "window arg reaches URL"     4242 "window=4242"
 url_case "URL has target"             4242 "target=com.example.app"
 url_case "no window arg, no window="  ""   "!window="
+url_case "submit URL has session="    "4242 tok-1" "&session=tok-1"
+url_case "no token, no session="      4242 "!session="
+
+# Cancel prints the voicevim-cancel URL with target, window and session.
+cancel_url_case() { # name want-url [env...]
+  local name=$1 want=$2; shift 2
+  local f; f=$(mktemp -t vv-file)
+  local out; out=$(env "$@" VOICE_VIM_DRY_RUN=1 VOICE_VIM_EDITOR=true ITERM_SESSION_ID= \
+    "$root/bin/voice-vim-session" "$f" com.example.app 4242 ${TOKEN_ARG:-} 2>&1)
+  local url; url=$(printf '%s\n' "$out" | sed -n 's/^voice-vim-cancel-url: //p')
+  if [ "$url" = "$want" ] && ! printf '%s\n' "$out" | grep -q '^voice-vim-url:'; then
+    echo "ok   $name"
+  else
+    echo "FAIL $name: url '$url'"; fail=1
+  fi
+  rm -f "$f"
+}
+TOKEN_ARG=tok-2 cancel_url_case "dry-run cancel prints voice-vim-cancel-url" \
+  "hammerspoon://voicevim-cancel?target=com.example.app&window=4242&session=tok-2"
+cancel_url_case "token from VOICE_VIM_SESSION_TOKEN" \
+  "hammerspoon://voicevim-cancel?target=com.example.app&window=4242&session=tok-3" VOICE_VIM_SESSION_TOKEN=tok-3
 
 # --- End to end: the real session script, headless nvim, voice keys --------
 # A recording fake `open` is first on PATH, so nothing reaches Wispr Flow or

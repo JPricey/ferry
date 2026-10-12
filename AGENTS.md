@@ -158,9 +158,14 @@ the personal dictionary, or by mirroring edits into Flow's `History` rows.
    bundle id and the focused window's id (nil-guarded), and grabs the
    selection with Cmd+C (clipboard restored after).
 2. It writes the selection to a temp file and opens a Ghostty window running
-   `bin/voice-vim-session <file> <bundle-id> [window-id]`, via Ghostty's AppleScript
-   `new window with configuration {command:...}`. Ghostty closes the window
-   when the command exits. `hammerspoon/window-frame.lua` then finds the new window (by id diff), sets its saved or default frame, and saves moves. iTerm2 remains available with
+   `bin/voice-vim-session <file> <bundle-id> [window-id] [session-token]`, via Ghostty's AppleScript
+   `new window with configuration {command:...}`. Ghostty 1.3.1 may leave a
+   "Process exited" screen when the command exits, so Hammerspoon closes the
+   window itself (step 5). `hammerspoon/window-frame.lua` then finds the new
+   window (by id diff), reports it so the session token maps to it, sets its
+   saved or default frame (unless `rememberFrame = false`), and saves moves.
+   If the hotkey is pressed from an adopted session window, the new session
+   reuses that session's target instead of targeting Ghostty. iTerm2 remains available with
    `terminal = "iTerm2"`. Do not use `open -na Ghostty.app --args -e`: it
    starts a second Ghostty instance per session that never quits.
 3. The session script prepends Homebrew and `~/.local/bin` to PATH (the
@@ -169,10 +174,15 @@ the personal dictionary, or by mirroring edits into Flow's `History` rows.
    `wispr-flow://start-hands-free`.
 4. Flow pastes the dictation into the buffer. The user edits.
 5. On editor exit the script decides: non-zero exit, empty, whitespace-only,
-   or unchanged from seed means cancel; anything else means submit. Submit
-   calls `hammerspoon://voicevim-submit?file=&target=&window=`
+   or unchanged from seed means cancel; anything else means submit. Cancel
+   calls `hammerspoon://voicevim-cancel?target=&window=&session=`
+   (dry run: `voice-vim-cancel-url: …`): Hammerspoon closes the session
+   window and focuses the start window (or activates its app). Submit
+   calls `hammerspoon://voicevim-submit?file=&target=&window=&session=`
    (`VOICE_VIM_DRY_RUN=1` prints it as `voice-vim-url: …` instead).
-   Hammerspoon reads and deletes the file, then runs
+   Hammerspoon closes the session window (`win:close()`, pcall-guarded,
+   logged as `session: closed window …` or `session: window not found`),
+   reads and deletes the file, then runs
    `lua/voice-vim/delivery.lua` (loaded with `dofile`, effects passed in as
    an `env` built from `hs.*`): put the text on the clipboard, focus the
    target window (or activate the app if the window is gone), poll every

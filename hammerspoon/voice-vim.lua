@@ -5,6 +5,9 @@
 -- editor) -> hammerspoon://voicevim-submit callback -> put the text on the
 -- clipboard, focus the target window, wait until it is frontmost, Cmd+V.
 -- The delivery logic lives in lua/voice-vim/delivery.lua (pure, tested).
+-- Each session gets a token; Hammerspoon maps it to the Ghostty window it
+-- opened and closes that window on submit or on hammerspoon://voicevim-cancel
+-- (which then refocuses the start window).
 --
 -- Usage in ~/.hammerspoon/init.lua:
 --   local voicevim = require("voice-vim")
@@ -80,11 +83,11 @@ end
 local GHOSTTY = "com.mitchellh.ghostty"
 
 -- The window-frame glue, loaded once and kept in M._frameGlue so the
--- watchers it holds on open windows stay referenced. Returns nil when
--- rememberFrame is off or the glue cannot load (logged; tried again on the
--- next session). Never raises.
+-- watchers it holds on open windows stay referenced. It also finds the
+-- session window when rememberFrame is off (then it sets no frame). Returns
+-- nil when the glue cannot load (logged; tried again on the next session).
+-- Never raises.
 local function frameGlue()
-  if not M.config.rememberFrame then return nil end
   local wf = M._frameGlue
   if not wf then
     local ok, res = pcall(function()
@@ -118,15 +121,18 @@ local function frameBefore()
   return { wf = wf, before = before }
 end
 
--- After the window opened: find it, set its frame, watch it. Never raises.
-local function frameAfter(snap)
+-- After the window opened: find it, report it to onFound, set its frame
+-- (when rememberFrame is on), watch it. Never raises.
+local function frameAfter(snap, onFound)
   if not snap then return end
-  local ok, err = pcall(snap.wf.adopt, GHOSTTY, snap.before)
+  local ok, err = pcall(snap.wf.adopt, GHOSTTY, snap.before, nil,
+    { onFound = onFound, frame = M.config.rememberFrame ~= false })
   if not ok then log.e("frame: adopt failed: " .. tostring(err)) end
 end
 
--- Launch a terminal window running argv (a list of strings).
-local function openTerminal(argv)
+-- Launch a terminal window running argv (a list of strings). onFound(win)
+-- is called with the new Ghostty window once it is found.
+local function openTerminal(argv, onFound)
   local term = M.config.terminal
   local cmdline = shjoin(argv)
   local script
@@ -134,7 +140,8 @@ local function openTerminal(argv)
   if term == "ghostty" then
     -- Ghostty 1.3+ exposes an AppleScript dictionary. `new window with
     -- configuration` runs our command in a fresh window of the already
-    -- running instance and closes the window when the command exits.
+    -- running instance. Ghostty 1.3.1 can leave a "Process exited" screen
+    -- instead of closing it, so submit and cancel close it themselves.
     -- (The `open -na Ghostty.app --args -e` route spawns a second app
     -- instance per session and leaves it running; avoid it.)
     -- Hammerspoon needs Automation permission for Ghostty the first time.
@@ -148,6 +155,7 @@ local function openTerminal(argv)
     snap = frameBefore()
   elseif term == "iTerm2" then
     if M.config.rememberFrame then log.i("frame: not managed under iTerm2") end
+    log.i("session: window not tracked under iTerm2 (it closes its own)")
     script = string.format([[
       tell application "iTerm2"
         activate
@@ -163,7 +171,7 @@ local function openTerminal(argv)
     log.e(term .. " launch failed: " .. hs.inspect(err))
     hs.alert.show("voice-vim: could not open " .. term)
   elseif snap then
-    frameAfter(snap)
+    frameAfter(snap, onFound)
   end
   return ok
 end
@@ -175,12 +183,59 @@ local function focusedWindowId()
   return id
 end
 
+-- Sessions: token -> { token, target, windowId (start window), win, winId
+-- (session window) }. M._windows maps a session window id to its session
+-- until that window is closed, so a press from a voice-vim window (live, or
+-- left on Ghostty's "Process exited" screen) reuses its start target.
+M._sessions = {}
+M._windows = {}
+
+local tokenCount = 0
+local function newToken()
+  tokenCount = tokenCount + 1
+  return string.format("%x-%x-%x", os.time(), tokenCount, math.random(0, 0xfffff))
+end
+
+-- The session whose window has this id, or nil.
+local function sessionForWindow(id)
+  if id == nil then return nil end
+  return M._windows[id]
+end
+
+-- Close the session window for token and drop the token. Returns the
+-- session (or nil). Never raises; every failure only logs.
+local function endSession(token, why)
+  if token == nil or token == "" then return nil end
+  local s = M._sessions[token]
+  M._sessions[token] = nil
+  if not s or not s.win then
+    log.i("session: window not found (" .. why .. ", session " .. tostring(token) .. ")")
+    return s
+  end
+  local ok, res = pcall(function() return s.win:close() end)
+  if ok and res then
+    log.i("session: closed window " .. tostring(s.winId) .. " (" .. why .. ")")
+    if s.winId ~= nil then M._windows[s.winId] = nil end
+  else
+    log.w("session: could not close window " .. tostring(s.winId) .. " (" .. why .. "): "
+      .. tostring(res))
+  end
+  return s
+end
+
 function M.begin()
   local app = hs.application.frontmostApplication()
   local target = app and app:bundleID() or ""
   local winId = focusedWindowId()
   local sel = ""
-  if M.config.captureSelection and app then sel = grabSelection(app) end
+  local reuse = sessionForWindow(winId)
+  if reuse then
+    -- Never target a voice-vim window: use the start target of its session.
+    log.i("begin: frontmost is a voice-vim window, reusing its target")
+    target, winId = reuse.target or "", reuse.windowId
+  elseif M.config.captureSelection and app then
+    sel = grabSelection(app)
+  end
 
   local file = os.tmpname() .. "-voice-vim.md"
   local f = io.open(file, "w")
@@ -195,8 +250,19 @@ function M.begin()
   argv[#argv + 1] = file
   argv[#argv + 1] = target
   argv[#argv + 1] = winId and tostring(winId) or ""
-  log.i("begin: target=" .. target .. " window=" .. tostring(winId) .. " file=" .. file)
-  openTerminal(argv)
+  local token = newToken()
+  argv[#argv + 1] = token
+  local s = { token = token, target = target, windowId = winId }
+  M._sessions[token] = s
+  log.i("begin: target=" .. target .. " window=" .. tostring(winId) .. " file=" .. file
+    .. " session=" .. token)
+  local opened = openTerminal(argv, function(win)
+    s.win = win
+    s.winId = win:id()
+    if s.winId ~= nil then M._windows[s.winId] = s end
+    log.i("session: window " .. tostring(s.winId) .. " is session " .. token)
+  end)
+  if not opened then M._sessions[token] = nil end
 end
 
 -- Load the pure delivery core from the repo. Returns the module or nil.
@@ -277,9 +343,10 @@ local function deliveryEnv(win, text)
 end
 
 -- Callback from bin/voice-vim-session:
--- hammerspoon://voicevim-submit?file=&target=&window=
+-- hammerspoon://voicevim-submit?file=&target=&window=&session=
 function M.submit(params)
   params = params or {}
+  endSession(params.session, "submit")
   local file, target = params.file, params.target or ""
   local windowId = tonumber(params.window or "")
   local f = file and io.open(file, "r")
@@ -327,6 +394,35 @@ function M.submit(params)
   if not ok then copyOnly(text, "delivery error: " .. tostring(err)) end
 end
 
+-- Callback from bin/voice-vim-session on cancel:
+-- hammerspoon://voicevim-cancel?target=&window=&session=
+-- Close the session window, then focus the start window (or its app).
+function M.cancel(params)
+  params = params or {}
+  local s = endSession(params.session, "cancel")
+  local target = params.target
+  if target == nil or target == "" then target = s and s.target or nil end
+  local windowId = tonumber(params.window or "") or (s and s.windowId) or nil
+  log.i("cancel: target=" .. tostring(target) .. " window=" .. tostring(windowId))
+  local ok, err = pcall(function()
+    local win = windowId and hs.window.get(windowId) or nil
+    if win then
+      log.i("cancel: focusing window " .. tostring(windowId))
+      win:focus()
+      return
+    end
+    local app = target and target ~= "" and hs.application.get(target) or nil
+    if app then
+      log.i("cancel: activating app " .. tostring(target) .. " (window "
+        .. tostring(windowId) .. " not found)")
+      app:activate()
+    else
+      log.w("cancel: target " .. tostring(target) .. " not found, focus left alone")
+    end
+  end)
+  if not ok then log.w("cancel: focus failed: " .. tostring(err)) end
+end
+
 -- True when every modifier is Option. macOS 15+ may refuse such hotkeys.
 local function isOptionOnly(mods)
   if #mods == 0 then return false end
@@ -345,6 +441,10 @@ function M.start(cfg)
     M.config.activateDelay = nil
   end
   hs.urlevent.bind("voicevim-submit", function(_, params) M.submit(params) end)
+  hs.urlevent.bind("voicevim-cancel", function(_, params)
+    local ok, err = pcall(M.cancel, params)
+    if not ok then log.e("cancel: " .. tostring(err)) end
+  end)
   -- hammerspoon://voicevim-start starts a session without the hotkey
   -- (Karabiner, a launcher, or `open -g` from a shell).
   hs.urlevent.bind("voicevim-start", function() M.begin() end)

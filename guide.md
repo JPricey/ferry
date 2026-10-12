@@ -59,11 +59,11 @@ shortcut instead, the next `Ctrl-S` starts a new session.
 ## Submit
 
 `ZZ`, `Ctrl-X` in normal or insert mode, or `:Submit` writes the buffer,
-closes the window, brings the target window back to the front and pastes the
-text at the cursor, replacing any selection. The text stays on the clipboard
-afterwards. If the target cannot be confirmed in front within
-`confirmTimeout` seconds, or delivery fails, nothing is pasted and an alert
-says "copied — paste manually".
+and Hammerspoon closes the Ghostty window, brings the target window back to
+the front and pastes the text at the cursor, replacing any selection; the
+text stays on the clipboard. If the target cannot be confirmed in front
+within `confirmTimeout` seconds, or delivery fails, nothing is pasted and an
+alert says "copied — paste manually".
 
 ## Submit while Flow is recording
 
@@ -74,9 +74,10 @@ is not waited for; pressing the submit key again submits at once.
 
 ## Cancel
 
-`ZQ`, `Ctrl-Q` in normal or insert mode, `:Cancel`, or `:cq` closes the
-window and pastes nothing; if Flow is still recording from `Ctrl-S`, it is
-stopped and its text is discarded. Quitting with the buffer empty or
+`ZQ`, `Ctrl-Q` in normal or insert mode, `:Cancel`, or `:cq` pastes
+nothing: Hammerspoon closes the Ghostty window and puts focus back on the
+window you started from. If Flow is still recording from `Ctrl-S`, it is
+stopped and its text is discarded; quitting with the buffer empty or
 unchanged from its starting text also cancels.
 
 ## Browse history

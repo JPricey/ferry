@@ -290,7 +290,7 @@ local function fs(f)
   if type(f) ~= "table" then return tostring(f) end
   return string.format("%s,%s %sx%s", tostring(f.x), tostring(f.y), tostring(f.w), tostring(f.h))
 end
-local function frameSetup(cfg)
+local function frameSetup(cfg, winOpts)
   local rec, M = fresh()
   local ghostty = rec:app({ bundleID = "com.mitchellh.ghostty", windows = {} })
   ghostty._windows[1] = rec:window({ id = 1, app = ghostty })
@@ -301,7 +301,9 @@ local function frameSetup(cfg)
     local ok, res, err = applescript(script)
     if ok and script:find('application "Ghostty"', 1, true) then
       nextId = nextId + 1
-      local w = rec:window({ id = nextId, app = ghostty })
+      local o = { id = nextId, app = ghostty }
+      for k, v in pairs(winOpts or {}) do o[k] = v end
+      local w = rec:window(o)
       ghostty._windows[#ghostty._windows + 1] = w
       rec.focusedWindow = w
     end
@@ -414,6 +416,149 @@ do
   check("frame: adopt error does not raise", true, ok)
   check("frame: adopt error still opens the window", 2, #rec.osascripts)
   check("frame: adopt error logged", true, rec:hasLog("e", "adopt boom"))
+  cleanupScripts(rec)
+end
+
+-- Session window: begin() passes a token, the adopted Ghostty window is
+-- mapped to it, and submit / cancel close that window.
+local function sessionSetup(cfg, winOpts)
+  local rec, M, ghostty = frameSetup(cfg, winOpts)
+  local target = rec:app({ bundleID = "com.example.target" })
+  local tw = rec:window({ id = 4242, app = target })
+  target._window = tw
+  rec.frontmost = target
+  rec.focusedWindow = tw
+  return rec, M, ghostty
+end
+-- begin(), then the token from the session command and the new window.
+local function beginSession(rec, M, ghostty)
+  M.begin()
+  local script = rec.osascripts[#rec.osascripts] or ""
+  return script:match("'4242' '([^']+)'"), ghostty._windows[#ghostty._windows]
+end
+
+do
+  local rec, M, ghostty = sessionSetup()
+  local token, win = beginSession(rec, M, ghostty)
+  check("session: begin passes a token after the window id", true, token ~= nil)
+  local s = token and M._sessions[token]
+  check("session: adopt maps the token to the new window", win, s and s.win)
+  check("session: token keeps the start target", "com.example.target", s and s.target)
+  check("session: token keeps the start window", 4242, s and s.windowId)
+  check("session: adopt logged", true, rec:hasLog("i", "session: window 101 is session " .. tostring(token)))
+  local file = submitFile("closing\n")
+  rec:openURL("voicevim-submit", { file = file, target = "com.example.target", window = "4242", session = token })
+  rec:runTimers()
+  check("session submit: window closed once", 1, #rec.closes)
+  check("session submit: closed the session window", win, rec.closes[1] and rec.closes[1].win)
+  check("session submit: closed before the Cmd+V", 0, rec.closes[1] and rec.closes[1].keyStrokes)
+  check("session submit: one Cmd+V", 1, #rec.keyStrokes)
+  check("session submit: delivered", true, rec:hasLog("i", "submit: delivered"))
+  check("session submit: logs closed window", true, rec:hasLog("i", "session: closed window 101"))
+  check("session submit: token dropped", nil, M._sessions[token])
+  check("session submit: window mapping dropped", nil, M._windows[101])
+  cleanupScripts(rec)
+end
+
+do
+  local rec, M, ghostty = sessionSetup()
+  local token, win = beginSession(rec, M, ghostty)
+  check("cancel: voicevim-cancel bound", "function", type(rec.urlBinds["voicevim-cancel"]))
+  rec:openURL("voicevim-cancel", { target = "com.example.target", window = "4242", session = token })
+  check("cancel: window closed once", 1, #rec.closes)
+  check("cancel: closed the session window", win, rec.closes[1] and rec.closes[1].win)
+  check("cancel: focuses window 4242", 4242, rec.focuses[1] and rec.focuses[1]:id())
+  check("cancel: no keystroke", 0, #rec.keyStrokes)
+  check("cancel: logs closed window", true, rec:hasLog("i", "session: closed window 101 (cancel)"))
+  check("cancel: token dropped", nil, M._sessions[token])
+  rec:openURL("voicevim-cancel", { target = "com.example.target", window = "4242", session = token })
+  check("cancel: same token again closes nothing", 1, #rec.closes)
+  cleanupScripts(rec)
+end
+
+-- Cancel whose start window is gone: activates the app instead.
+do
+  local rec, M, ghostty = sessionSetup()
+  local token = beginSession(rec, M, ghostty)
+  rec:closeWindow(4242)
+  rec:openURL("voicevim-cancel", { target = "com.example.target", window = "4242", session = token })
+  check("cancel, window gone: app activated", 1, #rec.activations)
+  check("cancel, window gone: session window still closed", 1, #rec.closes)
+  cleanupScripts(rec)
+end
+
+-- Unknown session: no close, no error, submit still delivers.
+do
+  local rec, M, ghostty = sessionSetup()
+  beginSession(rec, M, ghostty)
+  local file = submitFile("unknown\n")
+  local ok = pcall(function()
+    rec:openURL("voicevim-submit", { file = file, target = "com.example.target", window = "4242", session = "nope" })
+    rec:runTimers()
+  end)
+  check("unknown session: no error", true, ok)
+  check("unknown session: no close", 0, #rec.closes)
+  check("unknown session: still delivers", 1, #rec.keyStrokes)
+  check("unknown session: logs window not found", true, rec:hasLog("i", "session: window not found"))
+  ok = pcall(rec.openURL, rec, "voicevim-cancel", { target = "com.example.target", window = "4242", session = "nope" })
+  check("unknown session cancel: no error", true, ok)
+  check("unknown session cancel: no close", 0, #rec.closes)
+  check("unknown session cancel: still focuses 4242", 4242, rec.focuses[#rec.focuses] and rec.focuses[#rec.focuses]:id())
+  cleanupScripts(rec)
+end
+
+-- win:close() raises: logged, submit still delivers.
+do
+  local rec, M, ghostty = sessionSetup(nil, { closeError = "close boom" })
+  local token = beginSession(rec, M, ghostty)
+  local file = submitFile("still goes\n")
+  local ok = pcall(function()
+    rec:openURL("voicevim-submit", { file = file, target = "com.example.target", window = "4242", session = token })
+    rec:runTimers()
+  end)
+  check("close throws: no error escapes", true, ok)
+  check("close throws: close attempted", 1, #rec.closes)
+  check("close throws: still delivers", 1, #rec.keyStrokes)
+  check("close throws: logged", true, rec:hasLog("w", "close boom"))
+  cleanupScripts(rec)
+end
+
+-- Hotkey pressed from a live voice-vim window: reuse its start target.
+do
+  local rec, M, ghostty = sessionSetup()
+  local _, win = beginSession(rec, M, ghostty)
+  rec.frontmost = ghostty
+  rec.focusedWindow = win
+  M.begin()
+  local script = rec.osascripts[2] or ""
+  check("reuse: second session targets the start window", true, script:find("'com.example.target' '4242'", 1, true) ~= nil)
+  check("reuse: Ghostty not recorded as target", nil, script:find("com.mitchellh.ghostty", 1, true))
+  check("reuse: logged", true, rec:hasLog("i", "begin: frontmost is a voice-vim window, reusing its target"))
+  cleanupScripts(rec)
+end
+
+-- Close fails (window left on "Process exited"): a press from it reuses the target.
+do
+  local rec, M, ghostty = sessionSetup(nil, { closeResult = false })
+  local token, win = beginSession(rec, M, ghostty)
+  rec:openURL("voicevim-cancel", { target = "com.example.target", window = "4242", session = token })
+  check("left window: close failure logged", true, rec:hasLog("w", "session: could not close window 101"))
+  rec.frontmost = ghostty
+  rec.focusedWindow = win
+  M.begin()
+  local script = rec.osascripts[2] or ""
+  check("left window: next session targets the start window", true, script:find("'com.example.target' '4242'", 1, true) ~= nil)
+  cleanupScripts(rec)
+end
+
+-- rememberFrame off: the window is still found and closed, but no frame set.
+do
+  local rec, M, ghostty = sessionSetup({ rememberFrame = false })
+  local token, win = beginSession(rec, M, ghostty)
+  check("rememberFrame off: token mapped to the window", win, token and M._sessions[token] and M._sessions[token].win)
+  check("rememberFrame off: still no setFrame", 0, #rec.setFrames)
+  rec:openURL("voicevim-cancel", { target = "com.example.target", window = "4242", session = token })
+  check("rememberFrame off: cancel closes the window", 1, #rec.closes)
   cleanupScripts(rec)
 end
 

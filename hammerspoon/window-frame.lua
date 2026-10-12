@@ -19,12 +19,13 @@
 --   wf.adopt("com.mitchellh.ghostty", before)            -- after opening
 --
 --   snapshot(bundle)        -> set of the app's current window ids
---   adopt(bundle, before, timeout)
+--   adopt(bundle, before, timeout, opts)
 --                           find a window of the app whose id is not in
 --                           before (the focused window first); check at
 --                           once, then every 0.02 s up to timeout (2 s).
---                           On a hit: apply, then watch. On a miss: log
---                           `frame: session window not found`.
+--                           On a hit: opts.onFound(win) if given, then
+--                           apply and watch unless opts.frame == false. On
+--                           a miss: log `frame: session window not found`.
 --   apply(win, done)        leave native fullscreen if needed (retry once
 --                           after 0.6 s), set the restored frame with no
 --                           animation, log `frame: default|restored|moved
@@ -191,8 +192,9 @@ function W.new(cfg)
     return nil
   end
 
-  function o.adopt(bundle, before, timeout)
+  function o.adopt(bundle, before, timeout, opts)
     before = type(before) == "table" and before or {}
+    opts = type(opts) == "table" and opts or {}
     timeout = (type(timeout) == "number" and timeout >= 0) and timeout or W.TIMEOUT
     stopTimer(o._adoptTimer)
     o._adoptTimer = nil
@@ -203,7 +205,11 @@ function W.new(cfg)
       local win = findNew(bundle, before)
       if win then
         log.i(string.format("frame: session window %s found after %d polls", tostring(winId(win)), polls))
-        o.apply(win, o.watch)
+        if type(opts.onFound) == "function" then
+          local ok, err = pcall(opts.onFound, win)
+          if not ok then log.w("frame: onFound: " .. tostring(err)) end
+        end
+        if opts.frame ~= false then o.apply(win, o.watch) end
         return
       end
       if polls >= maxPolls then

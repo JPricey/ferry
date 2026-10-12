@@ -77,7 +77,7 @@ to change it. Buffer-local settings live in `vim/voice-vim.vim`.
 - `lua/voice-vim/delivery.lua` — pure delivery core used by submit: set the
   clipboard, focus the target, poll until it is frontmost, paste once.
 - `bin/voice-vim-session` — runs inside the terminal: opens the editor,
-  decides submit vs cancel, calls back, closes its window.
+  decides submit vs cancel, and calls back; Hammerspoon closes its window.
 - `bin/voice-vim-paste` — osascript fallback paste when Hammerspoon is down.
 - `bin/voice-vim-migrate-init` — removes the old Option+V hotkey line from
   `~/.hammerspoon/init.lua` (backs up to `init.lua.bak`; safe to rerun).
@@ -106,7 +106,8 @@ to change it. Buffer-local settings live in `vim/voice-vim.vim`.
 
 ## Notes
 
-- Ghostty closes the session window when the editor exits. Do not launch
+- Hammerspoon closes the session window on submit and cancel, because
+  Ghostty 1.3.1 can leave a "Process exited" screen behind. Do not launch
   Ghostty with `open -na ... -e`; that spawns a second Ghostty instance per
   session that lingers after the window closes.
 - Stop a Flow dictation with the Flow shortcut, not Escape. Escape is also
