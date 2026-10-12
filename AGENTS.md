@@ -57,8 +57,9 @@ touching `lua/ferry/delivery.lua` or the Hammerspoon module,
 `bash tests/test-tmux.sh` after touching `lua/ferry/tmux.lua` (its own `tmux -L ferry-test` server only),
 and `bash tests/test-host.sh`, `bash tests/test-note.sh` and
 `bash tests/test-instance.sh` after touching `bin/ferry-host`,
-`lua/ferry/note.lua`, `lua/ferry/gui.lua` or `hammerspoon/instance.lua`, and
-`bash tests/test-host-neovide.sh` after touching `hammerspoon/hosts/neovide.lua`.
+`lua/ferry/note.lua`, `lua/ferry/gui.lua` or `hammerspoon/instance.lua`,
+`bash tests/test-host-neovide.sh` after touching `hammerspoon/hosts/neovide.lua`, and
+`bash tests/test-edit.sh` after touching `lua/ferry/edit.lua`.
 Hammerspoon is installed and the module is linked into `~/.hammerspoon/`;
 Accessibility permission must be granted manually, and Hammerspoon must be
 relaunched after granting it.
