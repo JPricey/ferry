@@ -54,6 +54,9 @@ setup step lands.
 
 That is the whole loop. To throw the text away instead, press **Ctrl-Q**.
 
+Steps 2 and 3 can be one: hold **Ctrl+Option+B**, speak, let go (see
+"Hold to talk" below).
+
 ## Show, hide and drafts
 
 There is only ever one voice-vim window. The hotkey shows it from any app
@@ -75,15 +78,18 @@ All of these work in insert mode, so you never have to leave it.
 | `Ctrl-Q` | Throw the note away without sending. `ZQ` and `:Cancel` do the same. |
 | `Ctrl-Y` | Copy the text to the clipboard and hide, whatever the `to:` line says. `:Copy` does the same. |
 | `Ctrl+Option+V` | Hide the note and keep it as a draft. `:q` does the same. |
+| `Ctrl+Option+B` (hold) | Wispr Flow listens while held and its text is added at the cursor; the note stays up. From any other app it shows the note first. |
 | `Ctrl-S` | Start Wispr Flow listening; press again to stop. |
 | `<leader>d` | Start Wispr Flow from normal mode (`:Dictate`). |
 | `<leader>h` | Show or hide the history sidebar (`:History`). |
 
-## Two ways to dictate
+## Ways to dictate
 
-- **Hold to talk.** Hold your normal Wispr Flow shortcut, speak, let go.
-  This works in the voice-vim buffer like in any other app, and needs
-  nothing from voice-vim.
+- **voice-vim's hold to talk.** Hold Ctrl+Option+B from any app, speak,
+  let go. See the next section.
+- **Flow's own shortcut.** Hold your normal Wispr Flow shortcut in the
+  note, speak, let go. This works in the voice-vim buffer like in any
+  other app, and needs nothing from voice-vim.
 - **Ctrl-S.** Press it to start Flow's hands-free mode, speak as long as
   you like, press it again to stop. You stay in insert mode. If you stop
   Flow with its own shortcut instead, that is fine: the next Ctrl-S starts
@@ -91,6 +97,33 @@ All of these work in insert mode, so you never have to leave it.
 
 Stop a recording with Flow's shortcut or Ctrl-S, not Escape. Escape only
 leaves insert mode in Vim.
+
+## Hold to talk
+
+Hold **Ctrl+Option+B** in any app. The note appears, aimed at the window
+you were in (as with Ctrl+Option+V), and Wispr Flow starts listening at
+once, so your first word is not cut off. Speak, then let go: Flow stops and
+its text lands in the note, in insert mode. Fix it and press Ctrl-X as
+usual.
+
+- **From the note itself**, holding the key adds more where the cursor is
+  (just after it, if you were in normal mode). The note never hides.
+- **Ctrl-X or Ctrl-Q right after letting go** waits for Flow's text, as
+  after Ctrl-S: Ctrl-X sends it with your last words, Ctrl-Q throws it
+  away so it never reaches your app.
+- **Flow only stops once the note is in front**, so your words never land
+  in Slack or wherever you started. If the note does not come up within 5
+  seconds of letting go, voice-vim leaves Flow recording and says so
+  ("note did not appear"); the same if Flow itself was slow to start
+  ("Flow was slow to start"). Open the note and press Ctrl-S to stop it.
+- **Change or turn off the key** with `talkHotkey` in Settings
+  (`talkHotkey = false` turns it off). It cannot be the same keys as
+  `hotkey`: that logs an error and the talk key is not bound.
+- **From Karabiner or another key tool**, open
+  `hammerspoon://voicevim-talk?state=down` when the key goes down and
+  `hammerspoon://voicevim-talk?state=up` when it comes up. In a Karabiner
+  rule, that is a `shell_command` of `open -g "hammerspoon://voicevim-talk?state=down"`
+  in `to` and the `state=up` one in `to_after_key_up`.
 
 ## Sending
 
@@ -181,6 +214,8 @@ moves onto your main screen.
 
 - `open -g hammerspoon://voicevim-start` from a shell, a launcher or a
   keyboard tool does what the hotkey does.
+- `hammerspoon://voicevim-talk?state=down` and `?state=up` do what pressing
+  and letting go of the hold to talk key do (see "Hold to talk").
 - `karabiner/voice-vim-hyper.json` is an optional Karabiner-Elements rule.
   It turns a held Right Command into a Hyper key, and Hyper+V acts like
   the hotkey. Copy it to `~/.config/karabiner/assets/complex_modifications/`,
@@ -194,6 +229,7 @@ from the Hammerspoon menu bar icon. Leave out any line to keep its default.
 ```lua
 require("voice-vim").start({
   hotkey = { { "ctrl", "alt" }, "v" },  -- the hotkey ("alt" is Option)
+  talkHotkey = { { "ctrl", "alt" }, "b" },  -- hold to talk; false turns it off
   captureSelection = false, -- start a new note with the selected text
   confirmTimeout = 1.0,     -- seconds to wait for the target window
   rememberFrame = true,     -- reopen the window where you left it
@@ -240,7 +276,12 @@ with how long it took, the target, the window, each check, the paste.
   brings it back.
 - **The hotkey does nothing.** Reload Config and look for `bound ctrl+alt+v`
   in the console. A `failed to bind` line means another app holds the key;
-  pick a different `hotkey`, or use the start URL.
+  pick a different `hotkey`, or use the start URL. For the hold to talk
+  key, look for `bound ctrl+alt+b (talk)` (or `talk hotkey off`).
+- **Flow kept recording after hold to talk.** An alert says so when the
+  note did not come up in time. Open the note (Ctrl+Option+V) and press
+  Ctrl-S to stop Flow. The console's `talk:` lines show each step with
+  its timing.
 - **Submit says it needs Accessibility.** Grant it to Hammerspoon, then
   quit and restart Hammerspoon.
 - **The sidebar shows the wrong app.** It shows the app that was in front

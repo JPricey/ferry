@@ -699,6 +699,8 @@ do
     #execs(rec, "'release'") .. " " .. #rec.alerts)
   check("start task running: withheld logged with the reason", true,
     rec:hasLog("w", "the Flow start task is still running"))
+  check("start task running: the alert says Flow was slow to start", true,
+    has(rec.alerts[1], "Flow was slow to start") and not has(rec.alerts[1], "did not appear"))
   check("start task running: server still recording, no URL (Ctrl-S stops Flow)", "true ",
     recording(sock) .. " " .. urls(sock))
   finishStart(rec)
@@ -747,6 +749,28 @@ do
   check("no note: one release --force, forced, one stop, no alert", "1 forced 1 0",
     #rel .. " " .. (rel[1] and rel[1].out:gsub("%s+$", "") or "") .. " " .. stops(sock) .. " " .. #rec.alerts)
   check("no note: logged that nvim had no recording", true, rec:hasLog("w", "nvim had no recording"))
+  stop(sock)
+end
+
+-- Ctrl-S in the note stops Flow while the talk modifiers are still down:
+-- key up asks nvim, which is idle, so no second stop and no alert.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  recordFlow(sock)
+  c.talkDown()
+  finishStart(rec)
+  rec.modifiers = { ctrl = true, alt = true }
+  c.talkUp()
+  tick(rec)
+  check("Ctrl-S during held modifiers: no release yet", 0, #execs(rec, "'release'"))
+  luaRun(sock, "talks.lua", 'require("voice-vim.flow").toggle() return 1')  -- Ctrl-S
+  rec.modifiers = {}
+  tick(rec)
+  check("Ctrl-S then key up: plain release, no --force, one stop (Ctrl-S's), no alert", "1 0 1 0",
+    #execs(rec, "'release'") .. " " .. #execs(rec, "'--force'") .. " " .. stops(sock) .. " " .. #rec.alerts)
+  check("Ctrl-S then key up: logged nvim already stopped Flow", true,
+    rec:hasLog("i", "talk: no release needed: nvim already stopped Flow (idle)"))
   stop(sock)
 end
 

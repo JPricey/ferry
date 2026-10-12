@@ -10,6 +10,16 @@ with your note in insert mode, ready for dictation; the window you were in
 (not just its app) becomes the paste target. Press it again from the note to
 hide it and go back to that window.
 
+## Hold to talk
+
+Hold **Ctrl+Option+B** (`talkHotkey`) in any app: the note appears and Wispr
+Flow starts listening at once; let go and Flow stops, its text landing in the
+note in insert mode (from the note itself, it adds at the cursor and never
+hides). The stop is only sent once the note is in front, so dictation never
+lands in another app; if the note does not come up within 5 seconds, or Flow
+was slow to start, an alert says Flow may still be recording. `talkHotkey =
+false` turns it off, and one equal to `hotkey` is not bound.
+
 ## Choose where it goes: the `to:` line
 
 The note's first line names its target, for example
@@ -70,8 +80,11 @@ screen. `rememberFrame = false` leaves the window to Neovide.
 
 Opening `hammerspoon://voicevim-start` does what the hotkey does, for
 example `open -g hammerspoon://voicevim-start` from a shell, Karabiner or a
-launcher. If the hotkey fails to bind, Hammerspoon shows an alert and logs
-`failed to bind` in its console; an Option-only hotkey logs a warning.
+launcher. `hammerspoon://voicevim-talk?state=down` and `?state=up` are hold
+to talk's key down and key up, for a Karabiner rule (`to` and
+`to_after_key_up`). If a hotkey fails to bind, Hammerspoon shows an alert
+and logs `failed to bind` in its console (`… (talk)` for the talk hotkey);
+an Option-only hotkey logs a warning.
 
 ## Move off Option+V
 
@@ -160,6 +173,7 @@ Hammerspoon menu bar icon:
 ```lua
 require("voice-vim").start({
   hotkey = { { "ctrl", "alt" }, "v" },  -- the trigger (default)
+  talkHotkey = { { "ctrl", "alt" }, "b" },  -- hold to talk (default); false turns it off
   captureSelection = false,     -- start a new note with the selection
   confirmTimeout = 1.0,         -- seconds to wait for the target before giving up
   rememberFrame = true,         -- reopen the window where you last left it

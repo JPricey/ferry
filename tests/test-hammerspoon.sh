@@ -69,7 +69,8 @@ do
   M.start(opts())
   check("voicevim-submit bound", "function", type(rec.urlBinds["voicevim-submit"]))
   check("voicevim-start bound", "function", type(rec.urlBinds["voicevim-start"]))
-  check("one hotkey bind", 1, #rec.hotkeyBinds)
+  check("voicevim-talk bound", "function", type(rec.urlBinds["voicevim-talk"]))
+  check("defaults: two hotkey binds", 2, #rec.hotkeyBinds)
   local b = rec.hotkeyBinds[1]
   check("hotkey mods are configured mods", table.concat(M.config.hotkey[1], "+"), table.concat(b.mods, "+"))
   check("hotkey key is configured key", M.config.hotkey[2], b.key)
@@ -81,6 +82,73 @@ do
   check("default key is v", "v", b.key)
   check("default: no Option-only warning", false, rec:hasLog("w", "Option-only"))
   check("default: bound ctrl+alt+v logged", true, rec:hasLog("i", "bound ctrl+alt+v"))
+  check("hotkey: no released or repeat fn", "nil nil", tostring(b.released) .. " " .. tostring(b.rep))
+  local tb = rec.hotkeyBinds[2] or {}
+  check("talk: default ctrl+alt+b", "ctrl+alt+b", table.concat(tb.mods or {}, "+") .. "+" .. tostring(tb.key))
+  check("talk: pressed is M.talkDown", M.talkDown, tb.fn)
+  check("talk: released is M.talkUp", M.talkUp, tb.released)
+  check("talk: no repeat fn", nil, tb.rep)
+  check("talk: object kept", tb.obj, M.talkHotkeyObj)
+  check("talk: bound ctrl+alt+b (talk) logged", true, rec:hasLog("i", "bound ctrl+alt+b (talk)"))
+  check("defaults: no alert", 0, #rec.alerts)
+end
+
+-- talkHotkey = false: only the main hotkey, logged off.
+do
+  local rec, M = fresh()
+  M.start(opts({ talkHotkey = false }))
+  check("talkHotkey=false: one bind, the hotkey", "1 true",
+    #rec.hotkeyBinds .. " " .. tostring(rec.hotkeyBinds[1].fn == M.toggle))
+  check("talkHotkey=false: talk hotkey off logged", true, rec:hasLog("i", "talk hotkey off"))
+  check("talkHotkey=false: no object, no alert", "nil 0", tostring(M.talkHotkeyObj) .. " " .. #rec.alerts)
+end
+
+-- The talk bind fails: error log and alert marked (talk); the hotkey still binds.
+do
+  local rec, M = fresh()
+  rec.hotkeyBind = function(_, key)
+    if key == "b" then return nil end
+    return { delete = function() end }
+  end
+  M.start(opts())
+  check("failing talk bind: logged with (talk)", true, rec:hasLog("e", "failed to bind ctrl+alt+b (talk)"))
+  check("failing talk bind: one alert naming (talk) and voicevim-talk", true,
+    #rec.alerts == 1 and rec.alerts[1]:find("(talk)", 1, true) ~= nil
+      and rec.alerts[1]:find("voicevim-talk", 1, true) ~= nil)
+  check("failing talk bind: hotkey still bound", true, rec:hasLog("i", "bound ctrl+alt+v"))
+end
+
+-- talkHotkey the same combo as the hotkey (other spelling): error, not bound.
+do
+  local rec, M = fresh()
+  M.start(opts({ talkHotkey = { { "option", "control" }, "V" } }))
+  check("same combo: one bind (the hotkey)", "1 true",
+    #rec.hotkeyBinds .. " " .. tostring(rec.hotkeyBinds[1].fn == M.toggle))
+  check("same combo: error logged", true, rec:hasLog("e", "is the same as the hotkey; not bound"))
+  check("same combo: one alert", 1, #rec.alerts)
+end
+
+-- hammerspoon://voicevim-talk?state=down|up reaches the controller's
+-- talkDown/talkUp; another state warns and does nothing.
+do
+  local rec, M = fresh()
+  M.start(opts())
+  local calls = {}
+  M._instance.talkDown = function() calls[#calls + 1] = "down" end
+  M._instance.talkUp = function() calls[#calls + 1] = "up" end
+  rec:openURL("voicevim-talk", { state = "down" })
+  rec:openURL("voicevim-talk", { state = "up" })
+  rec:openURL("voicevim-talk", { state = "sideways" })
+  rec:openURL("voicevim-talk", {})
+  check("voicevim-talk: down then up reach talkDown, talkUp", "down,up", table.concat(calls, ","))
+  check("voicevim-talk: other states warn", 2, #rec:findLogs("w", "voicevim-talk: state="))
+  rec.hotkeyBinds[2].fn()
+  rec.hotkeyBinds[2].released()
+  check("talk hotkey: pressed/released reach talkDown, talkUp", "down,up,down,up", table.concat(calls, ","))
+  M._instance.talkDown = function() error("talk boom") end
+  M.talkDown()
+  check("talkDown error: logged, one alert", "true 1",
+    tostring(rec:hasLog("e", "talk boom")) .. " " .. #rec.alerts)
 end
 
 -- Explicit config: mods passed through, no Option-only warning.
@@ -97,14 +165,14 @@ do
   local rec, M = fresh()
   M.start(opts({ hotkey = { { "alt" }, "v" } }))
   check("Option-only warning logged", true, rec:hasLog("w", "Option-only"))
-  check("Option-only still binds", 1, #rec.hotkeyBinds)
+  check("Option-only still binds (and the talk hotkey)", 2, #rec.hotkeyBinds)
 end
 
 -- hs.hotkey.bind returns nil: error log and alert.
 do
   local rec, M = fresh()
   rec.hotkeyBind = function() return nil end
-  M.start(opts({ hotkey = { { "ctrl", "alt" }, "v" } }))
+  M.start(opts({ hotkey = { { "ctrl", "alt" }, "v" }, talkHotkey = false }))
   check("nil bind logs error", true, rec:hasLog("e", "failed to bind ctrl+alt+v"))
   check("nil bind alerts", 1, #rec.alerts)
   check("nil bind keeps no hotkey object", nil, M.hotkeyObj)
@@ -115,7 +183,7 @@ end
 do
   local rec, M = fresh()
   rec.hotkeyBind = function() error("refused by macOS") end
-  local ok = pcall(M.start, opts({ hotkey = { { "ctrl", "alt" }, "v" } }))
+  local ok = pcall(M.start, opts({ hotkey = { { "ctrl", "alt" }, "v" }, talkHotkey = false }))
   check("erroring bind does not raise", true, ok)
   check("erroring bind logs error", true, rec:hasLog("e", "refused by macOS"))
   check("erroring bind alerts", 1, #rec.alerts)
@@ -125,10 +193,11 @@ end
 do
   local rec, M = fresh()
   M.start(opts({ hotkey = { { "ctrl", "alt" }, "v" } }))
-  local first = M.hotkeyObj
+  local first, firstTalk = M.hotkeyObj, M.talkHotkeyObj
   M.start(opts())
-  check("restart deletes old hotkey", true, first.deleted)
-  check("restart binds again", 2, #rec.hotkeyBinds)
+  check("restart deletes old hotkey and talk hotkey", "true true",
+    tostring(first.deleted) .. " " .. tostring(firstTalk.deleted))
+  check("restart binds both again", 4, #rec.hotkeyBinds)
 end
 
 -- Write a submit file the way the note leaves it.
@@ -349,6 +418,22 @@ do
   check("Neovide missing: each press alerts again", "3 " .. NO, #rec.alerts .. " " .. tostring(rec.alerts[3]))
   check("Neovide missing: a press opens nothing", "0 0 0",
     otherWindows(rec) .. " " .. #rec.tasks .. " " .. #rec.keyStrokes)
+  local tb = rec.hotkeyBinds[2]
+  check("Neovide missing: talk hotkey still bound", M.talkDown, tb and tb.fn)
+  tb.fn()
+  tb.released()
+  rec:openURL("voicevim-talk", { state = "down" })
+  rec:openURL("voicevim-talk", { state = "up" })
+  rec:runTimers()
+  check("Neovide missing: talk down alerts like a press, up adds nothing", "5 " .. NO,
+    #rec.alerts .. " " .. tostring(rec.alerts[5]))
+  local flowRuns = 0
+  for _, t in ipairs(rec.tasks) do
+    if has(t.path, "wispr-flow") or has(table.concat(t.args or {}, " "), "wispr-flow") then flowRuns = flowRuns + 1 end
+  end
+  for _, e in ipairs(rec.executes) do if has(e.cmd, "wispr-flow") then flowRuns = flowRuns + 1 end end
+  check("Neovide missing: talk never starts Flow (no task or command with wispr-flow)", "0 0",
+    flowRuns .. " " .. #rec.tasks)
 end
 
 -- Setting up the one instance raises in start(): one alert with the error,

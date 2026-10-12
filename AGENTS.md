@@ -198,6 +198,22 @@ instead of skipping it. `hammerspoon/window-frame.lua` gives the Neovide
 window its saved or default frame (unless `rememberFrame = false`) and
 saves moves.
 
+**Hold to talk.** `talkHotkey` (default Ctrl+Option+B, `false` = off, never
+the same combo as `hotkey`) binds pressed `M.talkDown` and released
+`M.talkUp`, no repeat; `voicevim-talk?state=down|up` does the same (for
+Karabiner). `c.talkDown` first starts Flow itself (`open -g
+wispr-flow://start-hands-free` as an hs.task), then runs `show --talk`
+(nvim's `flow.adopt_start`: recording, no URL) or, with the note focused,
+`talk` (insert at the cursor, never hides). `c.talkUp` polls until the start
+task exited, our Neovide is focused, nvim took the recording and no
+modifier is down, then runs `voice-vim-host release` once (`--force` when
+nvim never took it): every stop goes through nvim's Flow queue, so
+Ctrl-X/Ctrl-Q right after take over its wait. Not ready 5 s after key up:
+no stop (it could beat the start, or Flow's paste would land elsewhere),
+one alert by cause. nvim already idle or waiting (Ctrl-S, Submit, Cancel):
+no stop, no alert. Without an instance, talkDown alerts like a press and
+never starts Flow.
+
 **Delivery.** `voicevim-submit?file=&target=&window=` hides Neovide, then
 `M.submit` reads and deletes the file and runs `lua/voice-vim/delivery.lua`
 (loaded with `dofile`, effects passed in as an `env` built from `hs.*`):

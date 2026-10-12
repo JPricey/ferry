@@ -11,7 +11,7 @@
 --   rec:hasLog("e", "failed to bind")
 --
 -- Recorded (all lists, in call order):
---   rec.hotkeyBinds  {mods, key, fn, obj}
+--   rec.hotkeyBinds  {mods, key, fn, released, rep, obj} (fn = pressed)
 --   rec.urlBinds     name -> handler (also rec.urlBindOrder, a list of names)
 --   rec.alerts       message strings
 --   rec.keyStrokes   {mods, key, delay, app}
@@ -32,7 +32,7 @@
 --                    value as .seq (task: when started), so tests can order them
 --
 -- Controls (set on rec before or between calls):
---   rec.hotkeyBind     nil, or function(mods, key, fn) whose result is returned
+--   rec.hotkeyBind     nil, or function(mods, key, fn, released, rep) whose result is returned
 --                      by hs.hotkey.bind (it may also error)
 --   rec.frontmost      app stub returned by hs.application.frontmostApplication
 --   rec.apps           bundle id -> app stub, for hs.application.get
@@ -355,17 +355,18 @@ function S.install()
   hs.accessibilityState = function(_prompt) return rec.accessibility end
 
   hs.hotkey = {
-    bind = function(mods, key, fn, ...)
+    bind = function(mods, key, fn, released, rep)
       local obj
       if rec.hotkeyBind then
-        obj = rec.hotkeyBind(mods, key, fn, ...)
+        obj = rec.hotkeyBind(mods, key, fn, released, rep)
       else
         obj = { deleted = false }
         function obj:delete() self.deleted = true end
         function obj:enable() return self end
         function obj:disable() return self end
       end
-      rec.hotkeyBinds[#rec.hotkeyBinds + 1] = { mods = copy(mods), key = key, fn = fn, obj = obj }
+      rec.hotkeyBinds[#rec.hotkeyBinds + 1] = { mods = copy(mods), key = key, fn = fn,
+        released = released, rep = rep, obj = obj }
       return obj
     end,
   }
