@@ -125,6 +125,7 @@ selection costs up to 0.4 s per press.
 
 Press your normal Wispr Flow shortcut and speak. Flow pastes into the Neovim
 buffer like any other text field. Stop with the Flow shortcut, not Escape.
+`Cmd-V` in the note pastes the clipboard in insert, normal and command mode.
 
 ## Dictate again from inside the buffer
 
@@ -169,7 +170,8 @@ and `<C-s>` toggles Flow from insert mode at the end of the note.
 
 In the sidebar, `<CR>` inserts the entry into your buffer, `p` replaces the
 note's text with it (keeping the `to:` line) and sends it, `y` copies it to the clipboard, `K` previews the
-full text, and `d` deletes it. Cancelled notes with text show a `~`.
+full text (`Esc` closes it), `d` deletes it, `R` refreshes the list and `q`
+closes the sidebar. Cancelled notes with text show a `~`.
 
 ## Notes are files
 

@@ -17,7 +17,6 @@ Most milestones here end in Joe checks. Expect the orchestrator to stop at each 
 
 The orchestrator adds Joe checks to run, questions, and failed tasks here, newest last. Joe answers inline. The orchestrator moves resolved items into the milestone's Log.
 
-- **Rename to ferry: move the folder** (all tasks done). `~/Code/voice-vim/bin/ferry-host stop`, quit ferry (Cmd+Q), `mv ~/Code/voice-vim ~/Code/ferry && cd ~/Code/ferry && ./install.sh`, then Ctrl+Option+V. Start the next Claude session in `~/Code/ferry`.
 - **Notes and history browser: bring old history over** (H6 merged): `~/Code/ferry/bin/ferry-migrate-history --dry-run`, then without `--dry-run`; note the `wrote N` line and look in `~/notes/scratchpads/`.
 - **Diagnose paste and the hotkey: Joe checks** (all tasks done, agent checks pass). Do these in order:
   1. ~~Done 2026-10-11: Option+V binds and opens a session.~~ Open the Hammerspoon console, then Reload Config. Your `init.lua` still sets Option+V, so look for `bound alt+v` or `failed to bind alt+v` (plus an Option-only warning), and for any `hs.hotkey` error line (Hammerspoon may log the bind failure itself and still return an object). Then press Option+V and note whether a session opens. Write the result here; it answers "did Option+V fail to bind on macOS 26?".
@@ -26,12 +25,6 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   4. Ten submits in a row, spread across Slack, the Claude app and a Claude Code pane in Ghostty/tmux (use two Ghostty windows, so the wrong-window case is tested). Each should either land in the window you started from, or show "copied — paste manually" with the text on the clipboard. For any miss, copy the `ferry` lines from the console here (they log target, window, focus, each frontmost check, settle and the keystroke).
   - When 1–4 pass, set the milestone to `done`. The next milestone, "One instance toggled by a hotkey", has a hard need on the host spike, not on this one.
 - **One installer: Joe checks.** `./install.sh --check` (changes nothing; lists what is missing), then `./install.sh` (installs Neovide, reloads Hammerspoon), then `./install.sh` again: the second run should install nothing and change no files.
-- **Voice keys in the buffer: Joe checks** (all tasks done, agent checks pass). Show the note with Ctrl+Option+V from a Slack message field (Reload Config first):
-  1. Ctrl-S in insert mode: Flow's hands-free indicator appears. Speak, Ctrl-S again: Flow stops, the text lands, you are still in insert mode.
-  2. Ctrl-S, say "these are the last words", Ctrl-X at once: within ~4 s the note hides and Slack gets the whole sentence.
-  3. Ctrl-S, speak, stop with Flow's own shortcut: the text lands. Ctrl-S once: Flow starts on that first press. Ctrl-S to stop.
-  4. Type a few words, Ctrl-Q in insert mode: hides, nothing pasted. Repeat from normal mode.
-  5. Ctrl-S, speak, Ctrl-Q: hides after Flow finishes, nothing lands in Slack.
 - **Window size and position: Joe checks** (all tasks done, agent checks pass). Reload Config first. Steps:
   (Now the Neovide window; the frame is applied when Neovide launches.)
   1. Console: `hs.settings.clear("ferry.windowFrame")`, quit Neovide, then Reload Config.
@@ -40,13 +33,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   4. Quit Neovide, Ctrl+Option+V: same place and size, `frame: restored …`.
   5. With an external monitor: drag it there, quit Neovide, unplug, Ctrl+Option+V: on the laptop screen, `frame: moved onto main screen`.
   6. Submit once into Slack: the paste still lands.
-- **Hold to talk: Joe checks** (P1–P5 merged, agent checks pass). Reload Config first, start from a Slack message field:
-  1. Console shows `bound ctrl+alt+v` and the talk key bound (`… (talk)`).
-  2. Hold Ctrl+Option+B, say "one two three four five", release: the note appears, Flow's indicator shows while held, the text lands in the note in insert mode with "one" not clipped, nothing lands in Slack. Copy the `talk:` lines and `show: host focused after` from the console.
-  3. Cold start: `~/Code/ferry/bin/ferry-host stop`, quit Neovide, hold, speak at once, release before the window appears: text lands in the note, not Slack.
-  4. Note in front, normal mode mid-line: hold, speak, release: inserted at the cursor, the note never hides.
-  5. Hold, speak, release, Ctrl-X at once: Slack gets the whole sentence. Again with Ctrl-Q: nothing reaches Slack.
-  6. Release Ctrl+Option before B, and another time B first: Flow stops both times and the text lands in the note.
+
 ## Diagnose paste and the hotkey
 
 - **Status:** needs-joe
@@ -177,7 +164,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 
 ## Voice keys in the buffer
 
-- **Status:** needs-joe
+- **Status:** done
 - **Needs:** nothing
 - **Deliverable:** dictate, stop and cancel without leaving insert mode, in both today's session buffer and the new one-instance note.
 - **Scope:**
@@ -205,6 +192,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-11: F2 done and verified. Neovide `<D-v>` calls `flow.on_paste`; `tests/test-host.sh` `<D-v>` check now compares only the `<C-R><C-O>+` prefix. Note: a second Cancel during the wait runs at once (escape hatch), so Flow's late paste could then reach the target.
   - 2026-10-11: F3 done and verified. Changes today's session: Ctrl-S toggles Flow (Neovim only), Ctrl-Q cancels, Ctrl-X/ZZ/Ctrl-Q wait for Flow's paste when it was started from the buffer. If `ferry.flow` fails to load, Submit/Cancel warn and still finish.
   - 2026-10-11: agent checks pass (all 14 test scripts); status → needs-joe.
+  - 2026-10-12: Joe: all Joe checks pass (Ctrl-S, Ctrl-X and Ctrl-Q, including Ctrl-X/Ctrl-Q while Flow is recording). Status → done.
 
 ## Window size and position
 
@@ -302,7 +290,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 
 ## Hold to talk
 
-- **Status:** needs-joe
+- **Status:** done
 - **Needs:** One instance toggled by a hotkey
 - **Deliverable:** a second hotkey that opens ferry with Wispr Flow recording while the key is held. Joe expects this to be his most common way in (2026-10-12).
 - **Scope:**
@@ -343,10 +331,11 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-12: P4 verify FAILED (2nd) only on a false alert (a Submit/Cancel/Hide that finishes while the talk key is held → "Flow is still recording" 5 s after key up; Flow did stop, nothing reaches the target app). Joe: merge P4 now, fix later → task P5, after the rename.
   - 2026-10-12: P4 merged (e4aff98, 15d5bb1; note API 8, flow API 4). Changes Hammerspoon on Joe's next reload: Ctrl+Option+B binds hold to talk; `hammerspoon://ferry-talk?state=down|up`. Joe checks can run now; P5 (false alert) follows the rename.
   - 2026-10-12: P5 done and verified (flow API 5: `flow-state` reports `stopped` when nvim's own stop ended the adopted recording and its paste arrived; key up treats it as a quiet end; note API 10). Merged 3f82b91. Test flakes found on main and a stale `stop_gen` → task Q1 (under "Notes and history browser", since it touches note tests).
+  - 2026-10-12: Joe: all Joe checks pass (hold from another app and from the note, cold start, Ctrl-X/Ctrl-Q right after release, either release order). Status → done.
 
 ## Rename to ferry
 
-- **Status:** needs-joe
+- **Status:** done
 - **Needs:** Hold to talk (P4 merged) and T3 merged, so nothing else is in flight while every file changes.
 - **Deliverable:** the project is called ferry everywhere, all at once, with no trace of the old name in the tree (Joe, 2026-10-12). Git history is left alone.
 - **Scope:**
@@ -366,6 +355,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-12: R1 done and verified (replica of Joe's setup: draft saved, old Neovide and server stopped and nothing else, data moved, init.lua rewritten with a timestamped .bak, link replaced, window frame moved, second run a no-op), plus a small fix (print the new draft path; find an old server under any TMPDIR). Merged 2ddfc0a, 86635be; Joe's hotkey is dead until he runs `./install.sh`. R2 waits for that. In R2 also drop the live-upgrade tests that rebuild pre-rename trees (a pre-rename server can no longer exist after the migration).
   - 2026-10-12: Joe ran `./install.sh`: the migration worked (old server and window gone, `~/.hammerspoon/ferry.lua`, init.lua `require("ferry")`, data in `Application Support/ferry`, ferry.app running). Joe check 1 passed ("the new app is working"). R2 starts.
   - 2026-10-12: R2 done and verified (migration block and pre-rename upgrade tests removed; `git grep -niE 'voice.?vim'` and `git ls-files` show no old name). Merged f52b0da. Left: Joe check 2, moving the folder to `~/Code/ferry`.
+  - 2026-10-12: Joe moved the folder to `~/Code/ferry` and ran `./install.sh` (`~/.hammerspoon/ferry.lua` and the nvim server use the new path); the hotkey works. Status → done.
 
 ## ferry in the Dock
 

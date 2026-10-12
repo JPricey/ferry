@@ -116,6 +116,7 @@ All of these work in insert mode, so you never have to leave it.
 | `Ctrl-S` | Start Wispr Flow listening; press again to stop. |
 | `<leader>d` | Start Wispr Flow from normal mode (`:Dictate`). |
 | `<leader>h` | Show or hide the history sidebar (`:History`). |
+| `Cmd-V` | Paste the clipboard (also in normal and command mode). |
 
 ## Ways to dictate
 
@@ -228,6 +229,9 @@ On an entry in the sidebar:
 | `y` | Copy it to the clipboard |
 | `K` | Preview the full text |
 | `d` | Delete it |
+| `R` | Refresh the list |
+| `q` | Close the sidebar (`:q` hides the whole window) |
+| `Esc` | Close the preview |
 
 The note keys also work while the sidebar is focused, and act on your note:
 `Ctrl-X`, `ZZ`, `:wq` and `:x` send it, `Ctrl-Q` and `ZQ` cancel it, `:q`
