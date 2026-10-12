@@ -96,6 +96,12 @@ note then carries on in the conflict file; merge the two by hand. If
 Cancel cannot save the note (say the folder is read-only), the note stays
 open with an alert, and a copy of the text waits in the outbox.
 
+Prompts from before notes were files live in the old history database. To
+bring them over, run `~/Code/ferry/bin/ferry-migrate-history --dry-run` to
+see what it would write, then run it without `--dry-run`. It prints
+`wrote N, skipped M`; rows with no text and notes already in the folder are
+skipped, so running it twice is safe. The database itself is only read.
+
 ## Keys
 
 All of these work in insert mode, so you never have to leave it.

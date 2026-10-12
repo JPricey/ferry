@@ -93,6 +93,8 @@ commands live in `lua/ferry/note.lua`.
 - `lua/ferry/history.lua` — the history sidebar.
 - `bin/ferry-db` — owns the SQLite history database (start, finish,
   list, get, delete).
+- `bin/ferry-migrate-history` — one-off: turns the old history
+  database's rows into note files (reads the database only; safe to rerun).
 - `bin/ferry-migrate-init` — removes the old Option+V hotkey line from
   `~/.hammerspoon/init.lua` (backs up to `init.lua.bak`; safe to rerun).
 - `tests/` — one `test-*.sh` per area (see `AGENTS.md` for which to run);

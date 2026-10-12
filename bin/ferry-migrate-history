@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""ferry-migrate-history: turn old history rows into note files.
+
+  ferry-migrate-history [--from DB] [--to DIR] [--dry-run]
+
+Reads the `sessions` table of the old history database (opened read-only,
+never written) and writes one note file per row into the notes folder:
+
+  outcome open -> draft, submitted -> sent, cancelled -> cancelled
+  created = started_at; updated (and sent, for sent notes) = ended_at
+  target  = app:<bundle id> (clipboard when the row has none)
+  body    = final_text, else seed_text
+
+Rows without text are skipped, and so are rows whose id is already a note
+in the folder (including .trash), so running it again writes nothing new.
+File names follow lua/ferry/store.lua's name(created, id). Afterwards
+`ferry-notes rebuild` reindexes the folder, but only when it is the notes
+folder ferry uses ($FERRY_NOTES_DIR, else ~/notes/scratchpads): the index
+($FERRY_INDEX, else the default) belongs to that folder. For any other
+--to nothing is indexed, and the script prints a rebuild command that
+builds a separate index inside that folder (<dir>/.index.sqlite).
+Prints `wrote N, skipped M` (`would write N, skipped M` with --dry-run,
+which writes nothing).
+
+--from  default $FERRY_DB, else ~/Library/Application Support/ferry/history.sqlite
+--to    default $FERRY_NOTES_DIR, else ~/notes/scratchpads (created)
+"""
+import os
+import re
+import shlex
+import sqlite3
+import subprocess
+import sys
+import urllib.parse
+from datetime import datetime, timezone
+import importlib.machinery
+import importlib.util
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+NOTES_BIN = os.path.join(HERE, "ferry-notes")
+STATES = {"open": "draft", "submitted": "sent", "cancelled": "cancelled"}
+KEYS = ("id", "state", "created", "updated", "sent", "target")
+
+# ---------------------------------------------------------------------------
+# Scalars, written exactly as store.lua's M.scalar writes strings.
+
+AMBIGUOUS = set(("null Null NULL ~ yes Yes YES no No NO on On ON off Off OFF y Y n N "
+                 "True TRUE False FALSE = .inf .Inf .INF .nan .NaN .NAN").split())
+SPACE = " \t\n\v\f\r"  # Lua %s
+
+
+def looks_numeric(s):
+    t = re.sub(r"^[-+]", "", s, count=1).replace("_", "")
+    if (re.fullmatch(r"[0-9]+", t) or re.fullmatch(r"0x[0-9A-Fa-f]+", t)
+            or re.fullmatch(r"0o[0-7]+", t) or re.fullmatch(r"0b[01]+", t)):
+        return True
+    has_digit = re.search(r"[0-9]", t) is not None
+    if re.fullmatch(r"[0-9]*\.?[0-9]*[eE][-+]?[0-9]+", t) and has_digit:
+        return True
+    if re.fullmatch(r"[0-9]*\.[0-9]*", t) and has_digit:
+        return True
+    if re.fullmatch(r"[0-9]+:[0-5]?[0-9][:0-9]*", t):
+        return True
+    return False
+
+
+def is_control(c):
+    return ord(c) < 32 or ord(c) == 127
+
+
+def needs_quote(s):
+    if s == "" or s in AMBIGUOUS or looks_numeric(s):
+        return True
+    if s[0] in SPACE or s[-1] in SPACE or any(is_control(c) for c in s):
+        return True
+    if s[0] in "-?:,[]{}#&*!|>'\"%@`":
+        return True
+    return ": " in s or " #" in s or s.endswith(":")
+
+
+def quote(s):
+    def esc(c):
+        if c == '"':
+            return '\\"'
+        if c == "\\":
+            return "\\\\"
+        if c == "\n":
+            return "\\n"
+        if c == "\t":
+            return "\\t"
+        if c == "\r":
+            return "\\r"
+        if is_control(c):
+            return "\\x%02x" % ord(c)
+        return c
+    return '"' + "".join(esc(c) for c in s) + '"'
+
+
+def scalar(s):
+    return quote(s) if needs_quote(s) else s
+
+
+def split_lines(s):
+    if s == "":
+        return []
+    if not s.endswith("\n"):
+        s += "\n"
+    return s.split("\n")[:-1]
+
+
+def format_note(meta, body):
+    """File text for meta (keys in KEYS order) and body, as store.format."""
+    head = ["---\n"] + ["%s: %s\n" % (k, scalar(meta[k])) for k in KEYS if meta.get(k)]
+    head.append("---\n")
+    return "".join(head) + "".join(l + "\n" for l in split_lines(body))
+
+
+def note_name(created, ident):
+    """store.lua's name(created, id) for an ISO created string."""
+    m = re.match(r"([0-9]{4})-([0-9]{2})-([0-9]{2})[T ]([0-9]{2}):([0-9]{2}):([0-9]{2})", created)
+    short = re.sub(r"[^A-Za-z0-9_-]", "", ident)[:8]
+    if not m or not short:
+        return None
+    return "%s-%s-%s-%s%s%s-%s.md" % (m.groups() + (short,))
+
+
+# ---------------------------------------------------------------------------
+
+def local_iso(utc):
+    """`2026-10-12T16:15:02Z` -> local time with offset, or None."""
+    if not utc:
+        return None
+    try:
+        dt = datetime.strptime(utc.strip(), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return dt.astimezone().isoformat(timespec="seconds")
+
+
+def target_spec(target):
+    t = (target or "").strip()
+    if not t:
+        return "clipboard"
+    if t == "clipboard" or re.match(r"(app|tmux|fleet):", t):
+        return t  # already a spec
+    return "app:" + t
+
+
+def load_notes():
+    """bin/ferry-notes as a module, for its frontmatter parser."""
+    sys.dont_write_bytecode = True
+    loader = importlib.machinery.SourceFileLoader("ferry_notes", NOTES_BIN)
+    spec = importlib.util.spec_from_loader("ferry_notes", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def existing_ids(folder):
+    """Ids of the notes in folder and folder/.trash (id, else file stem)."""
+    notes = load_notes()
+    ids = set()
+    for d in (folder, os.path.join(folder, ".trash")):
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for n in names:
+            p = os.path.join(d, n)
+            if not n.endswith(".md") or n.startswith(".") or not os.path.isfile(p):
+                continue
+            try:
+                _, meta, _, _ = notes.parse(notes.read_text(p))
+            except OSError:
+                continue
+            v = meta.get("id")
+            ids.add(v if isinstance(v, str) and v else n[:-3])
+    return ids
+
+
+def write_new(path, text):
+    """Writes a temp file, then links it into place; never overwrites."""
+    d, base = os.path.split(path)
+    tmp = os.path.join(d, ".%s.%d.tmp" % (base, os.getpid()))
+    try:
+        with open(tmp, "wb") as f:
+            f.write(text.encode("utf-8", "surrogateescape"))
+        os.link(tmp, path)
+        return True
+    except FileExistsError:
+        return False
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def open_ro(path):
+    uri = "file:%s?mode=ro" % urllib.parse.quote(os.path.abspath(path))
+    con = sqlite3.connect(uri, uri=True)
+    con.row_factory = sqlite3.Row
+    con.text_factory = lambda b: b.decode("utf-8", "surrogateescape")
+    return con
+
+
+def main(argv):
+    src = os.environ.get("FERRY_DB") or "~/Library/Application Support/ferry/history.sqlite"
+    default_dest = os.environ.get("FERRY_NOTES_DIR") or "~/notes/scratchpads"
+    dest = default_dest
+    dry = False
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("-h", "--help"):
+            print(__doc__.strip())
+            return 0
+        if a == "--dry-run":
+            dry = True; i += 1
+        elif a in ("--from", "--to") and i + 1 < len(argv):
+            if a == "--from":
+                src = argv[i + 1]
+            else:
+                dest = argv[i + 1]
+            i += 2
+        else:
+            print("bad argument: %s (see --help)" % a, file=sys.stderr)
+            return 2
+    src = os.path.expanduser(src)
+    dest = os.path.abspath(os.path.expanduser(dest))
+
+    if not os.path.isfile(src):
+        print("no history database: " + src, file=sys.stderr)
+        return 1
+    try:
+        con = open_ro(src)
+        rows = con.execute("SELECT id, started_at, ended_at, target, seed_text, final_text,"
+                           " outcome FROM sessions ORDER BY started_at, rowid").fetchall()
+        con.close()
+    except sqlite3.Error as e:
+        print("cannot read %s: %s" % (src, e), file=sys.stderr)
+        return 1
+
+    have = existing_ids(dest)
+    if not dry:
+        os.makedirs(dest, exist_ok=True)
+    wrote = skipped = 0
+    for r in rows:
+        ident = r["id"] or ""
+        final, seed = r["final_text"] or "", r["seed_text"] or ""
+        body = final if final.strip() else seed
+        state = STATES.get(r["outcome"])
+        created = local_iso(r["started_at"])
+        ended = local_iso(r["ended_at"])
+        name = note_name(created or "", ident)
+        why = None
+        if not body.strip():
+            why = "no text"
+        elif ident in have:
+            why = "already in the notes folder"
+        elif state is None:
+            why = "unknown outcome %r" % r["outcome"]
+        elif name is None:
+            why = "bad started_at or id"
+        if why:
+            print("skip %s: %s" % (ident, why), file=sys.stderr)
+            skipped += 1
+            continue
+        meta = {"id": ident, "state": state, "created": created, "updated": ended,
+                "sent": ended if state == "sent" else None,
+                "target": target_spec(r["target"])}
+        path = os.path.join(dest, name)
+        if dry:
+            if os.path.exists(path):
+                print("skip %s: %s exists" % (ident, name), file=sys.stderr)
+                skipped += 1
+                continue
+            print("would write " + path)
+        elif not write_new(path, format_note(meta, body)):
+            print("skip %s: %s exists" % (ident, name), file=sys.stderr)
+            skipped += 1
+            continue
+        have.add(ident)
+        wrote += 1
+
+    if dry:
+        print("would write %d, skipped %d" % (wrote, skipped))
+        return 0
+    # The index in use ($FERRY_INDEX or the default) belongs to the notes
+    # folder in use. Rebuilding it from another folder would hide that
+    # folder's notes from `list` until its next sync, so another --to is
+    # not indexed; the hint names an index of its own inside that folder.
+    same = (os.path.realpath(dest)
+            == os.path.realpath(os.path.abspath(os.path.expanduser(default_dest))))
+    if not same:
+        print("wrote %d, skipped %d" % (wrote, skipped))
+        cmd = "FERRY_NOTES_DIR=%s FERRY_INDEX=%s %s rebuild" % (
+            shlex.quote(dest), shlex.quote(os.path.join(dest, ".index.sqlite")),
+            shlex.quote(NOTES_BIN))
+        print("not indexed: run " + cmd, file=sys.stderr)
+        return 0
+    env = dict(os.environ, FERRY_NOTES_DIR=dest)
+    res = subprocess.run([NOTES_BIN, "rebuild"], env=env, stdout=subprocess.DEVNULL)
+    print("wrote %d, skipped %d" % (wrote, skipped))
+    if res.returncode != 0:
+        print("ferry-notes rebuild failed (exit %d)" % res.returncode, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

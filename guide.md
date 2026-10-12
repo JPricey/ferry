@@ -186,6 +186,12 @@ unsaved typing the note reloads it; otherwise your text goes to
 notice names both files. If Cancel cannot save the file, the note stays
 open and a copy waits in the outbox.
 
+## Bring old history into notes
+
+`bin/ferry-migrate-history` turns each row of the old history database into
+a note file (`--dry-run` first lists what it would write). It only reads
+the database, and a second run writes nothing new.
+
 ## Edit the buffer
 
 It is a normal Neovim buffer with your config, plus markdown filetype, soft

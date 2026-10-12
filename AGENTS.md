@@ -53,6 +53,7 @@ touching `lua/ferry/delivery.lua` or the Hammerspoon module,
 `bash tests/test-target.sh` after touching `lua/ferry/target.lua`,
 `bash tests/test-store.sh` after touching `lua/ferry/store.lua`,
 `bash tests/test-notes-index.sh` after touching `bin/ferry-notes`,
+`bash tests/test-migrate-history.sh` after touching `bin/ferry-migrate-history` or `bin/ferry-notes`,
 `bash tests/test-tmux.sh` after touching `lua/ferry/tmux.lua` (its own `tmux -L ferry-test` server only),
 and `bash tests/test-host.sh`, `bash tests/test-note.sh` and
 `bash tests/test-instance.sh` after touching `bin/ferry-host`,
