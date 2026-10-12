@@ -2,8 +2,8 @@
 
 Dictate with Wispr Flow into a Vim buffer, edit, then send the result where
 it needs to go. Today that is the text field that was focused when you
-started. The next direction is one always-running instance, targets chosen
-after writing, and a browsable notes history.
+started. The next direction is one always-running instance and a browsable
+notes history. Choosing other targets after writing is parked (2026-10-12).
 
 **Ground truths:** `GROUND_TRUTHS.md` holds the requirements, decisions
 and non-obvious implementation details Joe has settled. Read it before

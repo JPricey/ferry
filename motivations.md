@@ -37,7 +37,9 @@ lessons". These goals replace the V0 goals where they conflict:
   stays on the clipboard so a manual paste works. Never lose the text.
 - **Write first, choose where it goes after.** Targets: the app and window
   you came from, the clipboard, a tmux pane (Claude Code sessions), and later
-  fleet sessions and tasks.
+  fleet sessions and tasks. *Parked 2026-10-12:* the window you came from
+  and the clipboard (Ctrl-Y) cover today's use; the rest comes back only if
+  a need shows up.
 - **A notes app for prompts.** Every note persists, including drafts. Browse
   the history, search it, reopen a note, keep editing it, send it again.
 - **One composer for all text.** The same composer serves as `$EDITOR`

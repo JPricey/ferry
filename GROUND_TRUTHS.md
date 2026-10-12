@@ -29,27 +29,24 @@ Sections:
    he pressed the hotkey, not just its app.
 4. **One instance, shown and hidden by a hotkey.** Never a second ferry
    window. It appears instantly because nvim is already running.
-5. **Write first, choose where it goes after.** Targets: the app and window
-   you came from, the clipboard, a tmux pane (Claude Code sessions), and
-   later fleet sessions and tasks.
-6. **A notes app for prompts.** Every note persists, including drafts.
+5. **A notes app for prompts.** Every note persists, including drafts.
    Browse the history, search it, reopen a note, keep editing, send again.
-7. **One composer for all text.** The same composer serves as `$EDITOR`
+6. **One composer for all text.** The same composer serves as `$EDITOR`
    (Claude Code's Ctrl-G, `git commit`) and as fleet's composer. ferry
    keeps working when fleet is absent.
-8. **Low friction for voice.** Keys work from insert mode, so Joe never has
+7. **Low friction for voice.** Keys work from insert mode, so Joe never has
    to leave insert mode to dictate, send or cancel:
    - **Ctrl-X** sends (insert and normal mode; also `ZZ`, `:Submit`).
    - **Ctrl-Q** cancels without pasting (insert and normal mode; also `ZQ`).
    - **Ctrl-S** starts and stops Wispr Flow hands-free.
    - Sending or cancelling while Flow is still recording never loses the
      last words and never lets cancelled dictation land in the target.
-9. **The window is where Joe left it.** Not fullscreen. The first open is
+8. **The window is where Joe left it.** Not fullscreen. The first open is
    centred on the main screen at 50% of its width and 50% of its height.
    After that it opens at the position and size Joe last gave it.
-10. **Ending a note leaves nothing behind.** Sending and cancelling hide
-    the one window; no other window is left open.
-11. **Speech comes from the Wispr Flow desktop app.** No custom
+9. **Ending a note leaves nothing behind.** Sending and cancelling hide
+   the one window; no other window is left open.
+10. **Speech comes from the Wispr Flow desktop app.** No custom
     speech-to-text, so Flow's dictionary and style learning keep working.
 
 ## Decisions
@@ -102,8 +99,6 @@ Sections:
 15. **The project is called ferry** (Joe, 2026-10-12). It was renamed from
     its first name everywhere at once, with no aliases; git history is left
     as it was.
-16. **Sending to a tmux pane only pastes** (Joe, 2026-10-12). ferry never
-    presses Enter in the pane.
 
 ## Implementation details
 

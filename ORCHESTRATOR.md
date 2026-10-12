@@ -7,14 +7,14 @@ Your job: move [milestones.md](milestones.md) forward, one milestone at a time, 
 ## State
 
 - `milestones.md` is the only state. Anything not written there is lost when your context is cleared. Update it after every step of the loop, not at the end.
-- Milestone statuses: `todo`, `breaking-down`, `in-progress`, `verifying`, `needs-joe`, `done`.
+- Milestone statuses: `todo`, `breaking-down`, `in-progress`, `verifying`, `needs-joe`, `done`, `parked` (out of scope until Joe brings it back; never picked).
 - Task lines: `- [ ]` open, `- [x]` done, `- [!]` failed twice and waiting on Joe. Each task line names its verification.
 - Each milestone has a `Log` list. Add a dated line for each breakdown, task done, failed check, and gate.
 
 ## The loop
 
 1. **Load.** Read `AGENTS.md`, `motivations.md`, `milestones.md`, `planning.md` ("Status and lessons" and "Next direction"), and `git log --oneline -20`. Check that the working tree is clean. If it is not, find out why from the log before you continue.
-2. **Pick.** Take the first milestone whose status is not `done` or `needs-joe` and whose `Needs` are met. A need is met when that milestone is `done`, or when it is `needs-joe` with all tasks `[x]` and its agent checks passing. A need marked `(hard)` is met only by `done`. If none qualifies, go to "Wind down".
+2. **Pick.** Take the first milestone whose status is not `done`, `needs-joe` or `parked` and whose `Needs` are met. A need is met when that milestone is `done`, or when it is `needs-joe` with all tasks `[x]` and its agent checks passing. A need marked `(hard)` is met only by `done`. If none qualifies, go to "Wind down".
 3. **Break down** (if the milestone has no tasks). Spawn one `Plan` subagent with the milestone text, the docs it links, and the task rules below. Write its tasks into the milestone, set the status to `in-progress`, and log it. If the breakdown changes scope or order, also add a line to "Changes to this plan".
 4. **Implement.** For each open task in order, spawn one `general-purpose` subagent with the implementer prompt below.
    - Run tasks one at a time by default.

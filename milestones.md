@@ -4,7 +4,7 @@ This is the work plan and the orchestrator's state. See `ORCHESTRATOR.md` for ho
 
 Each milestone must leave ferry usable. Change the order when a milestone teaches something new, and record why in "Changes to this plan" at the bottom.
 
-- **Status:** `todo` · `breaking-down` · `in-progress` · `verifying` · `needs-joe` · `done`.
+- **Status:** `todo` · `breaking-down` · `in-progress` · `verifying` · `needs-joe` · `done` · `parked` (out of scope for now; the orchestrator skips it until Joe brings it back).
 - **Agent checks:** an agent can run them.
 - **Joe checks:** need Joe at the keyboard. Hotkeys, focus, paste, Wispr Flow and macOS permissions can only be proven this way. Joe sets `done` after they pass.
 - **Needs:** a need marked `(hard)` waits for that milestone to be `done`, including Joe checks. Other needs only wait for its tasks and agent checks.
@@ -424,7 +424,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 
 ## Targets chosen after writing
 
-- **Status:** in-progress
+- **Status:** parked (Joe, 2026-10-12). T1–T4 stay merged: `to:` line, `to: clipboard`, Ctrl-Y, `target.lua`, `tmux.lua`. T5–T7 are not planned. Bring it back if a need shows up.
 - **Needs:** One instance toggled by a hotkey
 - **Deliverable:** write first, then choose where the text goes.
 - **Scope:**
@@ -458,11 +458,12 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-12: T3 verify FAILED (1st): a clipboard copy that fails silently still finished and hid the note, leaving the text only in the history row with no alert (GT req 2). Sent to a new implementer in the same worktree.
   - 2026-10-12: T3 done and verified on the 2nd attempt: `to: clipboard`, `:Copy`/`<C-y>` (also in the sidebar); every copy goes through `to_clipboard` (read-back check), and a failed copy keeps the note shown with an error. Note API 7. Minor: a failed copy from the sidebar's `p` shows a traceback; long notices can need Enter in narrow windows.
   - 2026-10-12: Joe: a tmux send never presses Enter. T5 unblocked.
+  - 2026-10-12: parked by Joe after seeing how a target would be picked: choosing a target inside the note is more to learn than going to the window and pasting, and Ctrl-Y (copy and hide) already covers that. T5–T7 not started; the merged T1–T4 stay. Not removed, so it can come back.
 
 ## `$EDITOR` mode and open with a target
 
 - **Status:** todo
-- **Needs:** One instance toggled by a hotkey. Open-with-target also needs Targets chosen after writing.
+- **Needs:** One instance toggled by a hotkey. Open-with-target also needs Targets chosen after writing. That half is parked with it (2026-10-12); `ferry-edit` is not.
 - **Deliverable:** other tools can open ferry.
 - **Scope:**
   - `ferry-edit <file>` opens the file in the running instance and waits until that buffer closes.
@@ -475,7 +476,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 
 ## Fleet targets
 
-- **Status:** todo
+- **Status:** parked (Joe, 2026-10-12), with "Targets chosen after writing".
 - **Needs:** Targets chosen after writing. Also needs fleet's "Composer targets" milestone (`~/Code/fleet/plans/milestones.md`) to be done.
 - **Deliverable:** ferry can send to fleet sessions and tasks.
 - **Scope:**
@@ -525,3 +526,4 @@ Record each change here, dated, with the reason.
 - 2026-10-12: added "ferry in the Dock" (Joe), right after the rename.
 - 2026-10-12: Joe approved the GROUND_TRUTHS updates after B3 and decisions 13–15 (notes folder, two hotkeys, the name ferry); applied.
 - 2026-10-12: Joe approved GROUND_TRUTHS decision 16 (a tmux send only pastes, never Enter); added.
+- 2026-10-12: parked "Targets chosen after writing" (T5–T7) and "Fleet targets" (Joe: not needed now, may come back). Copy and paste by hand with Ctrl-Y covers sending elsewhere. The open-with-a-target half of "`$EDITOR` mode and open with a target" is parked with them; `ferry-edit` is not. Joe approved removing GROUND_TRUTHS requirement 5 (write first, choose where it goes after; later requirements renumbered) and decision 16 (a tmux send only pastes); applied.
