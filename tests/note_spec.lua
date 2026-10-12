@@ -564,6 +564,16 @@ vim.wait(3000, function() return nfile(cf):find("more", 1, true) ~= nil end, 20)
 check("later saves: the conflict file, original untouched, still one notice",
   T .. "ferry typing more " .. T .. "outside edit 1 1",
   nfile(cf) .. " " .. nfile(po) .. " " .. #notices .. " " .. #conflicts())
+-- The conflict file deleted outside: the next save recreates it as the
+-- fork (its own id and conflict_of), never under the original's id.
+os.remove(cf)
+body({ "ferry typing more", "after delete" })
+changed(bo)
+vim.wait(3000, function() return vim.fn.filereadable(cf) == 1 end, 20)
+local rm = store.read(cf) or {}
+check("conflict file deleted outside: the next save recreates it with the fork's id and conflict_of",
+  tostring(rawget(cm, "id")) .. " " .. ido .. " " .. T .. "ferry typing more|after delete",
+  tostring(rawget(rm, "id")) .. " " .. tostring(rawget(rm, "conflict_of")) .. " " .. nfile(cf))
 -- An outside edit found by checktime while ferry has unsaved typing forks
 -- at once, without waiting for the autosave.
 store.write(cf, store.read(cf), { "second outside" })
@@ -574,6 +584,8 @@ vim.wait(1000, function() return #conflicts() > 1 end, 20)
 local cf2 = vim.tbl_filter(function(x) return x ~= cf end, conflicts())[1] or ""
 check("checktime with unsaved typing: forks at once, one notice, both texts kept",
   "1 " .. T .. "second outside " .. T .. "typing again", #notices .. " " .. nfile(cf) .. " " .. nfile(cf2))
+check("forking a conflict file names it after the original stem (no chained .conflict-)", true,
+  vim.fs.basename(cf2):match("^" .. vim.pesc(stem) .. "%.conflict%-[%d%-]+%.md$") ~= nil)
 -- A blank Cancel never deletes a file changed outside.
 store.write(cf2, store.read(cf2), { "outside again" })
 set({ "to: app:com.example.app#4242", "" })
@@ -592,6 +604,60 @@ local cs = vim.tbl_filter(function(x) return x:find(sstem, 1, true) ~= nil end, 
 check("Submit over an outside edit: original kept, sent text in the conflict file, delivered",
   T .. "edited elsewhere sent|app:com.example.app#4242|true|sent text submit",
   nfile(ps) .. " " .. nfile(cs[1] or "") .. " " .. kinds())
+
+-- A fork whose first write fails: the next save writes the conflict file
+-- with the fork's id and conflict_of, the original is left alone.
+reset(); notices = {}
+local pf, idf, bf = show()
+body({ "before" })
+vim.cmd("write")
+store.write(pf, store.read(pf), { "outside first" })
+vim.fn.setfperm(notes, "r-xr-xr-x")
+body({ "fork text" })
+pcall(vim.cmd, "write")
+vim.fn.setfperm(notes, "rwxr-xr-x")
+local fstem = vim.fs.basename(pf):gsub("%.md$", "")
+local function fconf()
+  return vim.tbl_filter(function(x) return x:find(fstem, 1, true) ~= nil end, conflicts())
+end
+local fid = note.current() and note.current().id
+check("fork's first write fails: no conflict file yet, original kept, buffer on the conflict name", "0 "
+  .. T .. "outside first true", #fconf() .. " " .. nfile(pf) .. " "
+  .. tostring(vim.api.nvim_buf_get_name(bf):find(fstem .. ".conflict-", 1, true) ~= nil))
+body({ "fork text", "retried" })
+vim.cmd("write")
+local fm = store.read(fconf()[1] or "") or {}
+check("fork's first write failed: the next save writes the fork's id and conflict_of, original untouched",
+  "true " .. idf .. " " .. T .. "outside first",
+  tostring(fid ~= idf and rawget(fm, "id") == fid) .. " " .. tostring(rawget(fm, "conflict_of")) .. " " .. nfile(pf))
+vim.cmd("Cancel")
+
+-- ferry remembers the bytes it wrote, not the file re-read after: an
+-- outside write right after ferry's own write is never taken as ferry's.
+reset(); notices = {}
+local pg, _, bg = show()
+local real_write, once = store.write, true
+store.write = function(path, meta, lines)
+  local ok, err = real_write(path, meta, lines)
+  if ok and once and same(path, pg) then
+    once = false
+    real_write(path, store.read(path), { "slipped in" })
+  end
+  return ok, err
+end
+body({ "ferry wrote this" })
+vim.cmd("write")
+store.write = real_write
+body({ "ferry again" })
+vim.cmd("write")
+local gstem = vim.fs.basename(pg):gsub("%.md$", "")
+local gs = vim.tbl_filter(function(x) return x:find(gstem, 1, true) ~= nil end, conflicts())
+check("an outside write right after ferry's write: kept, ferry's next save forks",
+  T .. "slipped in 1 " .. T .. "ferry again",
+  nfile(pg) .. " " .. #gs .. " " .. nfile(gs[1] or ""))
+check("the outside write after ferry's: the buffer moved to the conflict file", true,
+  same(vim.api.nvim_buf_get_name(bg), gs[1] or ""))
+vim.cmd("Cancel")
 
 -- Cancel when the note file cannot be written: nothing is lost.
 reset(); notices = {}

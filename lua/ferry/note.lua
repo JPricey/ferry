@@ -232,8 +232,10 @@ local function digest(path)
   return vim.fn.sha256(text or "")
 end
 
--- Remember path as ferry wrote or read it into buf.
-local function remember(buf, path) vim.b[buf].ferry_disk = digest(path) end
+-- Remember the file's bytes as ferry wrote or read them into buf (their
+-- sha256, from digest() or of the text ferry itself wrote: re-reading the
+-- file after a write would take an outside write in between as ferry's).
+local function remember(buf, sum) vim.b[buf].ferry_disk = sum end
 
 -- True when path holds what ferry last wrote or read into buf. A buffer
 -- with no record (held over from note api 10 or older) counts as ferry's.
@@ -256,8 +258,11 @@ local function rename(buf, path)
 end
 
 -- <dir>/<name>.conflict-<date>-<time>.md next to path, not taken yet.
+-- path a conflict file itself: <name> is its original's stem, so names do
+-- not chain (x.conflict-A.conflict-B.md).
 local function conflict_path(path)
-  local base = path:gsub("%.md$", "") .. ".conflict-" .. os.date("%Y-%m-%d-%H%M%S")
+  local stem = path:gsub("%.md$", ""):gsub("%.conflict%-%d%d%d%d%-%d%d%-%d%d%-%d%d%d%d%d%d[%-%d]*$", "")
+  local base = stem .. ".conflict-" .. os.date("%Y-%m-%d-%H%M%S")
   local p, n = base .. ".md", 1
   while vim.uv.fs_stat(p) do
     n = n + 1
@@ -269,15 +274,24 @@ end
 -- path (buf's note file) changed outside ferry: leave it as it is and move
 -- buf to a conflict file beside it, which takes ferry's text from now on.
 -- Returns the conflict file's base frontmatter (the original's, with a
--- fresh id, `conflict_of` and state draft) and its path.
+-- fresh id, `conflict_of` and state draft) and its path. The buffer keeps
+-- the fork's id and conflict_of (b:ferry.file_id, .conflict_of), so a
+-- conflict file that is never written or is deleted later is recreated
+-- as the fork, never under the original's id. b:ferry.id stays: it keys
+-- the note's history row.
 local function fork(buf, path)
   local meta = store.read(path) or {}
-  local orig = rawget(meta, "id") or (vim.b[buf].ferry or {}).id
+  local b = vim.b[buf].ferry or {}
+  local orig = rawget(meta, "id") or b.file_id or b.id
   local id = M.uuid()
   local new = conflict_path(path)
   store.set(meta, "id", id)
   store.set(meta, "state", "draft")
   if orig then store.set(meta, "conflict_of", orig) end
+  if type(vim.b[buf].ferry) == "table" then
+    b.file_id, b.conflict_of = id, orig
+    vim.b[buf].ferry = b
+  end
   rename(buf, new)
   vim.b[buf].ferry_disk = nil
   local note = M.state.note
@@ -307,19 +321,21 @@ local function write_note(buf, opts)
   end
   local b = vim.b[buf].ferry or {}
   local now = os.time()
-  store.set(meta, "id", rawget(meta, "id") or b.id)
+  store.set(meta, "id", rawget(meta, "id") or b.file_id or b.id)
+  if b.conflict_of and not rawget(meta, "conflict_of") then store.set(meta, "conflict_of", b.conflict_of) end
   store.set(meta, "state", opts.state or rawget(meta, "state") or "draft")
   store.set(meta, "created", rawget(meta, "created") or iso(tonumber(b.created) or now))
   store.set(meta, "updated", iso(now))
   if opts.sent then store.set(meta, "sent", iso(now)) end
   store.set(meta, "target", opts.target or spec)
   vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
+  local text = store.format(meta, body)
   local ok, err = store.write(path, meta, body)
   if not ok then
     alert("ferry: could not save the note to " .. path .. ": " .. tostring(err))
     return false
   end
-  remember(buf, path)
+  remember(buf, vim.fn.sha256(text))
   vim.bo[buf].modified = false
   index(path)
   return true
@@ -376,10 +392,13 @@ end
 local function load(buf)
   local path = vim.api.nvim_buf_get_name(buf)
   if not readable(path) then return end
+  -- Hashed before the read: a write in between then reads as an outside
+  -- edit (kept), never as ferry's.
+  local sum = digest(path)
   local lines = M.read_note(path, captured_spec(vim.b[buf].ferry))
   if not lines then return end
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  remember(buf, path)
+  remember(buf, sum)
   vim.bo[buf].modified = false
 end
 
