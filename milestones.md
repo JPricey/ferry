@@ -341,6 +341,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-12: broken down into P1–P4 (design above). Question to Joe: default talk key (planner suggests Ctrl+Option+B; Ctrl+Option+Space switches input source). Agent defaults: a quick tap acts as a short hold; pressing the talk key while Ctrl-X/Ctrl-Q waits for Flow is not handled (the pending send or cancel wins). P1 starts now (worktree).
   - 2026-10-12: P1 done and verified (`flow.adopt_start`, `flow.release`, `flow.busy`; `finish_then` takes an optional kind; `release` during an existing wait keeps that wait's fn, so it never drops a Submit or Cancel). Review risk added to P3: a quick second hold within Flow's paste delay can lose its stop.
   - 2026-10-12: P2 done and verified (`show --talk`, `talk`, `release`; note API 4; `flow.lua` API 2 and note.lua reloads an older flow module keeping its state, since Joe's live server may hold a pre-P1 flow; live upgrade from API-3 note + pre-P1 flow checked on a real server). No visible change for Joe until P3/P4.
+  - 2026-10-12: P3 verify FAILED (1st): at `talkStopTimeout` it released even while the start `open` was still running, so the stop could reach Flow before the start and leave Flow recording (dictation could later land in the target app); also a `release` that printed `idle` ended a hold with neither a stop nor an alert, and a Ctrl-X during the poll gave a false "still recording" alert. Sent to a new implementer in the same worktree.
 
 ## Notes and history browser
 
