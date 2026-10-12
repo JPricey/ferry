@@ -395,6 +395,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 - **Log:**
   - 2026-10-12: created from Joe's feedback after the research; Joe: do it after the rename. D1 and D2 run in parallel (different files).
   - 2026-10-12: D1 done and verified (`~/Applications/ferry.app`: plist `local.ferry`, executable symlink to Neovide, `assets/ferry.png` from `assets/make-icon.py`; `--check` read-only; idempotent). Joe's next `./install.sh` builds it. Review notes → D3.
+  - 2026-10-12: D2 verify FAILED (1st): with ferry.app installed, our old plain Neovide (attached with `--server <our sock>`) stayed open next to the new ferry window (GT req 4). Fix: quit only that process once ferry.app's window is adopted. Sent to a new implementer in the same worktree.
 
 ## Notes and history browser
 
