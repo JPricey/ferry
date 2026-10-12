@@ -247,7 +247,7 @@ else
   if [ -s "$init" ]; then echo >> "$init"; fi
   cat >> "$init" <<LUA
 -- ferry: dictate into Neovim with Wispr Flow, then paste back.
--- Settings go inside start({ ... }); see guide.md, "Configure".
+-- Settings go inside start({ ... }); see USER_GUIDE.md, "Settings".
 $ipc_line
 require("ferry").start({
 })

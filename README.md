@@ -2,7 +2,7 @@
 
 Dictate with [Wispr Flow](https://wisprflow.ai) into a Neovim note, fix it
 up with real Vim, then paste the result into whatever you were typing in.
-New here? Read `USER_GUIDE.md`. See `motivations.md` for the why.
+Keys, commands and gotchas: `USER_GUIDE.md`. The why: `motivations.md`.
 
 ## How it works
 
@@ -74,7 +74,7 @@ require("ferry").start({
 })
 ```
 
-`guide.md` → "Configure" lists every setting. Note settings, keys and
+`USER_GUIDE.md` → "Settings" lists every setting. Note settings, keys and
 commands live in `lua/ferry/note.lua`.
 
 ## Layout
