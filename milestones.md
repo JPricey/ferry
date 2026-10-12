@@ -17,39 +17,13 @@ Most milestones here end in Joe checks. Expect the orchestrator to stop at each 
 
 The orchestrator adds Joe checks to run, questions, and failed tasks here, newest last. Joe answers inline. The orchestrator moves resolved items into the milestone's Log.
 
-- **Notes and history browser: Joe checks** (all tasks done; Reload Config first, so Ctrl+Option+N binds):
-  1. `~/Code/ferry/bin/ferry-migrate-history --dry-run`, then without `--dry-run`; note the `wrote N` line and `ls ~/notes/scratchpads/`.
-  2. Console shows the browse hotkey bound. Press Ctrl+Option+N from Slack: the browser shows with the newest note under the cursor. Press again: it hides and Slack has focus.
-  3. Dictate a note: Flow's text lands at the cursor; no `---`, `id:` or `to:` line ever appears in the note or in what gets pasted.
-  4. Leave a draft and hide. Open the browser, find it marked `●`, `Enter` to open it, finish it, send it.
-  5. A day of real use: find an old prompt with `/`, edit it, send it again; it lands in the window you came from.
-  6. Delete `~/Library/Application Support/ferry/index.sqlite`, open the browser: every note is back.
-- **`$EDITOR` mode: Joe checks** (E1–E4 done; Reload Config first): see the milestone's Joe checks 1–7 (`export EDITOR=~/Code/ferry/bin/ferry-edit VISUAL=$EDITOR`, Ctrl-G in Claude Code, Ctrl-X / Ctrl-Q, `git commit`, quit Hammerspoon → nvim fallback).
 - **Dictation polish: Joe check** (V2 done): run `~/Code/ferry/bin/ferry-corrections`; recurring fixes you recognise are listed. Add one in Flow's Dictionary, re-run: it is gone.
 - **GROUND_TRUTHS wording to approve** (2026-10-12): line 4 names `guide.md`, which is now folded into `USER_GUIDE.md` and deleted (Joe's call): change "`guide.md`" to "`USER_GUIDE.md`". Decision 14 says "Two hotkeys": add Ctrl+Option+N (browse). And after H5 removed the old history DB: decision 6 says "Tests use a temp `FERRY_DB`, their own nvim servers and `tmux -L ferry-test`." Proposed: "Tests use a temp `FERRY_NOTES_DIR` and `FERRY_INDEX` (a temp `FERRY_DB` only where the old history database is still read: `ferry-migrate-history` and old-tree upgrade tests), their own nvim servers and `tmux -L ferry-test`."
-- ~~Dictation polish: V1 failed three verifies~~ Joe 2026-10-12: ship without sentence-case (V1 minus `sentence_case`/`:FixCase`/`<leader>fc`), then wire it in (V4).
 - **Dictation polish: four questions** (V1–V2 proceed now): (1) Dictate-and-go: want it? Recommend yes, as a third hold key (e.g. Ctrl+Option+G) that sends ~1.5 s after Flow's text lands unless you press a key; plain hold-to-talk unchanged; needs GROUND_TRUTHS decision 14 ("Two hotkeys") updated. (2) ~~Fix-up keys and list location~~ Joe: yes. Flow's Dictionary stays read-only (GT 5): Joe adds words himself; ferry makes that easy (`:Corrections` view, copy a word, open Flow). (3) Auto-apply "always X → Y" fixes to Flow's text? Recommend opt-in, decided after V2 shows real patterns. (4) Accessibility direct insertion? Recommend not now: Slack/Claude (Electron) and Ghostty would mostly fall back to Cmd+V, which already works.
-- **`$EDITOR` mode: three questions** (E1–E4 proceed on the recommended answers): (1) ~~Save finished Ctrl-G edits in history (E5)?~~ Joe 2026-10-12: yes ("why not"). (2) Ctrl-Q in an edit = file unchanged and exit 1 (git's only reliable abort)? Recommend yes. (3) Fallback editor when ferry is down or over SSH = plain `nvim` in the same terminal? Recommend yes.
-- **Notes and history browser: bring old history over** (H6 merged): `~/Code/ferry/bin/ferry-migrate-history --dry-run`, then without `--dry-run`; note the `wrote N` line and look in `~/notes/scratchpads/`.
-- **Diagnose paste and the hotkey: Joe checks** (all tasks done, agent checks pass). Do these in order:
-  1. ~~Done 2026-10-11: Option+V binds and opens a session.~~ Open the Hammerspoon console, then Reload Config. Your `init.lua` still sets Option+V, so look for `bound alt+v` or `failed to bind alt+v` (plus an Option-only warning), and for any `hs.hotkey` error line (Hammerspoon may log the bind failure itself and still return an object). Then press Option+V and note whether a session opens. Write the result here; it answers "did Option+V fail to bind on macOS 26?".
-  2. ~~Done 2026-10-11: migrated; Ctrl+Option+V works.~~ In a terminal: `~/Code/ferry/bin/ferry-migrate-init`. It prints the removed line and the backup path (`~/.hammerspoon/init.lua.bak`). Reload Config again and confirm the console shows `bound ctrl+alt+v` with no error. Press Ctrl+Option+V once and confirm a session opens.
-  3. Optional: `cp ~/Code/ferry/karabiner/ferry-hyper.json ~/.config/karabiner/assets/complex_modifications/`, then Karabiner-Elements → Complex Modifications → Add rule → enable both ferry rules. Hold right Command and press V and confirm a session opens. Tap right Command alone and confirm it still acts as Command.
-  4. Ten submits in a row, spread across Slack, the Claude app and a Claude Code pane in Ghostty/tmux (use two Ghostty windows, so the wrong-window case is tested). Each should either land in the window you started from, or show "copied — paste manually" with the text on the clipboard. For any miss, copy the `ferry` lines from the console here (they log target, window, focus, each frontmost check, settle and the keystroke).
-  - When 1–4 pass, set the milestone to `done`. The next milestone, "One instance toggled by a hotkey", has a hard need on the host spike, not on this one.
-- **One installer: Joe checks.** `./install.sh --check` (changes nothing; lists what is missing), then `./install.sh` (installs Neovide, reloads Hammerspoon), then `./install.sh` again: the second run should install nothing and change no files.
-- **Window size and position: Joe checks** (all tasks done, agent checks pass). Reload Config first. Steps:
-  (Now the Neovide window; the frame is applied when Neovide launches.)
-  1. Console: `hs.settings.clear("ferry.windowFrame")`, quit Neovide, then Reload Config.
-  2. Ctrl+Option+V: Neovide opens centred at half the screen's width and height; the console shows `frame: default …`. Note any visible jump.
-  3. Move and resize it: one `frame: saved …` per drag. Hide it with the hotkey.
-  4. Quit Neovide, Ctrl+Option+V: same place and size, `frame: restored …`.
-  5. With an external monitor: drag it there, quit Neovide, unplug, Ctrl+Option+V: on the laptop screen, `frame: moved onto main screen`.
-  6. Submit once into Slack: the paste still lands.
 
 ## Diagnose paste and the hotkey
 
-- **Status:** needs-joe
+- **Status:** done
 - **Needs:** nothing
 - **Deliverable:** V0 that pastes into the right window, or at least leaves the text on the clipboard, from a hotkey that always fires.
 - **Scope:**
@@ -86,6 +60,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-11: agent checks pass (all five test scripts, karabiner JSON valid, luajit syntax check); status → needs-joe.
   - 2026-10-11: Joe check 1: on macOS 26.6, after Reload Config with the explicit Option+V line, Option+V binds and opens a session (Ghostty window, nvim with sidebar, insert mode). So Option+V is not refused outright; the earlier flakiness was intermittent, not a bind failure. Moving to Ctrl+Option+V still stands (fewer conflicts; Option+V types √ when missed).
   - 2026-10-11: Joe check 2: ran `bin/ferry-migrate-init` (removed line 5, backup `~/.hammerspoon/init.lua.bak`), reloaded; Ctrl+Option+V opens a session.
+  - 2026-10-12: Joe: all manual checks done and passing. Status → done.
 
 ## Single-instance host spike
 
@@ -209,7 +184,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 
 ## Window size and position
 
-- **Status:** needs-joe
+- **Status:** done
 - **Needs:** nothing
 - **Deliverable:** the ferry window opens where Joe last left it, at the size he left it, instead of fullscreen.
 - **Scope:**
@@ -237,6 +212,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-11: W2 done and verified (`hammerspoon/window-frame.lua`, not loaded yet). Note: if Ghostty snaps our default size, the snapped frame is saved once (harmless).
   - 2026-10-11: W3 done and verified. Changes Hammerspoon behavior: the Ghostty session window gets the saved or default frame; every frame error only logs. Config `rememberFrame = false` leaves the window to Ghostty entirely; `windowSize` sets the default fraction.
   - 2026-10-11: agent checks pass (test-frame, test-window-frame, test-hammerspoon incl. the five W3 cases, luajit syntax); status → needs-joe.
+  - 2026-10-12: Joe: all manual checks done and passing. Status → done.
 
 ## Close the session window cleanly
 
@@ -262,7 +238,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 
 ## One installer
 
-- **Status:** needs-joe
+- **Status:** done
 - **Needs:** nothing
 - **Deliverable:** `./install.sh` sets up everything ferry needs on a Mac, safely re-runnable, and is the home for any future setup step.
 - **Scope:**
@@ -283,6 +259,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-11: created at Joe's request ("an installer which installs Neovide / home for any other setup"). Extends the existing `install.sh` instead of adding a second script. Single task written by the orchestrator.
   - 2026-10-11: I1 done and verified (dry run against a copy of Joe's real `init.lua`: only `brew install --cask neovide` and a reload, no file changes). Orchestrator follow-ups: cask renamed to `neovide-app` (Homebrew's current name), `hs` calls read `/dev/null`, `/opt/homebrew/bin/brew` found when not on PATH. Agent checks pass (all 16 test scripts); status → needs-joe.
   - 2026-10-12: I2 done and verified (Joe asked for one update command): `./install.sh` reloads Hammerspoon with `hs -c`, waits for the new config to answer, and prints `ok bound …` per hotkey/URL from `ferry.status()` (or `missing:` with the fix); adds `require("hs.ipc")` to ferry's init.lua block when missing; never restarts the nvim server (modules live-reload by api). Minor: the printed wait is "10 s" but the worst case is longer; `mv -f` would replace a symlinked init.lua with a file (Joe's is a file). Status → needs-joe.
+  - 2026-10-12: Joe: all manual checks done and passing. Status → done.
 
 ## Neovide looks like the terminal
 
@@ -375,7 +352,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 
 ## ferry in the Dock
 
-- **Status:** needs-joe
+- **Status:** done
 - **Needs:** Rename to ferry (R1)
 - **Deliverable:** our window shows up as its own app, "ferry", with its own icon, in the Dock, Cmd-Tab and the menu bar; a Neovide Joe opens himself stays "Neovide" (Joe, 2026-10-12, from `joe-other-feedback.md`).
 - **Design** (from research 2026-10-12): a tiny wrapper bundle `~/Applications/ferry.app` (bundle id `local.ferry`, name `ferry`, executable `Contents/MacOS/ferry` = a symlink to Neovide's binary, icon `Contents/Resources/ferry.png`). Launched by direct exec (never `open`), macOS attributes the process to the wrapper; Neovide's `--icon` sets the Dock icon. A symlink stays current across `brew upgrade neovide-app`. Fallback if it misbehaves: a relabelled, ad-hoc-signed copy of Neovide.app rebuilt by install.sh.
@@ -393,10 +370,11 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-12: D2 done and verified on the 2nd attempt: ferry.app launched by direct exec with `--icon`, found by `local.ferry`; our own old plain Neovide (args ` --server <our sock> `) is quit once the ferry window is up, nothing else; window title "ferry" while a Neovide UI is attached (gui api 2); alerts name "the ferry window". Changes Hammerspoon on reload. All tasks done; status → needs-joe. Joe check addition: when the old plain window is quit, no "Closing remote connection" prompt should appear in the ferry window.
   - 2026-10-12: Joe: "the new app is working" (ferry.app built by install.sh and launched by Hammerspoon).
   - 2026-10-12: D4 done and verified (b854815: `make-icon.py` draws at 1024, `ferry.png` 1024 px, `.icns` 10 sizes with nothing upscaled, two runs byte-identical, test-install all ok). Joe's next `./install.sh` copies the new icon into `~/Applications/ferry.app`.
+  - 2026-10-12: Joe: all manual checks done and passing. Status → done.
 
 ## Notes and history browser
 
-- **Status:** needs-joe
+- **Status:** done
 - **Needs:** One instance toggled by a hotkey
 - **Deliverable:** ferry works as a notes app for prompts.
 - **Scope:**
@@ -448,6 +426,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-12: H7 + H8 done and verified (a85e731…e2d0ac0; note API 17): `ferry-host browse` shows the note with the sidebar focused on the newest note (normal mode, synced, search cleared; keeps the note focused while Flow records; yields to a pending Ctrl-G edit); Ctrl+Option+N / `hammerspoon://ferry-browse` (`browseHotkey`, `false` off, refused if it equals another hotkey). All tasks done; status → needs-joe.
   - 2026-10-12: Joe: the open note vanishing from the browser is surprising; keep it listed with a marker. Added H9; status → in-progress.
   - 2026-10-12: H9 done and verified (note API 18, history api 6): the open note stays listed, marked `▶`; on its row `<CR>` jumps back, `s` sends, `y`/`K`/`P` work, `d` and `i` refuse with a notice; the marker moves on `<CR>` to another note; a save updates the row in place; browse lands on the newest other note; an older background list can't redraw deleted notes. Status → needs-joe.
+  - 2026-10-12: Joe: all manual checks done and passing. Status → done.
 
 ## Targets chosen after writing
 
@@ -492,7 +471,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 
 ## `$EDITOR` mode and open with a target
 
-- **Status:** needs-joe
+- **Status:** done
 - **Needs:** One instance toggled by a hotkey. Open-with-target also needs Targets chosen after writing. That half is parked with it (2026-10-12); `ferry-edit` is not.
 - **Deliverable:** other tools can open ferry.
 - **Scope:**
@@ -522,6 +501,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-12: E4 done and verified (4e6b822; note API 16, edit api 3, history api 5): while a Ctrl-G edit is pending, the hotkey re-shows the edit, hold to talk dictates into it, and hiding leaves it pending; the note and its draft are untouched. E1–E4 done; Joe checks 1–7 ready after Reload Config. E5 waits on Joe's answer about history.
   - 2026-10-12: Joe: save finished Ctrl-G edits in history too. E5 running.
   - 2026-10-12: E5 done and verified on the 2nd attempt (edit api 4): a Ctrl-X finish with text writes a `sent` note (`target: editor:<file name>`) in the server's notes folder and indexes it; aborts and blank text record nothing; recording never delays or fails the edit; `editor:` is a display-only target kind. All tasks done; status → needs-joe.
+  - 2026-10-12: Joe: all manual checks done and passing. Status → done.
 
 ## Fleet targets
 
