@@ -171,6 +171,23 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 - **Log:**
   - 2026-10-11: created at Joe's request (Ctrl-Q cancel, Ctrl-S Flow toggle). Conflicts checked: Ctrl-Q duplicates built-in Ctrl-V and Joe's config uses it only in ToggleTerm terminal mode and Telescope; Ctrl-S is nvim 0.11's insert-mode LSP signature help, irrelevant in a markdown note; Ghostty binds neither. Mappings are buffer-local.
 
+## Window size and position
+
+- **Status:** breaking-down
+- **Needs:** nothing
+- **Deliverable:** the voice-vim window opens where Joe last left it, at the size he left it, instead of fullscreen.
+- **Scope:**
+  - First open (nothing saved): centred on the main screen, 50% of its width and 50% of its height.
+  - Joe moves or resizes the window: the new frame is saved (Hammerspoon `hs.settings`) and used on the next open.
+  - A saved frame that is no longer on any visible screen (monitor unplugged) is moved onto the main screen, keeping its size if it fits.
+  - Applies to today's Ghostty session window now. The one-instance host adapter (B1 in "One instance toggled by a hotkey") reuses the same saved frame.
+  - Keep the frame logic pure and tested (no `hs`); keep the Hammerspoon glue thin. Update `guide.md`.
+- **Agent checks:** pure-logic tests for the default frame, restore and off-screen clamping; `tests/test-hammerspoon.sh` cases with stub screens and windows: a new session window gets the default frame, a moved window's frame is saved, and the next session window gets the saved frame. All tests and the luajit syntax check pass.
+- **Joe checks:** reload Hammerspoon; the first session opens centred at half size; move and resize it, cancel, open again: same place and size; repeat after unplugging an external monitor if you use one.
+- **Tasks:** not broken down yet.
+- **Log:**
+  - 2026-10-11: created at Joe's request. Neither `~/.config/ghostty/config` nor `hammerspoon/voice-vim.lua` sets fullscreen or a size, so Ghostty chooses it; Hammerspoon will set the frame after the window opens.
+
 ## Notes and history browser
 
 - **Status:** todo
@@ -259,3 +276,4 @@ Record each change here, dated, with the reason.
 - 2026-10-11: created from `planning.md` → "Next steps", for orchestrator-driven work. Split the single-instance step into a host spike and the build.
 - 2026-10-11: Joe asked the orchestrator to start "One instance toggled by a hotkey" before the host pick. Its hard need now covers only the host tasks (show/hide wiring, removing the new-window-per-press path). Host-independent tasks (server, note/draft/submit/cancel commands against a stubbed host) go first and must leave V0 working.
 - 2026-10-11: added "Voice keys in the buffer" (Ctrl-Q cancel, Ctrl-S Flow toggle, stop Flow before submit) at Joe's request, with no needs, so it can run before the host pick. "Stop hands-free on submit" moves there from "Dictation polish".
+- 2026-10-11: added "Window size and position" at Joe's request (default centred 50%×50% of the main screen, remember the last frame), with no needs.
