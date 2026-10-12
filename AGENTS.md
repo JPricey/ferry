@@ -179,7 +179,15 @@ Neovide and refocuses that window (while Flow is recording, `draft` answers
 `waiting for flow` and the note hides itself after Flow's paste). The note
 (`lua/ferry/note.lua`) sends `ferry-submit` (hide, then Delivery) or
 `ferry-hide`. The adapter only touches the Neovide process started with
-our `--server <sock>`. No selection grab unless `captureSelection = true`.
+our `--server <sock>`. When `~/Applications/ferry.app` (config `appPath`;
+bundle id `local.ferry`, `Contents/MacOS/ferry` a symlink to Neovide's
+binary) resolves, it launches that executable directly (nohup, `--icon`,
+`--server`; never `open`, which would resolve the symlink back to
+Neovide.app) and every lookup, adopt and frontmost check uses
+`local.ferry`/"ferry", so a plain Neovide is never shown, hidden or
+adopted; otherwise plain Neovide with one log line. `lua/ferry/gui.lua`
+sets the window title "ferry" while Neovide is attached (gui api 1;
+`ferry-host` reloads an older loaded gui module). No selection grab unless `captureSelection = true`.
 Setup happens once, synchronously, in `start()`: if Neovide is missing, or
 setting up the controller raises, it logs a `mode:` line and alerts once
 ("Neovide is not installed — run ./install.sh", or the setup error), and

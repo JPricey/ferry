@@ -23,6 +23,10 @@ for f in osascript open neovide; do
 done
 # A failing ghostty: ferry-host ensure finds no GUI settings.
 printf '#!/bin/sh\nexit 1\n' > "$swork/fakes/ghostty"; chmod +x "$swork/fakes/ghostty"
+# A fake ferry.app wrapper (its binary a symlink to the fake neovide).
+mkdir -p "$swork/ferry.app/Contents/MacOS" "$swork/ferry.app/Contents/Resources"
+: > "$swork/ferry.app/Contents/Info.plist"
+ln -s "$swork/fakes/neovide" "$swork/ferry.app/Contents/MacOS/ferry"
 : > "$swork/calls"
 export PATH="$swork/fakes:$PATH" FERRY_NOTES_DIR="$swork/notes" FERRY_HOST_NVIM_FLAGS=--clean
 unset FERRY_SOCK
@@ -44,8 +48,10 @@ end
 
 local swork = assert(os.getenv("FERRY_SWORK"))
 -- A fake neovide on the search path: host.available() finds it. start()
--- only records its pre-warm hs.task (the stub never runs tasks).
-local found = { searchPath = { swork .. "/fakes" }, appPaths = {} }
+-- only records its pre-warm hs.task (the stub never runs tasks). appPath:
+-- never Joe's ~/Applications/ferry.app.
+local noApp = swork .. "/none/ferry.app"
+local found = { searchPath = { swork .. "/fakes" }, appPaths = {}, appPath = noApp }
 local socks = 0
 
 -- Fresh stub and module for each case; start() with a fake Neovide found
@@ -402,7 +408,7 @@ do
   local rec = stub.install()
   local M = stub.load(modpath)
   rec.frontmost = rec:app({ bundleID = "com.example.target" })
-  M.start({ neovide = { searchPath = { swork .. "/empty" }, appPaths = {} } })
+  M.start({ neovide = { searchPath = { swork .. "/empty" }, appPaths = {}, appPath = noApp } })
   local NO = "ferry: Neovide is not installed — run ./install.sh"
   check("Neovide missing: not running", "unavailable", M.mode)
   check("Neovide missing: one alert", 1, #rec.alerts)
@@ -434,6 +440,21 @@ do
   for _, e in ipairs(rec.executes) do if has(e.cmd, "wispr-flow") then flowRuns = flowRuns + 1 end end
   check("Neovide missing: talk never starts Flow (no task or command with wispr-flow)", "0 0",
     flowRuns .. " " .. #rec.tasks)
+end
+
+-- The ferry.app wrapper: config appPath reaches the host, which finds it
+-- (even with no other Neovide) and logs that it uses it. false: plain only.
+do
+  local rec = stub.install()
+  local M = stub.load(modpath)
+  M.start(opts({ appPath = swork .. "/ferry.app", neovide = { searchPath = { swork .. "/empty" }, appPaths = {} } }))
+  check("ferry.app: config appPath -> instance mode", "instance 0", M.mode .. " " .. #rec.alerts)
+  check("ferry.app: host logs it uses ferry.app", true, rec:hasLog("i", "neovide: using ferry.app at " .. swork .. "/ferry.app"))
+  rec = stub.install()
+  M = stub.load(modpath)
+  M.start(opts({ appPath = false, neovide = { searchPath = { swork .. "/empty" }, appPaths = {} } }))
+  check("ferry.app: appPath = false and no Neovide -> unavailable", "unavailable", M.mode)
+  check("ferry.app: appPath = false logs plain Neovide", true, rec:hasLog("i", "using plain Neovide"))
 end
 
 -- Setting up the one instance raises in start(): one alert with the error,
@@ -551,7 +572,7 @@ do
   rec.frontmost, rec.focusedWindow = target, tw
   local M = stub.load(modpath)
   local cmdlines = {}
-  M.start({ sock = sock, neovide = { searchPath = found.searchPath, appPaths = {},
+  M.start({ sock = sock, neovide = { searchPath = found.searchPath, appPaths = {}, appPath = noApp,
     commandLine = function(pid) return cmdlines[pid] end } })
   check("instance: Neovide found -> instance mode, no alert", "instance 0", M.mode .. " " .. #rec.alerts)
   local b = rec.hotkeyBinds[1]

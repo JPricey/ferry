@@ -60,6 +60,16 @@ and does nothing else. If the server or Neovide fails to come up on a press,
 an alert says so and the next press tries again; a minimized (Cmd+M) window
 also comes back on the next press.
 
+## ferry as its own app
+
+When `~/Applications/ferry.app` (a wrapper around Neovide's binary, bundle id
+`local.ferry`) exists, Hammerspoon starts the window as that app, so the Dock,
+Cmd-Tab and the menu bar say "ferry" with its icon and the window title is
+"ferry"; a Neovide you open yourself stays "Neovide" and the hotkey never
+shows, hides or moves it. Without it ferry runs as plain Neovide and the
+console says so once; `appPath` in `start()` points elsewhere, `false` turns
+it off.
+
 ## Neovide looks like your terminal
 
 Neovide takes Ghostty's font and size and, when your colorscheme leaves the

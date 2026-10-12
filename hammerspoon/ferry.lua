@@ -8,7 +8,9 @@
 -- hammerspoon://ferry-submit, which hides Neovide and then runs M.submit
 -- below, or ferry-hide. start() pre-warms the server (an hs.task) so the
 -- first press is fast. Without Neovide there is no fallback window: start()
--- alerts once and each press alerts again.
+-- alerts once and each press alerts again. When install.sh has built the
+-- ~/Applications/ferry.app wrapper, Neovide runs as that app (named
+-- "ferry" in the Dock and Cmd-Tab); see hosts/neovide.lua.
 --
 -- Submit: put the text on the clipboard, focus the target window, wait until
 -- it is frontmost, Cmd+V. The delivery logic lives in
@@ -51,8 +53,12 @@ M.config = {
   -- The nvim server socket (default $FERRY_SOCK, else
   -- ${TMPDIR}/ferry.sock, as bin/ferry-host).
   sock = nil,
+  -- The ferry.app wrapper Neovide runs as (built by install.sh). nil:
+  -- ~/Applications/ferry.app, used when it is there; false: plain Neovide.
+  appPath = nil,
   -- Extra options for hammerspoon/hosts/neovide.lua new() (searchPath,
-  -- appPaths, adoptTimeout, commandLine). Tests use it.
+  -- appPaths, adoptTimeout, commandLine, appPath, appBundleID, appName).
+  -- Tests use it.
   neovide = nil,
 }
 
@@ -285,18 +291,21 @@ local function startInstance()
   local sock = M.config.sock or defaultSock()
   local hcfg = {
     log = log, sock = sock, root = root, fraction = M.config.windowSize,
-    rememberFrame = M.config.rememberFrame ~= false,
+    rememberFrame = M.config.rememberFrame ~= false, appPath = M.config.appPath,
   }
   for k, v in pairs(M.config.neovide or {}) do hcfg[k] = v end
   local neovide = dofile(root .. "/hammerspoon/hosts/neovide.lua")
   local host = neovide.new(hcfg)
   local ok, why = host.available()
   if not ok then return nil, why end
+  -- For alerts: "Neovide", or "the ferry window" with the ferry.app wrapper.
+  local _, appName = host.ident()
+  local hostName = appName == neovide.NAME and appName or "the ferry window"
   local c = dofile(root .. "/hammerspoon/instance.lua").new({
     host = host, root = root, sock = sock,
     captureSelection = M.config.captureSelection == true,
     deliver = function(p) M.submit(p) end,
-    hostName = "Neovide",
+    hostName = hostName,
   })
   building = c
   c.bindURLs()

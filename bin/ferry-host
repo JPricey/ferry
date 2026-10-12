@@ -73,6 +73,12 @@ rtp_fix="local ferryr = $(luastr "$root"); if not vim.tbl_contains(vim.opt.rtp:g
 note_api=8
 note_mod="(function(want) $rtp_fix; local n = require(\"ferry.note\"); if n.api == want then return n end; package.loaded[\"ferry.note\"] = nil; local ok, m = pcall(require, \"ferry.note\"); if not ok then package.loaded[\"ferry.note\"] = n; return n end; m.state = n.state; if n.host ~= n.default_host then m.host = n.host end; return m end)($note_api)"
 
+# The GUI module, as a Lua expression (rtp fixed by the caller). A server
+# that loaded it before gui.api reached gui_api reloads it; its setup()
+# then replaces the old autocmds (same augroup).
+gui_api=1
+gui_mod="(function(want) local g = require(\"ferry.gui\"); if (g.api or 0) >= want then return g end; package.loaded[\"ferry.gui\"] = nil; local ok, m = pcall(require, \"ferry.gui\"); if ok and type(m) == \"table\" then return m end; package.loaded[\"ferry.gui\"] = g; return g end)($gui_api)"
+
 ghostty_bin() {
   command -v ghostty 2>/dev/null && return
   local app=/Applications/Ghostty.app/Contents/MacOS/ghostty
@@ -139,7 +145,7 @@ ensure() {
   # Put the repo on the runtimepath (note_mod does it; a reused server may
   # lack it) and load the note module now, so the first show is not slowed
   # by it. Also hand it the GUI settings (re-read on every ensure).
-  rexpr "luaeval('(function(a) local n = $note_mod; return require(\"ferry.gui\").setup(a) end)(_A)', $(gui_dict))" >/dev/null
+  rexpr "luaeval('(function(a) local n = $note_mod; return $gui_mod.setup(a) end)(_A)', $(gui_dict))" >/dev/null
 }
 
 show() { # [--talk] target window [seedfile]
@@ -155,7 +161,7 @@ show() { # [--talk] target window [seedfile]
     || { echo "ferry-host: show failed: $out" >&2; return 1; }
   printf '%s\n' "${out%%$'\n'*}"
   case $out in
-    *$'\n?gui') rexpr "luaeval('(function(a) $rtp_fix; return require\"ferry.gui\".setup(a) end)(_A)', $(gui_dict))" >/dev/null 2>&1 ;;
+    *$'\n?gui') rexpr "luaeval('(function(a) $rtp_fix; return $gui_mod.setup(a) end)(_A)', $(gui_dict))" >/dev/null 2>&1 ;;
   esac
   return 0
 }

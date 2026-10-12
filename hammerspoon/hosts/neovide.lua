@@ -15,9 +15,14 @@
 -- bin/ferry-host).
 --
 --   launch(cb)   start Neovide attached to the server, off the main thread
---                (hs.task running /bin/sh): `neovide --server <sock>` under
---                nohup when a neovide binary is found (searchPath, then the
---                app bundle's Contents/MacOS/neovide), else
+--                (hs.task running /bin/sh). With the ferry.app wrapper
+--                (below): `<app>/Contents/MacOS/ferry --icon
+--                <app>/Contents/Resources/ferry.png --server <sock>` under
+--                nohup, a direct exec (never `open`, which would resolve the
+--                symlinked binary back to Neovide.app). Without it:
+--                `neovide --server <sock>` under nohup when a neovide binary
+--                is found (searchPath, then the app bundle's
+--                Contents/MacOS/neovide), else
 --                `open -n -a Neovide --args --server <sock>`. cb(ok, why)
 --                once the task started. Then the first new Neovide window
 --                is adopted by hammerspoon/window-frame.lua: it gets the
@@ -30,12 +35,28 @@
 --                Neovide is not up yet (just launched) or has no window,
 --                the show is kept and done when the launched window
 --                appears. A window not seen before (Neovide was already
---                running) is watched for moves, not moved.
+--                running) is watched for moves, not moved. With ferry.app
+--                and no ferry.app running (say a plain Neovide from before
+--                the wrapper is still attached, so the controller saw a UI
+--                and did not launch), show launches ferry.app itself and
+--                holds the show.
 --   hide(cb)     app:hide(). The controller refocuses the target in cb.
 --   isFocused()  -> bool, why: the frontmost app is our Neovide and its
 --                window is neither minimized nor invisible (so a press
 --                after Cmd+M shows it instead of hiding nothing).
---   available()  -> bool, why: a neovide binary or Neovide.app exists.
+--   available()  -> bool, why: ferry.app, a neovide binary or Neovide.app
+--                exists.
+--
+-- ferry.app (milestone "ferry in the Dock"): install.sh builds a wrapper
+-- bundle at appPath (default ~/Applications/ferry.app, bundle id
+-- local.ferry, name ferry) whose Contents/MacOS/ferry is a symlink to
+-- Neovide's binary, so the Dock, Cmd-Tab and the menu bar show "ferry".
+-- While its executable resolves, every lookup (our app, the window adopted
+-- after launch, the frontmost check) uses its bundle id and name, and a
+-- plain Neovide (com.neovide.neovide) is never shown, hidden or adopted.
+-- Without it, plain Neovide as before; which one is in use is logged once,
+-- and again when it changes (checked on each call, so install.sh needs no
+-- reload).
 --
 -- Our Neovide only: show, hide and isFocused act on the one Neovide process
 -- attached to our socket, never on a Neovide Joe runs for his own editing.
@@ -52,6 +73,8 @@ local N = {}
 
 N.BUNDLE = "com.neovide.neovide"
 N.NAME = "Neovide"
+N.APP_BUNDLE = "local.ferry" -- the ferry.app wrapper (install.sh builds it)
+N.APP_NAME = "ferry"
 N.ADOPT_TIMEOUT = 5 -- seconds to wait for the first window after launch
 
 local function q(s)
@@ -104,6 +127,12 @@ local function defaultSearchPath()
   return dirs
 end
 
+local function defaultAppPath()
+  local home = os.getenv("HOME")
+  if not home or home == "" then return nil end
+  return home .. "/Applications/ferry.app"
+end
+
 local function defaultAppPaths()
   local paths = { "/Applications/Neovide.app" }
   local home = os.getenv("HOME")
@@ -126,6 +155,10 @@ end
 --                  and ~/Applications)
 --   commandLine    function(pid) -> the process's command line or nil
 --                  (default: /bin/ps through hs.execute)
+--   appPath        the ferry.app wrapper (default ~/Applications/ferry.app;
+--                  false: never use it)
+--   appBundleID    its bundle id (default local.ferry)
+--   appName        its app name (default ferry)
 function N.new(cfg)
   cfg = cfg or {}
   local log = cfg.log or hs.logger.new("ferry", "info")
@@ -139,6 +172,9 @@ function N.new(cfg)
       searchPath = cfg.searchPath,
       appPaths = cfg.appPaths,
       commandLine = cfg.commandLine,
+      appPath = (cfg.appPath == nil) and defaultAppPath() or cfg.appPath,
+      appBundleID = cfg.appBundleID or N.APP_BUNDLE,
+      appName = cfg.appName or N.APP_NAME,
     },
     log = log,
     _wf = cfg.windowFrame,  -- window-frame glue (loaded lazily)
@@ -149,6 +185,8 @@ function N.new(cfg)
     _pid = nil,             -- pid of our Neovide (attached to our socket)
     _foreign = {},          -- pid -> true for Neovide processes that are not ours
     _findTimer = nil,       -- fallback poll for the launched window
+    _using = nil,           -- "app" or "plain": what was last logged
+    _stale = {},            -- pid -> true: plain Neovides on our socket, warned
   }
 
   local function try(fn, ...)
@@ -183,6 +221,33 @@ function N.new(cfg)
   -- -------------------------------------------------------------------------
   -- Finding Neovide
 
+  -- The ferry.app wrapper's executable when it resolves (a symlink to a
+  -- Neovide binary that is gone does not), else nil. Logs which host is in
+  -- use when that changes.
+  local function wrapperExe()
+    local app = o.config.appPath
+    local exe = type(app) == "string" and app ~= "" and app .. "/Contents/MacOS/ferry" or nil
+    if exe and not isFile(exe) then exe = nil end
+    local using = exe and "app" or "plain"
+    if using ~= o._using then
+      o._using = using
+      if exe then
+        log.i("neovide: using ferry.app at " .. app .. " (" .. o.config.appBundleID .. ")")
+      else
+        log.i("neovide: no ferry.app at " .. tostring(app)
+          .. " (or its binary is missing); using plain Neovide (run ./install.sh)")
+      end
+    end
+    return exe
+  end
+
+  -- Bundle id and app name of our host app: ferry.app's, else Neovide's.
+  local function ident()
+    if wrapperExe() then return o.config.appBundleID, o.config.appName end
+    return N.BUNDLE, N.NAME
+  end
+  o.ident = ident
+
   local function appBundle()
     if hs.application and hs.application.pathForBundleID then
       local p = try(hs.application.pathForBundleID, N.BUNDLE)
@@ -207,6 +272,7 @@ function N.new(cfg)
   end
 
   function o.available()
+    if wrapperExe() then return true, "ferry.app at " .. o.config.appPath end
     local bin = findBinary()
     if bin then return true, "neovide at " .. bin end
     local app = appBundle()
@@ -217,6 +283,16 @@ function N.new(cfg)
   -- The shell command that starts Neovide attached to the server.
   function o.launchCommand()
     local sock = o.config.sock
+    local exe = wrapperExe()
+    if exe then
+      -- Direct exec of the wrapper's executable, so macOS attributes the
+      -- process to ferry.app. Never `open`: it resolves the symlink and
+      -- starts Neovide.app.
+      local icon = o.config.appPath .. "/Contents/Resources/ferry.png"
+      local iconArg = isFile(icon) and (" --icon " .. q(icon)) or ""
+      return "nohup " .. q(exe) .. iconArg .. " --server " .. q(sock)
+        .. " </dev/null >/dev/null 2>&1 &", "ferry.app"
+    end
     local bin = findBinary()
     if bin then
       -- nohup + &: the sh exits at once and Neovide outlives the hs.task
@@ -237,8 +313,11 @@ function N.new(cfg)
     return nil
   end
 
+  -- app is our host app's kind (ferry.app, else plain Neovide), by bundle
+  -- id or name.
   local function isNeovide(app)
-    return call(app, "bundleID") == N.BUNDLE or call(app, "name") == N.NAME
+    local bundle, name = ident()
+    return call(app, "bundleID") == bundle or call(app, "name") == name
   end
 
   local function commandLine(pid)
@@ -279,21 +358,44 @@ function N.new(cfg)
       log.i("neovide: pid " .. o._pid .. " is gone")
       o._pid = nil
     end
+    local bundle, name = ident()
     local cands = {}
     local list = hs.application.applicationsForBundleID
-      and try(hs.application.applicationsForBundleID, N.BUNDLE)
+      and try(hs.application.applicationsForBundleID, bundle)
     if type(list) == "table" then
       for _, a in ipairs(list) do cands[#cands + 1] = a end
     end
     if hs.application.get then
-      cands[#cands + 1] = try(hs.application.get, N.BUNDLE)
-      cands[#cands + 1] = try(hs.application.get, N.NAME)
+      cands[#cands + 1] = try(hs.application.get, bundle)
+      cands[#cands + 1] = try(hs.application.get, name)
     end
     for i = 1, #cands do
       local a = cands[i]
-      if a and isOurs(a) then return a end
+      -- get(name) matches loosely; isNeovide keeps our app's kind only.
+      if a and isNeovide(a) and isOurs(a) then return a end
     end
     return nil
+  end
+
+  -- With ferry.app: warn (once per pid) about a plain Neovide attached to
+  -- our socket (started before the wrapper existed). It is left alone.
+  local function warnStalePlain()
+    if not (hs.application and hs.application.applicationsForBundleID) then return end
+    local list = try(hs.application.applicationsForBundleID, N.BUNDLE)
+    if type(list) ~= "table" then return end
+    for _, a in ipairs(list) do
+      local pid = pidOf(a)
+      if pid and not o._stale[pid] and not o._foreign[pid] then
+        local cmd = commandLine(pid)
+        if cmd and (" " .. cmd .. " "):find(" --server " .. o.config.sock .. " ", 1, true) then
+          o._stale[pid] = true
+          log.w("neovide: a plain Neovide (pid " .. pid .. ") is attached to our server;"
+            .. " left alone (ferry.app is in use). Quit it so only ferry shows the note")
+        else
+          o._foreign[pid] = true
+        end
+      end
+    end
   end
 
   -- -------------------------------------------------------------------------
@@ -399,7 +501,8 @@ function N.new(cfg)
     local cmd, how = o.launchCommand()
     log.i("neovide: launch (" .. how .. "): " .. cmd)
     local wf = glue()
-    local before = wf and try(wf.snapshot, N.BUNDLE) or {}
+    local bundle = ident()
+    local before = wf and try(wf.snapshot, bundle) or {}
     if not (hs.task and hs.task.new) then
       log.e("neovide: launch: hs.task unavailable")
       return done(cb, false, "hs.task unavailable")
@@ -434,7 +537,7 @@ function N.new(cfg)
       opts.onFound = function(win)
         local id = call(win, "id")
         local app = call(win, "application")
-        if app and not isOurs(app, true) then
+        if app and not (isNeovide(app) and isOurs(app, true)) then
           -- Another Neovide opened a window: leave it where it is (adopt
           -- reads opts.frame after onFound) and look for ours instead.
           log.w("neovide: window " .. tostring(id) .. " is not ours; not adopted")
@@ -446,7 +549,7 @@ function N.new(cfg)
         if o.config.rememberFrame then o._watchedId = id end
         if o._pendingShow then showHeld(app or neovideApp(), win) end
       end
-      try(wf.adopt, N.BUNDLE, before, o.config.adoptTimeout, opts)
+      try(wf.adopt, bundle, before, o.config.adoptTimeout, opts)
     else
       findLaunched()
     end
@@ -461,6 +564,17 @@ function N.new(cfg)
       if since and since <= o.config.adoptTimeout then
         log.i("neovide: show: not up yet, will show its window when it appears")
         return done(cb, true, "waiting for the launched window")
+      end
+      if wrapperExe() then
+        -- The controller launches only when no UI is attached; a plain
+        -- Neovide left on our socket counts as one. Launch ferry.app here.
+        warnStalePlain()
+        log.w("neovide: show: ferry.app (--server " .. o.config.sock .. ") is not running; launching it")
+        local launched, why
+        o.launch(function(ok, w) launched, why = ok, w end)
+        if launched then return done(cb, true, "launching ferry.app") end
+        o._pendingShow = false
+        return done(cb, false, "ferry.app did not launch: " .. tostring(why))
       end
       log.w("neovide: show: our Neovide (--server " .. o.config.sock .. ") is not running")
       return done(cb, false, "Neovide not running")
@@ -488,19 +602,20 @@ function N.new(cfg)
 
   -- Our Neovide is frontmost: focused only when its window can be seen.
   local function windowShown(app, how)
+    local _, name = ident()
     local win = windowOf(app)
-    if not win then return false, "Neovide frontmost but has no window" end
-    if call(win, "isMinimized") == true then return false, "Neovide window minimized" end
-    if call(win, "isVisible") == false then return false, "Neovide window not visible" end
-    return true, "Neovide frontmost" .. how
+    if not win then return false, name .. " frontmost but has no window" end
+    if call(win, "isMinimized") == true then return false, name .. " window minimized" end
+    if call(win, "isVisible") == false then return false, name .. " window not visible" end
+    return true, name .. " frontmost" .. how
   end
 
   function o.isFocused()
     local app = hs.application and try(hs.application.frontmostApplication)
     local b = call(app, "bundleID")
     local pid = pidOf(app)
-    local how = b == N.BUNDLE and "" or " (by name)"
-    if o._pid and pid == o._pid then return windowShown(app, how) end
+    local how = b == ident() and "" or " (by name)"
+    if o._pid and pid == o._pid and isNeovide(app) then return windowShown(app, how) end
     if isNeovide(app) then
       if isOurs(app) then return windowShown(app, how) end
       return false, "frontmost is another Neovide (pid " .. tostring(pid) .. ")"

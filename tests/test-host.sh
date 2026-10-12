@@ -146,6 +146,8 @@ bg() { ask "synIDattr(synIDtrans(hlID('Normal')), 'bg#', 'gui')"; }
 ask "execute('set rtp+=$work | colorscheme ferrytest')" >/dev/null
 "$host" show com.example.app 4242 >/dev/null
 check "without a GUI: guifont and Normal guibg untouched" "'' ''" "'$(ask '&guifont')' '$(bg)'"
+title() { ask "&title.' '.&titlestring"; }
+check "without a GUI: window title untouched" "0 " "$(title)"
 ask "execute('colorscheme ferrytest')" >/dev/null
 check "without a GUI: a ColorScheme leaves Normal without guibg" "''" "'$(bg)'"
 ask "execute('let g:neovide = v:true | doautocmd UIEnter')" >/dev/null
@@ -156,6 +158,18 @@ ask "execute('colorscheme ferrytest')" >/dev/null
 check "after a colorscheme change the background is re-applied" "#001e27" "$(bg)"
 ask "execute('highlight Normal guibg=#123456 | doautocmd UIEnter')" >/dev/null
 check "an existing Normal guibg is left alone" "#123456" "$(bg)"
+check "GUI attached: window title is ferry" "1 ferry" "$(title)"
+# A UI leaves and no Neovide UI is listed (g:neovide stays set): restored.
+ask "execute('doautocmd UILeave')" >/dev/null
+for _ in $(seq 40); do [ "$(title)" = "0 " ] && break; sleep 0.05; done
+check "no Neovide UI left: window title restored" "0 " "$(title)"
+# A server that loaded gui.lua before it had the title (no api): ensure
+# reloads it, and the title is set at once (a GUI is attached).
+ask "luaeval('(function() local g = require\"ferry.gui\"; g.api = nil; g.old = true; return 1 end)()')" >/dev/null
+"$host" ensure >/dev/null
+check "old gui module: ensure reloads it" "1 true" \
+  "$(ask 'luaeval("require\"ferry.gui\".api")') $(ask 'luaeval("require\"ferry.gui\".old == nil")')"
+check "old gui module: title set after the reload" "1 ferry" "$(title)"
 
 # --- a server started before this change gets layout and GUI on show ---------
 g=$("$host" show com.example.app 4242)

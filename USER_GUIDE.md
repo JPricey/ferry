@@ -247,6 +247,13 @@ Environment variables: `FERRY_HISTORY=0` stops saving history,
 `FERRY_SIDEBAR=0` keeps the sidebar closed, and `FERRY_DB` moves the
 history database.
 
+If `~/Applications/ferry.app` exists (a small wrapper around Neovide),
+the window runs as that app: the Dock, Cmd-Tab and the menu bar show
+"ferry" with its own icon, and the window title is "ferry". A Neovide you
+open yourself keeps its own name, and the hotkey never touches it. Without
+the wrapper, ferry runs as plain Neovide. Set `appPath` in
+`ferry.start({ ... })` to use a wrapper elsewhere, or `false` to never use one.
+
 If Ghostty is installed, Neovide uses its font, size and background
 colour, so the note looks like your terminal even with a transparent
 colorscheme. They are read when
@@ -272,11 +279,18 @@ with how long it took, the target, the window, each check, the paste.
   the one window failed when Hammerspoon loaded; the alert and the
   console's `mode:` line say why. Run `./install.sh` (it installs Neovide)
   and Reload Config.
-- **"Neovide did not appear" or "could not open the note".** The press did
+- **"Neovide did not appear" (or "the ferry window did not appear") or
+  "could not open the note".** The press did
   not get the window up (Neovide did not start, or its Neovim server did
   not). The console says which step failed. Press the hotkey again: it
   starts them again. If you minimized the window with Cmd+M, the next press
   brings it back.
+- **The Dock says "Neovide", not "ferry".** ferry runs as its own app only
+  when `~/Applications/ferry.app` exists; the console's `neovide: no
+  ferry.app at …` line says it was not found. If a `neovide: a plain
+  Neovide … is attached to our server` line shows up, an older Neovide
+  window is still connected to ferry: quit it, and the next press opens
+  ferry as its own app.
 - **The hotkey does nothing.** Reload Config and look for `bound ctrl+alt+v`
   in the console. A `failed to bind` line means another app holds the key;
   pick a different `hotkey`, or use the start URL. For the hold to talk

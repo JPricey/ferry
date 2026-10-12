@@ -11,12 +11,22 @@
 -- on UIEnter it sets 'guifont' and, if Normal has no guibg, the background;
 -- after any ColorScheme it re-applies the background. With no GUI nothing
 -- changes, so terminal UIs keep their transparent look.
+--
+-- The window title is "ferry" ('title' on, 'titlestring' ferry) while a GUI
+-- is attached. After a UILeave that leaves no Neovide UI listed (g:neovide
+-- stays set once Neovide has attached, so it is not asked), the previous
+-- values come back.
 local M = {}
+
+-- Bumped when a running server must reload this module (bin/ferry-host
+-- reloads it when the loaded one reports a lower api). 1: window title.
+M.api = 1
+M.TITLE = "ferry"
 
 M.settings = { font = "", bg = "" }
 
-function M.attached()
-  if vim.g.neovide then return true end
+-- A UI whose client is neovide is attached.
+function M.listed()
   for _, ui in ipairs(vim.api.nvim_list_uis()) do
     local ok, info = pcall(vim.api.nvim_get_chan_info, ui.chan or -1)
     if ok and type(info) == "table" and info.client and info.client.name == "neovide" then
@@ -24,6 +34,10 @@ function M.attached()
     end
   end
   return false
+end
+
+function M.attached()
+  return vim.g.neovide and true or M.listed()
 end
 
 -- Set Normal's guibg when it has none (an existing one is left alone).
@@ -42,9 +56,35 @@ function M.apply_font()
   return true
 end
 
+-- Title "ferry" when on (default: a GUI is attached); else the earlier
+-- 'title' and 'titlestring' come back.
+function M.apply_title(on)
+  if on == nil then on = M.attached() end
+  if on then
+    if not M.saved_title then
+      M.saved_title = { title = vim.o.title, titlestring = vim.o.titlestring }
+    end
+    pcall(function()
+      vim.o.title = true
+      vim.o.titlestring = M.TITLE
+    end)
+    return true
+  end
+  local saved = M.saved_title
+  if saved then
+    M.saved_title = nil
+    pcall(function()
+      vim.o.titlestring = saved.titlestring
+      vim.o.title = saved.title
+    end)
+  end
+  return false
+end
+
 function M.apply()
   M.apply_font()
   M.apply_bg()
+  M.apply_title()
 end
 
 -- Only plain values reach :highlight: a #rrggbb colour or a colour name.
@@ -68,6 +108,10 @@ function M.setup(settings)
     vim.schedule(M.apply)
   end })
   vim.api.nvim_create_autocmd("ColorScheme", { group = group, callback = function() M.apply_bg() end })
+  -- The leaving UI is still listed during UILeave.
+  vim.api.nvim_create_autocmd("UILeave", { group = group, callback = function()
+    vim.schedule(function() M.apply_title(M.listed()) end)
+  end })
   M.apply()
   return 1
 end
