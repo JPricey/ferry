@@ -82,6 +82,16 @@ Sections:
    edit the fleet repo.
 9. **No secrets in the repo.** Wispr's `config.json` holds tokens and is
    never copied here.
+10. **The one instance runs in Neovide** (Joe, 2026-10-11). Show and hide
+    are a plain app unhide and hide, so the composer never raises or
+    disturbs Ghostty work windows. Fallback, if Wispr Flow does not paste
+    into Neovide: a dedicated Ghostty window.
+11. **Notes are markdown files** (Joe, 2026-10-11). Each note is a file in
+    a notes folder and that file is the source of truth. SQLite is only a
+    search index that can be rebuilt from the files.
+12. **No selection grab by default in the one instance** (Joe, 2026-10-11).
+    Copying the selection costs up to 0.4 s per press, which breaks the
+    instant show. A setting turns it back on.
 
 ## Implementation details
 

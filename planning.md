@@ -140,7 +140,7 @@ logs `show:`/`hide:` ms from the key press to logger `voice-vim-spike`.
 | Neovide | | | | | |
 | Ghostty quick terminal | | | | | |
 
-Pick:
+Pick: **Neovide** (Joe, 2026-10-11, on the orchestrator's recommendation, without trying all three). Show/hide is a plain app hide/unhide that cannot raise or disturb Ghostty work windows. Fallback: Ghostty window, if Flow does not paste into Neovide.
 
 What carries over to "One instance toggled by a hotkey": the server and note
 model do not depend on the host. `vv-host` moves to `bin/` and `note.lua` to
