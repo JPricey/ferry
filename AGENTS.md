@@ -51,7 +51,7 @@ touching `lua/voice-vim/delivery.lua` or the Hammerspoon module,
 `bash tests/test-window-frame.sh` after touching `hammerspoon/window-frame.lua`,
 and `bash tests/test-host.sh`, `bash tests/test-note.sh` and
 `bash tests/test-instance.sh` after touching `bin/voice-vim-host`,
-`lua/voice-vim/note.lua` or `hammerspoon/instance.lua`, and
+`lua/voice-vim/note.lua`, `lua/voice-vim/gui.lua` or `hammerspoon/instance.lua`, and
 `bash tests/test-host-neovide.sh` after touching `hammerspoon/hosts/neovide.lua`.
 Hammerspoon is installed and the module is linked into `~/.hammerspoon/`;
 Accessibility permission must be granted manually, and Hammerspoon must be

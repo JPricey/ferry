@@ -128,8 +128,8 @@ or cancel instead of hide; it never skips the wait.
 
 Every note is saved. Press `<leader>h` to show or hide a sidebar on the
 left that lists past dictations, newest first, grouped by day, with the app
-each one went to (session windows open it by themselves). `<Tab>` jumps
-back to your text.
+each one went to (it opens by itself each time the note appears). `<Tab>`
+jumps back to your text.
 
 On an entry in the sidebar:
 
@@ -189,6 +189,13 @@ require("voice-vim").start({
 Environment variables: `VOICE_VIM_EDITOR` picks another editor than
 `nvim`, `VOICE_VIM_HISTORY=0` stops saving history, `VOICE_VIM_SIDEBAR=0`
 keeps the sidebar closed, and `VOICE_VIM_DB` moves the history database.
+
+Neovide uses Ghostty's font, size and background colour, so the note looks
+like your terminal even with a transparent colorscheme. They are read when
+the Neovim server starts (Reload Config to pick up Ghostty changes);
+`VOICE_VIM_GUI_FONT` (for example `Menlo:h14`) and `VOICE_VIM_GUI_BG` (for
+example `#001e27`) override them. Each time the note appears, other splits
+(such as a file tree your config opens) are closed.
 
 ## When something goes wrong
 

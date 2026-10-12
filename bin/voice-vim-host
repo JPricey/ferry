@@ -19,6 +19,15 @@
 #   VOICE_VIM_SOCK              socket (default ${TMPDIR}/voice-vim.sock)
 #   VOICE_VIM_NOTES_DIR         note folder (default ${TMPDIR}/voice-vim-notes)
 #   VOICE_VIM_HOST_NVIM_FLAGS   extra flags for the server nvim (tests: --clean)
+#   VOICE_VIM_SIDEBAR           0: show opens the note without the history sidebar
+#   VOICE_VIM_GUI_FONT          Neovide font (e.g. "Menlo:h14"); default: Ghostty's
+#   VOICE_VIM_GUI_BG            Neovide background when the colorscheme has none
+#                               (e.g. "#001e27"); default: Ghostty's
+#
+# GUI settings (font, background) are read from `ghostty +show-config` by
+# ensure, and by show when the server has none yet (a server started before
+# they existed). They only take effect while Neovide is attached
+# (lua/voice-vim/gui.lua). No Ghostty: no GUI settings, nothing else changes.
 set -u
 
 # Called from Hammerspoon we inherit a bare launchd PATH, so make sure
@@ -37,6 +46,42 @@ vimstr() { local s=${1//\'/\'\'}; printf "'%s'" "$s"; }
 
 rexpr() { "$nvim_bin" --server "$sock" --remote-expr "$1"; }
 
+# The note module, as a Lua expression. A server started before the module
+# last changed (note.api differs) reloads it, keeping its state and host.
+note_api=2
+note_mod="(function(want) local n = require(\"voice-vim.note\"); if n.api == want then return n end; package.loaded[\"voice-vim.note\"] = nil; local ok, m = pcall(require, \"voice-vim.note\"); if not ok then package.loaded[\"voice-vim.note\"] = n; return n end; m.state = n.state; if n.host ~= n.default_host then m.host = n.host end; return m end)($note_api)"
+
+ghostty_bin() {
+  command -v ghostty 2>/dev/null && return
+  local app=/Applications/Ghostty.app/Contents/MacOS/ghostty
+  [ -x "$app" ] && echo "$app"
+}
+
+# Values of `key = value` lines in config text, non-empty ones joined by ",".
+cfg_val() { printf '%s\n' "$2" | sed -n "s/^$1 = //p" | sed '/^[[:space:]]*$/d' | paste -sd, - ; }
+
+# GUI settings as a Vim dict: {'font': 'Family:h13', 'bg': '#001e27'}.
+# Overrides first, then Ghostty's own settings, then its defaults. Each
+# ghostty call is cut off after 1 s; any failure just leaves a value empty.
+gui_dict() {
+  local font=${VOICE_VIM_GUI_FONT:-} bg=${VOICE_VIM_GUI_BG:-} g user="" def="" fam size
+  if { [ -z "$font" ] || [ -z "$bg" ]; } && g=$(ghostty_bin); then
+    user=$(perl -e 'alarm 1; exec @ARGV' "$g" +show-config </dev/null 2>/dev/null)
+    fam=$(cfg_val font-family "$user"); size=$(cfg_val font-size "$user")
+    local ubg; ubg=$(cfg_val background "$user")
+    if [ -z "$fam" ] || [ -z "$size" ] || [ -z "$ubg" ]; then
+      def=$(perl -e 'alarm 1; exec @ARGV' "$g" +show-config --default </dev/null 2>/dev/null)
+      [ -n "$fam" ] || fam=$(cfg_val font-family "$def")
+      [ -n "$size" ] || size=$(cfg_val font-size "$def")
+      [ -n "$ubg" ] || ubg=$(cfg_val background "$def")
+    fi
+    size=${size%%,*}
+    if [ -z "$font" ] && [ -n "$fam" ]; then font=$fam${size:+:h$size}; fi
+    [ -n "$bg" ] || bg=${ubg%%,*}
+  fi
+  printf "{'font': %s, 'bg': %s}" "$(vimstr "$font")" "$(vimstr "$bg")"
+}
+
 alive() { [ -S "$sock" ] && [ "$(rexpr 1 2>/dev/null)" = 1 ]; }
 
 need_server() {
@@ -47,7 +92,7 @@ need_server() {
 # result. Fails if the server is down or the call raised an error.
 call() { # fn dict
   local out
-  out=$(rexpr "luaeval('require\"voice-vim.note\".$1(_A)', $2)" 2>&1) \
+  out=$(rexpr "luaeval('$note_mod.$1(_A)', $2)" 2>&1) \
     || { echo "voice-vim-host: $1 failed: $out" >&2; return 1; }
   printf '%s\n' "$out"
 }
@@ -67,14 +112,24 @@ ensure() {
   fi
   # Put the repo on the runtimepath (a reused server may lack it) and load
   # the note module now, so the first show is not slowed by it.
-  rexpr "luaeval('(function(r) if not vim.tbl_contains(vim.opt.rtp:get(), r) then vim.opt.rtp:prepend(r) end; return require(\"voice-vim.note\") and 1 end)(_A)', $(vimstr "$root"))" >/dev/null
+  # Also hand it the GUI settings (re-read on every ensure).
+  rexpr "luaeval('(function(a) local r = a.root; if not vim.tbl_contains(vim.opt.rtp:get(), r) then vim.opt.rtp:prepend(r) end; local n = $note_mod; return require(\"voice-vim.gui\").setup(a.gui) end)(_A)', {'root': $(vimstr "$root"), 'gui': $(gui_dict)})" >/dev/null
 }
 
 show() { # target window [seedfile]
   need_server
   local seed=${3:-}
   if [ -n "$seed" ]; then seed=$(cd "$(dirname "$seed")" && pwd)/$(basename "$seed"); fi
-  call show "{'target': $(vimstr "${1:-}"), 'window': $(vimstr "${2:-}"), 'seed': $(vimstr "$seed"), 'dir': $(vimstr "$notes")}"
+  # The reply is the note's path, plus a "?gui" line when the server has no
+  # GUI settings yet (started before they existed): those are loaded after.
+  local out
+  out=$(rexpr "luaeval('(function(a) local p = $note_mod.show(a); if vim.g.voicevim_gui == nil then p = p .. \"\\n?gui\" end; return p end)(_A)', {'target': $(vimstr "${1:-}"), 'window': $(vimstr "${2:-}"), 'seed': $(vimstr "$seed"), 'dir': $(vimstr "$notes"), 'sidebar': $(vimstr "${VOICE_VIM_SIDEBAR:-}")})" 2>&1) \
+    || { echo "voice-vim-host: show failed: $out" >&2; return 1; }
+  printf '%s\n' "${out%%$'\n'*}"
+  case $out in
+    *$'\n?gui') rexpr "luaeval('require\"voice-vim.gui\".setup(_A)', $(gui_dict))" >/dev/null 2>&1 ;;
+  esac
+  return 0
 }
 
 status() {

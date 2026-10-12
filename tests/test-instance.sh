@@ -22,6 +22,8 @@ for f in osascript open neovide; do
   printf '#!/bin/sh\n{ echo "CALL %s"; echo "$*"; } >> "%s/calls"\nexit 1\n' "$f" "$work" > "$work/fakes/$f"
   chmod +x "$work/fakes/$f"
 done
+# A failing ghostty: voice-vim-host ensure finds no GUI settings.
+printf '#!/bin/sh\nexit 1\n' > "$work/fakes/ghostty"; chmod +x "$work/fakes/ghostty"
 : > "$work/calls"
 export PATH="$work/fakes:$PATH" VOICE_VIM_DB="$work/history.sqlite"
 # The controller must pass these itself.

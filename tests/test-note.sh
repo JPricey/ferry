@@ -24,6 +24,8 @@ printf '%s\n' "\$*" >>"$work/open.log"
 exit 0
 EOF
 chmod +x "$work/bin/open"
+# A failing ghostty: voice-vim-host ensure finds no GUI settings.
+printf '#!/bin/sh\nexit 1\n' >"$work/bin/ghostty"; chmod +x "$work/bin/ghostty"
 export PATH="$work/bin:$PATH"
 
 fail=0

@@ -28,6 +28,15 @@ If the server or Neovide fails to come up on a press, an alert says so and
 the next press tries again; a minimized (Cmd+M) window also comes back on
 the next press.
 
+## Neovide looks like your terminal
+
+Neovide takes Ghostty's font and size and, when your colorscheme leaves the
+background transparent, Ghostty's background colour (read by
+`voice-vim-host ensure`; `VOICE_VIM_GUI_FONT`, e.g. `Menlo:h14`, and
+`VOICE_VIM_GUI_BG`, e.g. `#001e27`, override them). Terminal Neovim is never
+changed. Each show leaves only the note and the history sidebar in the
+window, closing other splits such as a file tree.
+
 ## Session windows
 
 With `mode = "session"` (or without Neovide), each press opens a Ghostty
@@ -113,7 +122,8 @@ session windows `:cq` and quitting cancel too.
 
 Every note and session is recorded. `:History` or `<leader>h` toggles a
 sidebar on the left listing past dictations newest first, grouped by day
-(session windows open it automatically); press `<Tab>` to jump back.
+(the note and session windows open it automatically); press `<Tab>` to jump
+back.
 
 ## Reuse a past dictation
 

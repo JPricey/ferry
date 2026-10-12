@@ -20,6 +20,11 @@
 local M = {}
 local flow = require("voice-vim.flow")
 
+-- Bumped when the module changes in a way an already-running server must
+-- pick up: bin/voice-vim-host reloads the module (keeping M.state and a
+-- swapped M.host) when the loaded one reports a different api.
+M.api = 2
+
 -- The current (unfinished) note: { id = uuid, path = file, buf = bufnr,
 -- unstarted = true while it has no history row (see blank()) }.
 -- dir: the notes folder of the last show().
@@ -188,14 +193,77 @@ function M.apply_options(buf)
   end
 end
 
+-- A window that can hold a note: a normal (non-floating) window on a
+-- normal buffer, not the history sidebar (so not nvim-tree either).
+local function note_window_ok(win)
+  if vim.api.nvim_win_get_config(win).relative ~= "" then return false end
+  local hist = package.loaded["voice-vim.history"]
+  if hist and hist.state and hist.state.win == win then return false end
+  return vim.bo[vim.api.nvim_win_get_buf(win)].buftype == ""
+end
+
 -- Show buf in the current window (or jump to a window already showing it).
+-- If the current window is a special one (sidebar, file tree, float), use
+-- another normal window in the tab, or split one off for the note.
 local function display(buf)
   local win = vim.fn.bufwinid(buf)
   if win ~= -1 then
     vim.api.nvim_set_current_win(win)
-  else
-    vim.api.nvim_win_set_buf(0, buf)
+    return
   end
+  if not note_window_ok(0) then
+    local found
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      if note_window_ok(w) then found = w; break end
+    end
+    if found then
+      vim.api.nvim_set_current_win(found)
+    else
+      vim.api.nvim_open_win(buf, true, { split = "right", win = -1 })
+      return
+    end
+  end
+  vim.api.nvim_win_set_buf(0, buf)
+end
+
+local function sidebar_on(opts)
+  local v = opts and opts.sidebar
+  if v == nil or v == "" then v = os.getenv("VOICE_VIM_SIDEBAR") end
+  return v ~= "0"
+end
+
+-- The note window (current) is the only normal window in its tab, plus the
+-- history sidebar on the left unless sidebar is off (VOICE_VIM_SIDEBAR=0),
+-- as in V0. Other windows (e.g. a file tree opened at startup) are closed;
+-- a modified buffer in one just becomes hidden. The sidebar is refreshed
+-- (after show returns) when the note changed since it was last listed.
+local function layout(opts)
+  local hist = require("voice-vim.history")
+  local note_win = vim.api.nvim_get_current_win()
+  local tab = vim.api.nvim_get_current_tabpage()
+  local want = sidebar_on(opts)
+  if hist.is_open() and (not want or vim.api.nvim_win_get_tabpage(hist.state.win) ~= tab) then
+    hist.close()
+  end
+  local side = hist.is_open() and hist.state.win or nil
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
+    if w ~= note_win and w ~= side and vim.api.nvim_win_get_config(w).relative == "" then
+      pcall(vim.api.nvim_win_close, w, true)
+    end
+  end
+  vim.api.nvim_set_current_win(note_win)
+  if not want then return end
+  local id = (vim.b.voicevim or {}).id
+  if side then
+    hist.state.main_win = note_win
+    if M.state.listed ~= id then
+      vim.schedule(function() pcall(hist.refresh) end)
+    end
+  else
+    pcall(hist.open)
+    if vim.api.nvim_win_is_valid(note_win) then vim.api.nvim_set_current_win(note_win) end
+  end
+  M.state.listed = id
 end
 
 -- Write the note if it has unsaved changes, so switching away loses nothing.
@@ -271,7 +339,8 @@ local function resume(opts)
 end
 
 -- Show the note: resume the unfinished one unless seeded, else open a fresh
--- note. opts: { target, window, seed = seed file path, dir = notes folder }.
+-- note. opts: { target, window, seed = seed file path, dir = notes folder,
+-- sidebar = "0" to leave the history sidebar closed }.
 -- A resumed note takes the new target and window. Returns the note's path.
 function M.show(opts)
   opts = opts or {}
@@ -283,6 +352,7 @@ function M.show(opts)
   else
     note = fresh(opts, seed)
   end
+  layout(opts)
   return note.path
 end
 

@@ -21,6 +21,24 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# A fake ghostty first on PATH: prints Ghostty-style config, fails (mode
+# file says fail) or hangs (hang). The real one is never run.
+mkdir -p "$work/bin" "$work/colors"
+cat >"$work/bin/ghostty" <<EOF
+#!/bin/sh
+case \$(cat "$work/ghostty.mode" 2>/dev/null) in
+  fail) exit 1 ;;
+  hang) exec sleep 10 ;;
+esac
+echo "font-family = Test Mono"
+echo "font-size = 13"
+echo "background = #001e27"
+EOF
+chmod +x "$work/bin/ghostty"
+export PATH="$work/bin:$PATH"
+# A transparent colorscheme, like Joe's NeoSolarized: Normal without guibg.
+printf 'hi clear\nhi Normal guifg=#839496 guibg=NONE\nlet g:colors_name = "vvtest"\n' >"$work/colors/vvtest.vim"
+
 # --- status / show while down --------------------------------------------
 check "status prints down with no server" down "$("$host" status)"
 "$host" show com.example.app 4242 >/dev/null 2>&1
@@ -99,5 +117,68 @@ check "stop quits the reused server and removes the socket" "0 gone" "$(servers)
 
 check "attach-cmd prints the remote-ui command" yes \
   "$(case $("$host" attach-cmd) in *"nvim --server $VOICE_VIM_SOCK --remote-ui") echo yes ;; *) echo no ;; esac)"
+
+# --- layout: the note and the history sidebar, nothing else ---------------
+wins() { ask 'join(map(range(1, winnr("$")), "fnamemodify(bufname(winbufnr(v:val)), \":t\")"), " ")'; }
+"$host" ensure >/dev/null
+check "ensure reads the GUI settings from ghostty" "{'bg': '#001e27', 'font': 'Test Mono:h13'}" "$(ask 'string(g:voicevim_gui)')"
+ask "execute('vsplit | split | vnew | setlocal buftype=nofile | file FakeTree')" >/dev/null
+f=$("$host" show com.example.app 4242)
+check "show closes extra splits and a file tree: sidebar left, note right" "history $(basename "$f")" "$(wins)"
+check "after show the note window is current, in insert mode" "$f i" "$(ask 'expand("%:p")') $(ask 'mode()')"
+ask "execute('vsplit')" >/dev/null
+"$host" show com.example.app 4242 >/dev/null
+check "a second show keeps the sidebar and drops the new split" "history $(basename "$f")" "$(wins)"
+nvim --server "$VOICE_VIM_SOCK" --remote-send '<Esc>:wincmd t<CR>'
+for _ in $(seq 100); do [ "$(ask 'expand("%:t")')" = history ] && break; sleep 0.05; done
+nvim --server "$VOICE_VIM_SOCK" --remote-send '<Tab>'
+for _ in $(seq 100); do [ "$(ask 'expand("%:t")')" = "$(basename "$f")" ] && break; sleep 0.05; done
+check "<Tab> in the sidebar jumps back to the note" "$(basename "$f")" "$(ask 'expand("%:t")')"
+check "VOICE_VIM_SIDEBAR=0: show leaves only the note" "$(basename "$f")" \
+  "$(VOICE_VIM_SIDEBAR=0 "$host" show com.example.app 4242 >/dev/null; wins)"
+
+# --- GUI appearance ------------------------------------------------------------
+bg() { ask "synIDattr(synIDtrans(hlID('Normal')), 'bg#', 'gui')"; }
+ask "execute('set rtp+=$work | colorscheme vvtest')" >/dev/null
+"$host" show com.example.app 4242 >/dev/null
+check "without a GUI: guifont and Normal guibg untouched" "'' ''" "'$(ask '&guifont')' '$(bg)'"
+ask "execute('colorscheme vvtest')" >/dev/null
+check "without a GUI: a ColorScheme leaves Normal without guibg" "''" "'$(bg)'"
+ask "execute('let g:neovide = v:true | doautocmd UIEnter')" >/dev/null
+check "GUI attached: guifont from Ghostty" "Test Mono:h13" "$(ask '&guifont')"
+check "GUI attached: Normal gets Ghostty's background" "#001e27" "$(bg)"
+check "GUI attached: Normal keeps its guifg" "#839496" "$(ask "synIDattr(synIDtrans(hlID('Normal')), 'fg#', 'gui')")"
+ask "execute('colorscheme vvtest')" >/dev/null
+check "after a colorscheme change the background is re-applied" "#001e27" "$(bg)"
+ask "execute('highlight Normal guibg=#123456 | doautocmd UIEnter')" >/dev/null
+check "an existing Normal guibg is left alone" "#123456" "$(bg)"
+
+# --- a server started before this change gets layout and GUI on show ---------
+g=$("$host" show com.example.app 4242)
+ask "luaeval('(function() local n = require\"voice-vim.note\"; n.api = 1; n.old = true; vim.g.voicevim_gui = nil; vim.cmd(\"vsplit | split\"); return 1 end)()')" >/dev/null
+"$host" draft >/dev/null
+h=$("$host" show com.example.app 4242)
+check "old server: show reloads the note module and keeps the draft" "2 true $g" \
+  "$(ask 'luaeval("require\"voice-vim.note\".api")') $(ask 'luaeval("require\"voice-vim.note\".old == nil")') $h"
+check "old server: show applies the layout" "history $(basename "$g")" "$(wins)"
+check "old server: show loads the GUI settings" "{'bg': '#001e27', 'font': 'Test Mono:h13'}" "$(ask 'string(g:voicevim_gui)')"
+"$host" stop
+
+# --- overrides and a missing or hung ghostty ------------------------------------
+VOICE_VIM_GUI_FONT='Other Font:h15' VOICE_VIM_GUI_BG='#112233' "$host" ensure >/dev/null
+check "VOICE_VIM_GUI_FONT and VOICE_VIM_GUI_BG win over Ghostty" "{'bg': '#112233', 'font': 'Other Font:h15'}" "$(ask 'string(g:voicevim_gui)')"
+VOICE_VIM_GUI_FONT='Other Font:h15' "$host" ensure >/dev/null
+check "a font override alone keeps Ghostty's background" "{'bg': '#001e27', 'font': 'Other Font:h15'}" "$(ask 'string(g:voicevim_gui)')"
+"$host" stop
+echo fail >"$work/ghostty.mode"
+"$host" ensure >/dev/null
+check "ghostty failing: ensure works, no GUI settings" "0 {'bg': '', 'font': ''}" "$? $(ask 'string(g:voicevim_gui)')"
+"$host" stop
+echo hang >"$work/ghostty.mode"
+t0=$(date +%s)
+"$host" ensure >/dev/null
+check "ghostty hanging: ensure works within 4 s, no GUI settings" "0 yes {'bg': '', 'font': ''}" \
+  "$? $([ $(($(date +%s) - t0)) -le 4 ] && echo yes) $(ask 'string(g:voicevim_gui)')"
+"$host" stop
 
 exit $fail

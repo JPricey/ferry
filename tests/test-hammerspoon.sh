@@ -21,6 +21,8 @@ for f in osascript open neovide; do
   printf '#!/bin/sh\n{ echo "CALL %s"; echo "$*"; } >> "%s/calls"\nexit 1\n' "$f" "$swork" > "$swork/fakes/$f"
   chmod +x "$swork/fakes/$f"
 done
+# A failing ghostty: voice-vim-host ensure finds no GUI settings.
+printf '#!/bin/sh\nexit 1\n' > "$swork/fakes/ghostty"; chmod +x "$swork/fakes/ghostty"
 : > "$swork/calls"
 export PATH="$swork/fakes:$PATH" VOICE_VIM_NOTES_DIR="$swork/notes" VOICE_VIM_HOST_NVIM_FLAGS=--clean
 unset VOICE_VIM_SOCK
