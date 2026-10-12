@@ -24,7 +24,7 @@ false` turns it off, and one equal to `hotkey` is not bound.
 
 Press **Ctrl+Option+N** (`browseHotkey`) in any app: the note appears as with
 Ctrl+Option+V (same paste target), with the history sidebar open and focused
-on the newest note in normal mode. Pressed from ferry it hides, like the
+on the newest note other than the open one (▶), in normal mode. Pressed from ferry it hides, like the
 hotkey; while an $EDITOR edit is pending it shows the edit, like the hotkey.
 `browseHotkey = false` turns it off, and one equal to `hotkey` or
 `talkHotkey` is not bound.

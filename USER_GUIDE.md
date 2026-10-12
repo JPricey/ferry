@@ -112,7 +112,7 @@ All of these work in insert mode, so you never have to leave it.
 | `Ctrl-Q` | Throw the note away without sending. `ZQ` and `:Cancel` do the same. |
 | `Ctrl-Y` | Copy the text to the clipboard and hide. `:Copy` does the same. |
 | `Ctrl+Option+V` | Hide the note and keep it as a draft. `:q` does the same. |
-| `Ctrl+Option+N` | Open the notes browser: from any app it shows the note with the history sidebar focused on your newest note. Pressed in ferry, it hides (like Ctrl+Option+V). While an $EDITOR edit is open, it shows the edit, not the browser. |
+| `Ctrl+Option+N` | Open the notes browser: from any app it shows the note with the history sidebar focused on your newest note other than the one you have open. Pressed in ferry, it hides (like Ctrl+Option+V). While an $EDITOR edit is open, it shows the edit, not the browser. |
 | `Ctrl+Option+B` (hold) | Wispr Flow listens while held and its text is added at the cursor; the note stays up. From any other app it shows the note first. |
 | `Ctrl-S` | Start Wispr Flow listening; press again to stop. |
 | `<leader>d` | Start Wispr Flow from normal mode (`:Dictate`). |

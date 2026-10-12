@@ -318,6 +318,28 @@ check("s on the open note's row: its file says sent, listed unmarked; a blank no
   "sent true false 0", fmeta(sp, "state") .. " " .. tostring(line_of("second save"):find("^   ") ~= nil) .. " "
   .. tostring(vim.fn.resolve(note.current().path) == vim.fn.resolve(sp)) .. " " .. n_open())
 
+-- A search the open note cannot match: its first save starts no background
+-- list (its row would not be shown); one it matches lists it.
+h.state.query = "kubernetes"; h.refresh()
+local bg, system = 0, vim.system
+vim.system = function(cmd, opts, cb)
+  if cb and cmd[2] == "list" then bg = bg + 1 end
+  return system(cmd, opts, cb)
+end
+local qb = note.current().buf
+vim.api.nvim_buf_set_lines(qb, 0, -1, false, { "nothing to find here" })
+vim.api.nvim_buf_call(qb, function() vim.cmd("silent write") end)
+pcall(note.wait_index, 3000)
+vim.wait(100)
+local miss = bg
+vim.api.nvim_buf_set_lines(qb, 0, -1, false, { "Kubernetes2 too" })
+vim.api.nvim_buf_call(qb, function() vim.cmd("silent write") end)
+vim.wait(2000, function() return listed("Kubernetes2 too") end)
+vim.system = system
+check("search on: a save that cannot match lists nothing; one that matches (prefix, any case) lists it, ▶",
+  "0 1 true", miss .. " " .. bg .. " " .. tostring((line_of("Kubernetes2 too") or ""):find("^▶") ~= nil))
+h.state.query = nil; h.refresh()
+
 -- Cancel on a note opened unchanged: its file (state sent) is left as is.
 local alpha_bytes = table.concat(vim.fn.readfile(paths.alpha, "b"), "\n")
 press("alpha sent", "<CR>")

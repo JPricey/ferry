@@ -1009,7 +1009,8 @@ end
 -- The browse hotkey: show (resume the note, which takes the new target and
 -- window; no seed, no talk), then focus the history sidebar, opened even
 -- when it is off (opts.sidebar or FERRY_SIDEBAR "0"), synced, search
--- cleared, cursor on the newest note row, normal mode. While Flow is
+-- cleared, cursor on the newest note row other than the open one (▶),
+-- normal mode. While Flow is
 -- recording or a finish waits for its paste, the note keeps focus in insert
 -- mode (Flow pastes into the front window) and a notice says so; the
 -- sidebar is still opened and synced. Returns the note's path.
@@ -1033,17 +1034,23 @@ function M.browse(opts)
   local busy = flow.recording() or flow.state.waiting
   if not busy then vim.cmd("stopinsert") end
   if hist.is_open() then
-    -- The newest note: the first row past the pinned ones (rows are pinned
-    -- first, then newest first); only pinned notes: the first; none: line 1.
-    local st, first, newest = hist.state, nil, nil
+    -- The newest other note: the first row past the pinned ones (rows are
+    -- pinned first, then newest first) that is not the open note (▶); else
+    -- the first row that is not the open note; else the open note's; none:
+    -- line 1.
+    local st, any, other, newest = hist.state, nil, nil, nil
     for ln = 1, vim.api.nvim_buf_line_count(st.buf) do
       local i = (st.map or {})[ln]
-      if i then
-        first = first or ln
-        if not st.rows[i].pinned then newest = ln; break end
+      local r = i and st.rows[i]
+      if r then
+        any = any or ln
+        if not r.open then
+          other = other or ln
+          if not r.pinned then newest = ln; break end
+        end
       end
     end
-    vim.api.nvim_win_set_cursor(st.win, { newest or first or 1, 0 })
+    vim.api.nvim_win_set_cursor(st.win, { newest or other or any or 1, 0 })
     if not busy then vim.api.nvim_set_current_win(st.win) end
   end
   if busy then

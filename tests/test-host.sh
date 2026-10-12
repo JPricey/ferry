@@ -225,6 +225,16 @@ ask "luaeval('(function() local f = require\"ferry.flow\"; f.state.recording, f.
 rm -f "$FERRY_NOTES_DIR/zz-outside.md" "$FERRY_NOTES_DIR/aa-pinned.md"
 "$host" show com.example.app 4242 >/dev/null
 check "show after browse: the note is current again, in insert mode" "$(notefile) i" "$(ask 'expand("%:t")') $(ask 'mode()')"
+# A draft left and resumed is the newest note, listed first (▶); browse
+# skips it: the cursor goes to the newest other note.
+ask "nvim_buf_set_lines(0, 0, -1, v:false, ['left as a draft'])" >/dev/null
+"$host" draft >/dev/null
+"$host" browse com.example.app 4242 >/dev/null
+ask 1 >/dev/null; sleep 0.2; ask 1 >/dev/null
+check "browse after a draft: row 1 is the open note (▶), cursor on the newest other note (row 2)" \
+  "$(notefile) true history 2 $(ask "luaeval('vim.fn.fnamemodify(require\"ferry.history\".state.rows[2].path, \":t\")')")" \
+  "$(ask "luaeval('vim.fn.fnamemodify(require\"ferry.history\".state.rows[1].path, \":t\")')") $(ask "luaeval('tostring(require\"ferry.history\".state.rows[1].open)')") $(ask 'expand("%:t")') $(hrow)"
+"$host" show com.example.app 4242 >/dev/null
 
 # --- GUI appearance ------------------------------------------------------------
 # A stand-in UI over the socket (raw msgpack): with a name it first names its

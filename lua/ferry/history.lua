@@ -431,23 +431,29 @@ end
 function M.refresh(keep_path)
   local st = M.state
   if not (st.buf and vim.api.nvim_buf_is_valid(st.buf)) then return end
+  st.gen = (st.gen or 0) + 1
   st.rows = M.load()
   draw(keep_path)
 end
 
 -- List again without blocking: `ferry-notes list` runs in the background
--- and the rows are drawn when it is done (unless the sidebar closed or the
--- search changed meanwhile), the cursor kept on its row. Never a wait: a
+-- and the rows are drawn when it is done (unless the sidebar closed, the
+-- search changed or the sidebar was listed again meanwhile: a list started
+-- before a sync must not draw gone files back), the cursor kept on its
+-- row. Never a wait: a
 -- wait runs the event loop, which would take ferry-host requests (draft,
 -- talk) in the middle of whatever the editor was doing.
 local function refresh_async()
   local q = query()
+  M.state.gen = (M.state.gen or 0) + 1
+  local gen = M.state.gen
   local cmd = { root() .. "/bin/ferry-notes" }
   vim.list_extend(cmd, list_args())
   pcall(vim.system, cmd, { text = true, env = { FERRY_NOTES_DIR = notes_dir() } }, function(r)
     vim.schedule(function()
       local st = M.state
-      if r.code ~= 0 or not M.is_open() or not (st.buf and vim.api.nvim_buf_is_valid(st.buf)) or query() ~= q then
+      if r.code ~= 0 or not M.is_open() or not (st.buf and vim.api.nvim_buf_is_valid(st.buf)) or query() ~= q
+        or st.gen ~= gen then
         return
       end
       local cur = current_row()
@@ -457,12 +463,36 @@ local function refresh_async()
   end)
 end
 
+-- False when buffer b's text cannot match the search (ferry-notes: every
+-- word a prefix of some word in the body, case folded); true with no
+-- search, no buffer, or a word with non-ASCII letters (FTS5 folds those
+-- in ways this does not), so a doubt still lists.
+local function may_match(b)
+  local q = query()
+  if not q or not b then return true end
+  local words = {}
+  for w in table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false), "\n"):lower():gmatch("[%w\128-\255]+") do
+    words[#words + 1] = w
+  end
+  for qw in q:lower():gmatch("%S+") do
+    if qw:find("[\128-\255]") then return true end
+    for part in qw:gmatch("%w+") do
+      local hit = false
+      for _, w in ipairs(words) do
+        if w:sub(1, #part) == part then hit = true; break end
+      end
+      if not hit then return false end
+    end
+  end
+  return true
+end
+
 -- A note file was written and indexed (note api 18 calls this then, on the
 -- main loop). Its row, when listed, shows the file's state and first line
 -- now, without listing again (its place and time wait for the next list),
 -- and the ▶ mark follows the current note; the cursor stays. The open
 -- note's file not listed yet (its first save) lists the sidebar again, in
--- the background.
+-- the background, unless a search is on that its text cannot match.
 function M.note_saved(path)
   local st = M.state
   if not path or not (M.is_open() and st.buf and vim.api.nvim_buf_is_valid(st.buf)) then return end
@@ -472,7 +502,7 @@ function M.note_saved(path)
   end
   local cur = current_row()
   if not found then
-    if open_path() == k then refresh_async() end
+    if open_path() == k and may_match(open_buf()) then refresh_async() end
     return
   end
   local meta, body = require("ferry.store").read(path)
