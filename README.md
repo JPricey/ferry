@@ -101,6 +101,8 @@ commands live in `lua/ferry/note.lua`.
 - `lua/ferry/store.lua` — reads and writes note files (frontmatter, body).
 - `bin/ferry-notes` — the search index over the notes folder (index, sync,
   list with `--query`, pin, delete); only a cache of the files.
+- `lua/ferry/fixup.lua` — post-dictation fix-ups (join breaks, sentence
+  case, fillers, homophones); not wired into the note yet.
 - `bin/ferry-migrate-history` — one-off: turns the old history
   database's rows into note files (reads the database only; safe to rerun).
 - `bin/ferry-corrections` — prints the word fixes you keep making after
