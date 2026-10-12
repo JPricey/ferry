@@ -12,10 +12,18 @@ local flow = require("voice-vim.flow")
 local db = root .. "/bin/voice-vim-db"
 
 -- Never touch the system clipboard: a fake + and * provider.
-local clip = {}
+-- clip_mode "throw" makes the + copy raise, "drop" makes it silently keep
+-- nothing (nil: a working copy).
+local clip, clip_mode = {}, nil
 vim.g.clipboard = {
   name = "voice-vim-test",
-  copy = { ["+"] = function(lines) clip["+"] = lines end, ["*"] = function(lines) clip["*"] = lines end },
+  copy = {
+    ["+"] = function(lines)
+      if clip_mode == "throw" then error("fake clipboard copy failed") end
+      if clip_mode ~= "drop" then clip["+"] = lines end
+    end,
+    ["*"] = function(lines) clip["*"] = lines end,
+  },
   paste = { ["+"] = function() return clip["+"] or {} end, ["*"] = function() return clip["*"] or {} end },
 }
 
@@ -359,6 +367,47 @@ vim.cmd("Copy")
 check(":Copy of a blank body cancels: hide, + untouched, row dropped", "hide  none",
   kinds() .. " " .. clipped() .. " " .. outcome(idc4))
 
+-- A clipboard copy that throws or silently drops the text: the note is
+-- never finished on a copy that did not take (GT 2).
+local CLIP_FAIL = "voice-vim: could not copy to the clipboard — note kept"
+for _, mode in ipairs({ "throw", "drop" }) do
+  for _, case in ipairs({
+    { ":Copy", nil, "Copy" },
+    { "to: clipboard + Submit", "clipboard", "Submit" },
+    { "to: fleet:task:x + Submit", "fleet:task:x", "Submit" },
+    { "to: bogus:x + Submit", "bogus:x", "Submit" },
+  }) do
+    reset(); clip["+"] = nil; notices = {}
+    local _, idf, bf = show()
+    vim.wait(3000, function() return outcome(idf) == "open" end, 20)
+    if case[2] then header(case[2]) end
+    body({ "do not lose", "me" })
+    local want_lines = lines()
+    clip_mode = mode
+    local ok, e = pcall(vim.cmd, case[3])
+    clip_mode = nil
+    local name = "copy " .. mode .. ", " .. case[1]
+    -- An ERROR notice surfaces as a Vim error under pcall; nothing else may.
+    check(name .. ": no error but the notice", true, ok or tostring(e):find(CLIP_FAIL, 1, true) ~= nil)
+    check(name .. ": no host call, + empty", " ", kinds() .. " " .. clipped())
+    check(name .. ": note current and shown, text kept, row open",
+      idf .. " true " .. want_lines .. " open",
+      tostring((note.current() or {}).id) .. " " .. tostring(vim.api.nvim_get_current_buf() == bf)
+      .. " " .. lines() .. " " .. outcome(idf))
+    check(name .. ": error notice, never copied", true,
+      (notices[#notices] or ""):find(CLIP_FAIL, 1, true) ~= nil
+      and not table.concat(notices, "\n"):find("copied", 1, true))
+    set({ "" })
+    vim.cmd("Cancel")
+  end
+end
+reset(); clip["+"] = nil
+local _, idw = show()
+body({ "works again" })
+vim.cmd("Copy")
+check("after the fake copy works again, :Copy copies and hides", "hide works again submitted",
+  kinds() .. " " .. clipped() .. " " .. outcome(idw))
+
 -- --- voice keys: Flow toggle and the wait for its last paste -------------
 -- Flow pastes into the note as a bracketed paste, i.e. a vim.paste call.
 local function paste_later(text, ms)
@@ -477,6 +526,20 @@ vim.cmd("Submit")
 vim.wait(3000, function() return #notices > 0 end, 20)
 check("failed open copies the text to +", "clipboard fallback", table.concat(clip["+"] or {}, "\n"))
 check("failed open notifies copied — paste manually", "voice-vim: copied — paste manually", notices[1])
+for _, mode in ipairs({ "throw", "drop" }) do
+  notices = {}; clip["+"] = nil; clip_mode = mode
+  show()
+  set({ "fallback " .. mode })
+  vim.cmd("Submit")
+  vim.wait(3000, function() return #notices > 0 end, 20)
+  clip_mode = nil
+  local kept = (notices[1] or ""):match("text kept in (%S+)$")
+  check("failed open, copy " .. mode .. ": + empty, error notice names the kept file",
+    "  fallback " .. mode .. "\n",
+    table.concat(clip["+"] or {}, "\n") .. " " .. tostring((notices[1] or ""):find("could not", 1, true) and "")
+    .. " " .. tostring(kept and readfile(kept)))
+  if kept then os.remove(kept) end
+end
 os.remove(work .. "/open.fail")
 
 say(fail == 0 and "note_spec: all ok" or "note_spec: FAILED")

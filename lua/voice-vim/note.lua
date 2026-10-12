@@ -177,6 +177,19 @@ local function open_url(url, on_fail)
   if not ok then on_fail() end
 end
 
+-- Put text on the clipboard and confirm it is there: true when + reads
+-- back as text. A provider whose copy throws or drops the text raises no
+-- error from setreg, so the read-back is the only proof.
+local function to_clipboard(text)
+  local trim = function(s) return (s:gsub("\n+$", "")) end
+  local ok = pcall(vim.fn.setreg, "+", text)
+  if not ok then return false end
+  local got_ok, got = pcall(vim.fn.getreg, "+")
+  return got_ok and type(got) == "string" and trim(got) == trim(text)
+end
+
+local CLIP_FAIL = "voice-vim: could not copy to the clipboard — note kept"
+
 -- The default host talks to Hammerspoon. submit{file,target,window} reuses
 -- V0's voicevim-submit URL (Hammerspoon reads, delivers and deletes the
 -- file); hide{} asks it to hide the host and refocus the target. If the URL
@@ -190,9 +203,13 @@ function M.default_host.submit(p)
     local f = io.open(p.file, "r")
     local text = f and f:read("a") or ""
     if f then f:close() end
-    os.remove(p.file)
-    vim.fn.setreg("+", (text:gsub("\n$", "")))
-    vim.notify("voice-vim: copied — paste manually", vim.log.levels.WARN)
+    if to_clipboard((text:gsub("\n$", ""))) then
+      os.remove(p.file)
+      vim.notify("voice-vim: copied — paste manually", vim.log.levels.WARN)
+    else
+      vim.notify("voice-vim: could not reach Hammerspoon or copy to the clipboard — text kept in "
+        .. p.file, vim.log.levels.ERROR)
+    end
   end)
 end
 
@@ -681,9 +698,13 @@ local function body_text(buf, body)
 end
 
 -- Copy: the body on the clipboard (first, so a failure later still leaves
--- it there), recorded as submitted to `clipboard`, then hide.
+-- it there), recorded as submitted to `clipboard`, then hide. If the copy
+-- does not take, the note stays current and shown, and its row open.
 local function copy_body(buf, body, text)
-  vim.fn.setreg("+", text)
+  if not to_clipboard(text) then
+    vim.notify(CLIP_FAIL, vim.log.levels.ERROR)
+    return
+  end
   local file = to_tempfile(buf, body)
   finish(buf, "submitted", file, "clipboard")
   os.remove(file)
@@ -701,9 +722,12 @@ local function submit_now(buf)
   local t, err = target.parse(spec)
   if t and t.kind == "clipboard" then return copy_body(buf, body, text) end
   if not (t and t.kind == "app") then
-    vim.fn.setreg("+", text)
-    vim.notify(string.format("voice-vim: copied — target %q %s", spec,
-      t and "cannot be sent to yet" or ("is not valid (" .. tostring(err) .. ")")), vim.log.levels.WARN)
+    local why = t and "cannot be sent to yet" or ("is not valid (" .. tostring(err) .. ")")
+    if not to_clipboard(text) then
+      vim.notify(string.format("%s (target %q %s)", CLIP_FAIL, spec, why), vim.log.levels.ERROR)
+      return
+    end
+    vim.notify(string.format("voice-vim: copied — target %q %s", spec, why), vim.log.levels.WARN)
     return
   end
   local file = to_tempfile(buf, body)

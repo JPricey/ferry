@@ -225,6 +225,10 @@ with how long it took, the target, the window, each check, the paste.
 - **Nothing was pasted.** Look for "copied — paste manually". The text is
   on your clipboard; paste it by hand. The console shows which check
   failed.
+- **"could not copy to the clipboard — note kept".** A copy (Ctrl-Y,
+  `to: clipboard`, or another target's fallback) did not reach the
+  clipboard. Nothing was sent or recorded; the note is still open with
+  your text. Try again, or select the text and copy it yourself.
 - **The hotkey only shows an alert.** Neovide is missing, or setting up
   the one window failed when Hammerspoon loaded; the alert and the
   console's `mode:` line say why. Run `./install.sh` (it installs Neovide)

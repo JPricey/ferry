@@ -28,6 +28,8 @@ target …" message and the note stays open.
 puts the text below the `to:` line on the clipboard and hides the note,
 whatever the `to:` line says. The note is recorded as sent to `clipboard`
 and the next press opens a fresh one; a blank note is cancelled instead.
+If the clipboard does not take the text, it says "could not copy to the
+clipboard — note kept" and the note stays open.
 
 ## Drafts
 
