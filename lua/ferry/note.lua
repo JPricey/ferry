@@ -93,7 +93,7 @@ local function say(msg, level) require("ferry.notice").notify(msg, level) end
 -- swapped M.host) when the loaded one reports a different api.
 -- 15: one-line notices; a wiped buffer's note keeps its fork's file id.
 -- 16: a pending $EDITOR edit wins show, talk, release and draft.
--- 17: browse (the history sidebar focused after show).
+-- 17: browse (the history sidebar focused after show; a pending edit wins it too).
 M.api = 17
 
 -- history api 4: the browser on the notes index (open, send, pin, ...,
@@ -101,11 +101,25 @@ M.api = 17
 -- module opened keeps its keys bound to the old functions (and, before
 -- api 3, lists rows of the old database), so rebind its keys to the new
 -- ones and list it again.
+-- A sidebar refresh on the next event loop turn. Only the latest one
+-- queued runs, and none when something listed the sidebar since (browse
+-- clears M.state.refresh_due after it puts the cursor on the newest note,
+-- which a refresh would undo).
+local function refresh_later(hist)
+  local due = {}
+  M.state.refresh_due = due
+  vim.schedule(function()
+    if M.state.refresh_due ~= due then return end
+    M.state.refresh_due = nil
+    pcall(hist.refresh)
+  end)
+end
+
 local function history()
   return current("ferry.history", 5, function(_, new)
     if new.is_open() then
       new.bind_keys(new.state.buf)
-      vim.schedule(function() pcall(new.refresh) end)
+      refresh_later(new)
     end
   end)
 end
@@ -703,17 +717,7 @@ local function layout(opts)
   local id = (vim.b.ferry or {}).id
   if side then
     hist.state.main_win = note_win
-    if M.state.listed ~= id then
-      -- Skipped when something listed it since (browse resets it and puts
-      -- the cursor on the newest note, which this refresh would undo).
-      local due = {}
-      M.state.refresh_due = due
-      vim.schedule(function()
-        if M.state.refresh_due ~= due then return end
-        M.state.refresh_due = nil
-        pcall(hist.refresh)
-      end)
-    end
+    if M.state.listed ~= id then refresh_later(hist) end
   else
     pcall(hist.open)
     if vim.api.nvim_win_is_valid(note_win) then vim.api.nvim_set_current_win(note_win) end
@@ -817,7 +821,7 @@ end
 
 local function on(v) return v ~= nil and v ~= "" and v ~= "0" and v ~= false and v ~= 0 end
 
--- A pending $EDITOR edit wins the hotkey: show, talk, release and draft
+-- A pending $EDITOR edit wins the hotkey: show, browse, talk, release and draft
 -- go to lua/ferry/edit.lua (api 3: on_show, ...) while one is pending.
 -- Returns that module, or nil. A server that never loaded it has none.
 local function pending_edit()
@@ -954,8 +958,12 @@ end
 -- recording or a finish waits for its paste, the note keeps focus in insert
 -- mode (Flow pastes into the front window) and a notice says so; the
 -- sidebar is still opened and synced. Returns the note's path.
+-- While a $EDITOR edit is pending it is shown as by show (edit.on_show)
+-- and the note and sidebar are left alone.
 function M.browse(opts)
   opts = vim.tbl_extend("force", opts or {}, { seed = "", talk = "", sidebar = "1" })
+  local edit = pending_edit()
+  if edit then return edit.on_show(opts) end
   local hist = history()
   local before = hist.is_open() and hist.state.win or nil
   local path = M.show(opts)
@@ -984,7 +992,7 @@ function M.browse(opts)
     if not busy then vim.api.nvim_set_current_win(st.win) end
   end
   if busy then
-    vim.notify("ferry: Flow is still recording; the note keeps focus until its text lands", vim.log.levels.WARN)
+    say("ferry: Flow is still recording; the note keeps focus until its text lands", vim.log.levels.WARN)
   end
   return path
 end

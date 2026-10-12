@@ -132,6 +132,20 @@ check "show during an edit leaves the note's captured target and draft alone" \
   "com.example.app 4242 note text" \
   "$(ask 'luaeval("require\"ferry.note\".state.captured.target")') $(ask 'luaeval("require\"ferry.note\".state.captured.window")') $(notel1)"
 
+# browse is show for a pending edit: the edit comes back, the note, its
+# target and the sidebar are left alone (no sidebar opened, no focus moved).
+send '<Esc>'
+ask "execute('tabnext 1')" >/dev/null
+side() { ask 'luaeval("require\"ferry.history\".is_open() and 1 or 0")'; }
+nwins() { ask 'luaeval("#vim.api.nvim_tabpage_list_wins(vim.api.nvim_list_tabpages()[1])")'; }
+s0="$(side) $(nwins)"
+r=$("$host" browse com.other.app 8)
+check "browse during an edit: prints the edit file, edit buffer current, insert mode" \
+  "$f $(rf "$f") i" "$r $(bufname) $(ask 'mode()')"
+check "browse during an edit leaves the note's target, draft and sidebar alone" \
+  "com.example.app 4242 note text $s0" \
+  "$(ask 'luaeval("require\"ferry.note\".state.captured.target")') $(ask 'luaeval("require\"ferry.note\".state.captured.window")') $(notel1) $(side) $(nwins)"
+
 send '<Esc>'
 ask "execute('tabnext 1')" >/dev/null
 r=$("$host" show --talk com.other.app 7)

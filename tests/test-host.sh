@@ -204,6 +204,13 @@ ask "luaeval('require\"ferry.note\".forget()')" >/dev/null
 ask 1 >/dev/null; sleep 0.2; ask 1 >/dev/null
 check "browse after a new note, pinned note listed: after the loop ran, cursor still on the newest note" "history 2 zz-outside.md" \
   "$(ask 'expand("%:t")') $(hrow)"
+# An older history module loaded (live upgrade): the reload queues a sidebar
+# refresh too; it must not move browse's cursor back either.
+ask "luaeval('(function() require\"ferry.history\".api = 4; return 1 end)()')" >/dev/null
+"$host" browse com.example.app 4242 >/dev/null
+ask 1 >/dev/null; sleep 0.2; ask 1 >/dev/null
+check "browse with an api-4 history module: reloaded, after the loop ran, cursor still on the newest note" "5 history 2 zz-outside.md" \
+  "$(ask 'luaeval("require\"ferry.history\".api")') $(ask 'expand("%:t")') $(hrow)"
 # Flow recording (or a finish waiting for its paste): browse keeps the note
 # focused in insert mode so Flow's paste lands there; the sidebar is synced.
 ask "luaeval('require\"ferry.flow\".assume_recording()')" >/dev/null

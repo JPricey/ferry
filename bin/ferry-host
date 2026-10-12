@@ -33,10 +33,11 @@
 #   status                          print `up uis=N` or `down`
 #   stop                            quit the server and remove the socket
 #
-# While a $EDITOR edit (bin/ferry-edit) is pending, show, talk, release
-# and draft act on the edit instead of the note: show re-shows the edit
-# (printing its file), talk and release dictate into it, draft leaves it
-# pending (lua/ferry/edit.lua on_show ... on_draft).
+# While a $EDITOR edit (bin/ferry-edit) is pending, show, browse, talk,
+# release and draft act on the edit instead of the note: show and browse
+# re-show the edit (printing its file; browse leaves the note and sidebar
+# alone), talk and release dictate into it, draft leaves it pending
+# (lua/ferry/edit.lua on_show ... on_draft).
 #
 # Environment:
 #   FERRY_SOCK              socket (default ${TMPDIR}/ferry.sock)
