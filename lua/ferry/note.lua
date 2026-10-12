@@ -704,7 +704,15 @@ local function layout(opts)
   if side then
     hist.state.main_win = note_win
     if M.state.listed ~= id then
-      vim.schedule(function() pcall(hist.refresh) end)
+      -- Skipped when something listed it since (browse resets it and puts
+      -- the cursor on the newest note, which this refresh would undo).
+      local due = {}
+      M.state.refresh_due = due
+      vim.schedule(function()
+        if M.state.refresh_due ~= due then return end
+        M.state.refresh_due = nil
+        pcall(hist.refresh)
+      end)
     end
   else
     pcall(hist.open)
@@ -942,8 +950,10 @@ end
 -- The browse hotkey: show (resume the note, which takes the new target and
 -- window; no seed, no talk), then focus the history sidebar, opened even
 -- when it is off (opts.sidebar or FERRY_SIDEBAR "0"), synced, search
--- cleared, cursor on the newest note row, normal mode. Returns the note's
--- path.
+-- cleared, cursor on the newest note row, normal mode. While Flow is
+-- recording or a finish waits for its paste, the note keeps focus in insert
+-- mode (Flow pastes into the front window) and a notice says so; the
+-- sidebar is still opened and synced. Returns the note's path.
 function M.browse(opts)
   opts = vim.tbl_extend("force", opts or {}, { seed = "", talk = "", sidebar = "1" })
   local hist = history()
@@ -955,7 +965,10 @@ function M.browse(opts)
   elseif not hist.is_open() then
     hist.open()
   end
-  vim.cmd("stopinsert")
+  -- Listed just now: a refresh layout() queued would move the cursor back.
+  M.state.refresh_due = nil
+  local busy = flow.recording() or flow.state.waiting
+  if not busy then vim.cmd("stopinsert") end
   if hist.is_open() then
     -- The newest note: the first row past the pinned ones (rows are pinned
     -- first, then newest first); only pinned notes: the first; none: line 1.
@@ -967,8 +980,11 @@ function M.browse(opts)
         if not st.rows[i].pinned then newest = ln; break end
       end
     end
-    vim.api.nvim_set_current_win(st.win)
     vim.api.nvim_win_set_cursor(st.win, { newest or first or 1, 0 })
+    if not busy then vim.api.nvim_set_current_win(st.win) end
+  end
+  if busy then
+    vim.notify("ferry: Flow is still recording; the note keeps focus until its text lands", vim.log.levels.WARN)
   end
   return path
 end

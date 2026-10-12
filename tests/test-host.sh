@@ -196,6 +196,23 @@ printf -- '---\nid: eeeeeeee-0000-4000-8000-000000000006\nstate: draft\npinned: 
 "$host" browse com.example.app 4242 >/dev/null
 check "browse with a pinned note: row 1 is the pinned note, cursor on the newest note" "aa-pinned.md 2 zz-outside.md" \
   "$(ask "luaeval('vim.fn.fnamemodify(require\"ferry.history\".state.rows[1].path, \":t\")')") $(hrow)"
+# A new note since the sidebar last listed (forget, as after a Submit): show's
+# layout queues a sidebar refresh; it must not move browse's cursor back to
+# the pinned row once the event loop has run.
+ask "luaeval('require\"ferry.note\".forget()')" >/dev/null
+"$host" browse com.example.app 4242 >/dev/null
+ask 1 >/dev/null; sleep 0.2; ask 1 >/dev/null
+check "browse after a new note, pinned note listed: after the loop ran, cursor still on the newest note" "history 2 zz-outside.md" \
+  "$(ask 'expand("%:t")') $(hrow)"
+# Flow recording (or a finish waiting for its paste): browse keeps the note
+# focused in insert mode so Flow's paste lands there; the sidebar is synced.
+ask "luaeval('require\"ferry.flow\".assume_recording()')" >/dev/null
+"$host" browse com.example.app 4242 >/dev/null
+ask 1 >/dev/null
+check "browse while Flow records (assume_recording): the note stays current in insert mode, sidebar open on the newest note, notice" \
+  "$(notefile) i history 2 zz-outside.md 1" \
+  "$(ask 'expand("%:t")') $(ask 'mode()') $(wins | cut -d' ' -f1) $(ask "luaeval('(function() local h = require\"ferry.history\"; local i = h.state.map[vim.api.nvim_win_get_cursor(h.state.win)[1]]; return tostring(i) .. \" \" .. vim.fn.fnamemodify(h.state.rows[i].path, \":t\") end)()')") $(ask "luaeval('vim.fn.execute(\"messages\"):find(\"Flow is still recording; the note keeps focus\", 1, true) and 1 or 0')")"
+ask "luaeval('(function() local f = require\"ferry.flow\"; f.state.recording, f.state.adopted = false, false end)()')" >/dev/null
 rm -f "$FERRY_NOTES_DIR/zz-outside.md" "$FERRY_NOTES_DIR/aa-pinned.md"
 "$host" show com.example.app 4242 >/dev/null
 check "show after browse: the note is current again, in insert mode" "$(notefile) i" "$(ask 'expand("%:t")') $(ask 'mode()')"
