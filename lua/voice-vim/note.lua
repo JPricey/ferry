@@ -17,13 +17,20 @@
 -- Voice keys: <C-s> toggles Wispr Flow hands-free, <C-q> cancels. Submit,
 -- Cancel and Hide first wait for Flow's last paste when Flow is recording
 -- (flow.finish_then), so the last words land in the note, not the target.
+--
+-- Line 1 of a note is its target header, `to: <spec>` (lua/voice-vim/
+-- target.lua), and the rest is the body. A fresh note's header is the
+-- captured target (b:voicevim.auto_spec); a resume rewrites it only while it
+-- still equals auto_spec, so an edited header is kept. Submit sends the body
+-- to the header's target, or to the captured one when line 1 is not a header.
 local M = {}
 local flow = require("voice-vim.flow")
+local target = require("voice-vim.target")
 
 -- Bumped when the module changes in a way an already-running server must
 -- pick up: bin/voice-vim-host reloads the module (keeping M.state and a
 -- swapped M.host) when the loaded one reports a different api.
-M.api = 2
+M.api = 3
 
 -- The current (unfinished) note: { id = uuid, path = file, buf = bufnr,
 -- unstarted = true while it has no history row (see blank()) }.
@@ -59,6 +66,17 @@ local function read_seed(path)
   if not text:find("%S") then return "" end
   return text
 end
+
+-- The captured target (bundle id and window id from show) as a spec:
+-- app:<bundle>[#<window>], or clipboard when nothing was captured.
+local function captured_spec(meta)
+  local bundle = meta and meta.target or ""
+  if bundle == "" then return "clipboard" end
+  local win = tostring(meta.window or "")
+  return target.render({ kind = "app", bundle = bundle, window = win:match("^%d+$") and tonumber(win) or nil })
+end
+
+local function header(spec) return "to: " .. spec end
 
 -- The note's buffer, reloading it from its file if it was wiped.
 local function note_buf(note)
@@ -96,11 +114,11 @@ local function history_start(id, target, seed)
   db_starts[id] = db({ "start", id, target or "", seedfile }, function() os.remove(seedfile) end)
 end
 
-local function history_finish(id, outcome, file)
+local function history_finish(id, outcome, file, spec)
   local pending = db_starts[id]
   db_starts[id] = nil
   if pending then pcall(pending.wait, pending, 5000) end
-  local obj = db({ "finish", id, outcome, file })
+  local obj = db({ "finish", id, outcome, file, spec or "" })
   if obj then pcall(obj.wait, obj, 5000) end
 end
 
@@ -300,13 +318,14 @@ local function fresh(opts, seed)
   if not discard_unstarted(M.state.note) then save(M.state.note) end
   local note = new_note(notes_dir(opts))
   local id = note.id
-  if seed ~= "" then
-    vim.api.nvim_buf_set_lines(note.buf, 0, -1, false, vim.split(seed, "\n", { plain = true }))
-  end
-  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  local meta = { id = id, target = opts.target or "", window = opts.window or "", seed = seed }
+  meta.auto_spec = captured_spec(meta)
+  local body = seed ~= "" and vim.split(seed, "\n", { plain = true }) or { "" }
+  vim.api.nvim_buf_set_lines(note.buf, 0, -1, false, target.join(meta.auto_spec, body))
+  vim.api.nvim_win_set_cursor(0, { 2, 0 })
   M.state.note, M.state.cursor = note, nil
-  vim.b[note.buf].voicevim = { id = id, target = opts.target or "", window = opts.window or "", seed = seed }
-  history_start(id, opts.target, seed)
+  vim.b[note.buf].voicevim = meta
+  history_start(id, meta.auto_spec, seed)
   vim.cmd("startinsert")
   return note
 end
@@ -317,15 +336,49 @@ local function resume(opts)
   display(buf)
   M.apply_options(buf)
   local meta = vim.b[buf].voicevim or { id = note.id, seed = "" }
+  local prev = captured_spec(meta)
   meta.target, meta.window = opts.target or "", opts.window or ""
+  -- The header follows the new target while it is still the automatic one.
+  -- A note that never had one (a blank note, or a draft from before
+  -- headers) gets it above its text. A note with a header but no
+  -- auto_spec (a draft last held by a module without auto_spec) keeps
+  -- that header; it is automatic only when it equals a captured spec.
+  local spec = captured_spec(meta)
+  local cur = M.state.cursor
+  if meta.auto_spec == nil then
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local have = target.split(lines)
+    if have == nil then
+      vim.api.nvim_buf_set_lines(buf, 0, 0, false, { header(spec) })
+      cur = cur and { cur[1] + 1, cur[2] } or { 2, 0 }
+      meta.auto_spec = spec
+    else
+      -- Drop repeats of the header that an earlier resume stacked on it,
+      -- so Submit never sends one as the body's first line.
+      local extra = 0
+      while lines[2 + extra] and target.split({ lines[2 + extra] }) == have do extra = extra + 1 end
+      if extra > 0 then
+        vim.api.nvim_buf_set_lines(buf, 1, 1 + extra, false, {})
+        if cur and cur[1] > 1 then cur = { math.max(cur[1] - extra, 2), cur[2] } end
+      end
+      if have == prev or have == spec then
+        vim.api.nvim_buf_set_lines(buf, 0, 1, false, { header(spec) })
+        meta.auto_spec = spec
+      else
+        meta.auto_spec = false
+      end
+    end
+  elseif meta.auto_spec and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] == header(meta.auto_spec) then
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { header(spec) })
+    meta.auto_spec = spec
+  end
   vim.b[buf].voicevim = meta
   if note.unstarted then
     note.unstarted = nil
-    history_start(note.id, meta.target, "")
+    history_start(note.id, spec, "")
   end
   -- Put the cursor back where draft() found it. In insert mode it may sit
   -- just past the end of the line, which normal mode cannot hold.
-  local cur = M.state.cursor
   local append = false
   if cur then
     local last = vim.api.nvim_buf_line_count(buf)
@@ -418,14 +471,14 @@ end
 
 -- End a note: record the outcome, and drop its buffer and file. If it was
 -- the current note, a blank note replaces it in its windows.
-local function finish(buf, outcome, file)
+local function finish(buf, outcome, file, spec)
   local meta = vim.b[buf].voicevim or {}
   local note = M.state.note
   local current = note and note.buf == buf
   if meta.id then
     -- A blank note submitted before any show has no row yet.
-    if current and note.unstarted then history_start(meta.id, meta.target, "") end
-    history_finish(meta.id, outcome, file)
+    if current and note.unstarted then history_start(meta.id, spec, "") end
+    history_finish(meta.id, outcome, file, spec)
   end
   local path = vim.api.nvim_buf_get_name(buf)
   if current then
@@ -446,19 +499,25 @@ local function finish(buf, outcome, file)
   if path ~= "" then os.remove(path) end
 end
 
-local function text_of(buf)
-  return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+-- The note's target spec and body lines: line 1 `to: <spec>` is the
+-- header; without one the spec is the captured target.
+-- Repeats of the header right under it (stacked by an older resume) are
+-- not body.
+local function parts(buf)
+  local spec, body = target.split(vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+  while spec and #body > 0 and target.split({ body[1] }) == spec do table.remove(body, 1) end
+  return spec or captured_spec(vim.b[buf].voicevim), body
 end
 
--- Write buf's text to <notes dir>/outbox/<id>.md and return its path. Not
+-- Write the body to <notes dir>/outbox/<id>.md and return its path. Not
 -- vim.fn.tempname(): nvim deletes that folder on exit, and Hammerspoon
 -- reads (then deletes) the submit file after the URL is opened.
-local function to_tempfile(buf)
+local function to_tempfile(buf, body)
   local dir = notes_dir() .. "/outbox"
   vim.fn.mkdir(dir, "p")
   local id = (vim.b[buf].voicevim or {}).id or M.uuid()
   local file = dir .. "/" .. id .. ".md"
-  vim.fn.writefile(vim.api.nvim_buf_get_lines(buf, 0, -1, false), file)
+  vim.fn.writefile(body, file)
   return file
 end
 
@@ -477,23 +536,35 @@ end
 -- Cancel: record the text as cancelled (blank notes are dropped from
 -- history) and hide.
 local function cancel_now(buf)
-  local file = to_tempfile(buf)
-  finish(buf, "cancelled", file)
+  local spec, body = parts(buf)
+  local file = to_tempfile(buf, body)
+  finish(buf, "cancelled", file, spec)
   os.remove(file)
   M.host.hide({})
 end
 
--- Submit: blank, or unchanged from the seed, is a cancel. Otherwise the text goes to the host with the target.
+-- Submit: a blank body, or one unchanged from the seed, is a cancel. An
+-- app target goes to the host with only the body. Any other target, or a
+-- header that does not parse, cannot be sent yet: the body goes on the
+-- clipboard and the note stays current and shown.
 local function submit_now(buf)
   local meta = vim.b[buf].voicevim or {}
-  local text = text_of(buf)
+  local spec, body = parts(buf)
+  local text = table.concat(body, "\n")
   local trim = function(s) return (s:gsub("\n+$", "")) end
   if not text:find("%S") or trim(text) == trim(meta.seed or "") then
     return cancel_now(buf)
   end
-  local file = to_tempfile(buf)
-  finish(buf, "submitted", file)
-  M.host.submit({ file = file, target = meta.target or "", window = meta.window or "" })
+  local t, err = target.parse(spec)
+  if not (t and t.kind == "app") then
+    vim.fn.setreg("+", text)
+    vim.notify(string.format("voice-vim: copied — target %q %s", spec,
+      t and "cannot be sent to yet" or ("is not valid (" .. tostring(err) .. ")")), vim.log.levels.WARN)
+    return
+  end
+  local file = to_tempfile(buf, body)
+  finish(buf, "submitted", file, target.render(t))
+  M.host.submit({ file = file, target = t.bundle, window = t.window and tostring(t.window) or "" })
 end
 
 -- Hide: keep the note as the draft (history row stays open) and hide.

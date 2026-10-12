@@ -2,7 +2,9 @@
 """voice-vim-db: owns the session history database.
 
   voice-vim-db start  <id> <target> <seed-file>      record a new session
-  voice-vim-db finish <id> <outcome> <final-file>    record how it ended
+  voice-vim-db finish <id> <outcome> <final-file> [<target>]
+                                                      record how it ended (and
+                                                      where it went: a target spec)
   voice-vim-db list   [--limit N] [--exclude ID]      JSON array, newest first
   voice-vim-db get    <id>                            JSON object
   voice-vim-db delete <id>
@@ -22,7 +24,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   id          TEXT PRIMARY KEY,
   started_at  TEXT NOT NULL,      -- ISO 8601 UTC
   ended_at    TEXT,
-  target      TEXT,               -- bundle id of the paste target
+  target      TEXT,               -- target spec (app:<bundle>#<window>, clipboard,
+                                  -- tmux:…); older rows hold a bare bundle id
   seed_text   TEXT,               -- selection the buffer started with
   final_text  TEXT,               -- buffer contents at exit
   outcome     TEXT NOT NULL       -- open | submitted | cancelled
@@ -70,7 +73,20 @@ def read(path):
         return ""
 
 
-def short_app(bundle):
+def short_app(target):
+    """Short label for a target spec (lua/voice-vim/target.lua) or, in older
+    rows, a bare bundle id."""
+    if not target:
+        return "?"
+    kind, sep, rest = target.partition(":")
+    if not sep:
+        if target == "clipboard":
+            return "clipboard"
+        bundle = target
+    elif kind == "app":
+        bundle = rest.split("#", 1)[0]
+    else:
+        return kind
     if not bundle:
         return "?"
     return APP_NAMES.get(bundle) or bundle.rsplit(".", 1)[-1]
@@ -130,14 +146,16 @@ def main(argv):
     if cmd == "finish":
         if not enabled:
             return 0
-        sid, outcome, final_file = args
+        sid, outcome, final_file = args[:3]
+        target = args[3] if len(args) > 3 else ""
         text = read(final_file)
         con = connect()
         if outcome == "cancelled" and not text.strip():
             con.execute("DELETE FROM sessions WHERE id=?", (sid,))
         else:
-            con.execute("UPDATE sessions SET ended_at=?, final_text=?, outcome=? WHERE id=?",
-                        (now(), text, outcome, sid))
+            con.execute("UPDATE sessions SET ended_at=?, final_text=?, outcome=?, "
+                        "target=CASE WHEN ?='' THEN target ELSE ? END WHERE id=?",
+                        (now(), text, outcome, target, target, sid))
         con.commit()
         return 0
 

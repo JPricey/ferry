@@ -115,7 +115,7 @@ check("the blank note has no history row before show", "none", outcome(blank_id)
 local p2, id2 = show()
 check("after Submit the next show is fresh", true, p2 ~= p1 and id2 ~= id1)
 check("next show resumes the blank note", blank_id, id2)
-check("fresh note is empty", "", table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|"))
+check("fresh note is only the target header", "to: app:com.example.app#4242|", table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|"))
 -- history start runs in the background; give it a moment.
 vim.wait(3000, function() return outcome(id2) == "open" end, 20)
 check("fresh note has an open row", "open", outcome(id2))
@@ -147,7 +147,8 @@ local function has_buf(id)
   return false
 end
 check("a seeded show drops the unused blank note", "none false", outcome(blank4) .. " " .. tostring(has_buf(blank4)))
-check("seeded note shows the seed", "selected text|line two", table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|"))
+check("seeded note shows the header, then the seed", "to: app:com.example.app#4242|selected text|line two",
+  table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|"))
 vim.cmd("Submit")
 check("unchanged-seed Submit calls host.hide only", "hide", kinds())
 check("unchanged-seed Submit records a cancelled row", "cancelled", outcome(id4))
@@ -179,6 +180,142 @@ check("history excludes b:voicevim.id of the note", false, listed(id9))
 check("history lists other notes", true, listed(id1))
 show()
 vim.cmd("Cancel")
+
+-- --- the to: header (target spec) -----------------------------------------
+local function lines() return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "|") end
+local function header(spec) vim.api.nvim_buf_set_lines(0, 0, 1, false, { "to: " .. spec }) end
+local function body(b) vim.api.nvim_buf_set_lines(0, 1, -1, false, b) end
+local function sent() local c = calls[1] or { nil, {} }
+  return kinds() .. " " .. tostring(c[2].target) .. " " .. tostring(c[2].window) .. " " .. tostring(c[3])
+end
+
+reset()
+local _, idh = show()
+check("show: line 1 is the captured target, cursor on row 2", "to: app:com.example.app#4242 2",
+  vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] .. " " .. vim.api.nvim_win_get_cursor(0)[1])
+check("show: b:voicevim.auto_spec is the header's spec", "app:com.example.app#4242", vim.b.voicevim.auto_spec)
+body({ "only the body", "two" })
+vim.cmd("Submit")
+check("Submit: host.submit gets the header's target and window, the file only the body",
+  "submit com.example.app 4242 only the body\ntwo\n", sent())
+check("Submit: history row target is the spec", "submitted app:com.example.app#4242",
+  outcome(idh) .. " " .. tostring((row(idh) or {}).target))
+
+reset()
+local _, idh2 = show()
+header("app:com.other#7")
+body({ "elsewhere" })
+vim.cmd("Submit")
+check("header edited to app:com.other#7: sent there", "submit com.other 7 elsewhere\n", sent())
+check("edited header: history row target is that spec", "app:com.other#7", tostring((row(idh2) or {}).target))
+
+reset()
+show()
+header("app:com.nowin")
+body({ "no window" })
+vim.cmd("Submit")
+check("header without a window: sent to the app, window empty", "submit com.nowin  no window\n", sent())
+
+reset()
+show()
+set({ "no header here" })
+vim.cmd("Submit")
+check("header deleted: sent to the captured target", "submit com.example.app 4242 no header here\n", sent())
+
+reset()
+local _, idh3 = show()
+vim.cmd("Submit")
+check("header only: Submit cancels (hide, the empty row is dropped)", "hide none", kinds() .. " " .. outcome(idh3))
+
+for _, case in ipairs({
+  { "bogus:x", "is not valid" },
+  { "fleet:task:x", "cannot be sent to yet" },
+}) do
+  reset(); notices = {}; clip["+"] = nil
+  local _, idb = show()
+  header(case[1])
+  body({ "keep this", "safe" })
+  vim.cmd("Submit")
+  check("to: " .. case[1] .. ": no host call, + holds the body", " keep this\nsafe",
+    kinds() .. " " .. table.concat(clip["+"] or {}, "\n"))
+  check("to: " .. case[1] .. ": notifies copied — target", true,
+    (notices[#notices] or ""):find('voice-vim: copied — target "' .. case[1] .. '" ' .. case[2], 1, true) ~= nil)
+  vim.wait(3000, function() return outcome(idb) == "open" end, 20)
+  check("to: " .. case[1] .. ": note still current and shown, row open",
+    idb .. " to: " .. case[1] .. "|keep this|safe open",
+    tostring((note.current() or {}).id) .. " " .. lines() .. " " .. outcome(idb))
+  set({ "" })
+  vim.cmd("Cancel")
+end
+
+reset()
+show()
+check("resumed blank note gets the header, cursor on row 2", "to: app:com.example.app#4242| 2",
+  lines() .. " " .. vim.api.nvim_win_get_cursor(0)[1])
+note.show({ target = "com.b", window = "9" })
+check("resume from com.b 9 replaces the automatic header", "to: app:com.b#9|", lines())
+header("app:com.kept#1")
+note.show({ target = "com.c", window = "3" })
+check("resume keeps an edited header", "to: app:com.kept#1|", lines())
+set({ "" })
+vim.cmd("Cancel")
+note.show({ target = "", window = "" })
+check("nothing captured: the header is to: clipboard", "to: clipboard|", lines())
+local lb = vim.api.nvim_get_current_buf()
+local lm = vim.b[lb].voicevim; lm.auto_spec = nil; vim.b[lb].voicevim = lm
+set({ "old draft" })
+show()
+check("a draft from before headers gets one above its text", "to: app:com.example.app#4242|old draft", lines())
+vim.cmd("Cancel")
+
+-- A header already on line 1 with no auto_spec (a draft last held by a
+-- module without auto_spec) is never stacked under a second one.
+local function drop_auto()
+  local b = vim.api.nvim_get_current_buf()
+  local m = vim.b[b].voicevim; m.auto_spec = nil; vim.b[b].voicevim = m
+end
+reset()
+note.show({ target = "com.a", window = "1" })
+body({ "hello body" })
+drop_auto()
+note.draft()
+note.show({ target = "com.a", window = "1" })
+check("no auto_spec, header already there: one header", "to: app:com.a#1|hello body", lines())
+vim.cmd("Submit")
+check("no auto_spec, header already there: Submit sends only the body",
+  "submit com.a 1 hello body\n", sent())
+reset()
+note.show({ target = "com.a", window = "1" })
+set({ "to: app:com.a#1", "to: app:com.a#1", "stacked" })
+drop_auto()
+note.draft()
+note.show({ target = "com.a", window = "1" })
+check("no auto_spec, stacked headers: collapsed to one", "to: app:com.a#1|stacked", lines())
+vim.cmd("Submit")
+check("no auto_spec, stacked headers: Submit sends only the body", "submit com.a 1 stacked\n", sent())
+reset()
+note.show({ target = "com.a", window = "1" })
+body({ "follow" })
+drop_auto()
+note.draft()
+note.show({ target = "com.b", window = "9" })
+check("no auto_spec, header equal to the captured spec follows com.b 9", "to: app:com.b#9|follow", lines())
+note.show({ target = "com.c", window = "2" })
+check("... and is automatic again after that", "to: app:com.c#2|follow", lines())
+set({ "to: app:com.other#7", "edited" })
+drop_auto()
+note.draft()
+note.show({ target = "com.b", window = "9" })
+check("no auto_spec, edited header is kept", "to: app:com.other#7|edited", lines())
+note.show({ target = "com.d", window = "4" })
+check("... and still kept on the next show", "to: app:com.other#7|edited", lines())
+set({ "" })
+vim.cmd("Cancel")
+reset()
+note.show({ target = "com.a", window = "1" })
+set({ "to: app:com.a#1", "to: app:com.a#1", "direct" })
+vim.cmd("Submit")
+check("Submit drops header repeats under line 1", "submit com.a 1 direct\n", sent())
 
 -- --- voice keys: Flow toggle and the wait for its last paste -------------
 -- Flow pastes into the note as a bracketed paste, i.e. a vim.paste call.

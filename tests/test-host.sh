@@ -90,7 +90,7 @@ printf 'selected text\nsecond line\n' >"$work/seed.txt"
 ask "nvim_buf_set_lines(0, 0, -1, v:false, ['edited after draft'])" >/dev/null
 c=$("$host" show com.example.app 4242 "$work/seed.txt")
 check "seeded show returns a new path" yes "$(test -n "$c" && test "$c" != "$a" && echo yes)"
-check "seed text is in the buffer, mode i" "selected text|second line i" \
+check "seed text is in the buffer below the header, mode i" "to: app:com.example.app#4242|selected text|second line i" \
   "$(ask 'join(getline(1, "$"), "|")." ".mode()')"
 check "b:voicevim.seed holds the seed text" "selected text|second line" "$(ask 'substitute(b:voicevim.seed, "\n", "|", "g")')"
 check "switching to a seeded note saves the previous one" "edited after draft" "$(cat "$a" 2>&1)"
@@ -158,7 +158,7 @@ g=$("$host" show com.example.app 4242)
 ask "luaeval('(function() local n = require\"voice-vim.note\"; n.api = 1; n.old = true; vim.g.voicevim_gui = nil; vim.cmd(\"vsplit | split\"); return 1 end)()')" >/dev/null
 "$host" draft >/dev/null
 h=$("$host" show com.example.app 4242)
-check "old server: show reloads the note module and keeps the draft" "2 true $g" \
+check "old server: show reloads the note module and keeps the draft" "3 true $g" \
   "$(ask 'luaeval("require\"voice-vim.note\".api")') $(ask 'luaeval("require\"voice-vim.note\".old == nil")') $h"
 check "old server: show applies the layout" "history $(basename "$g")" "$(wins)"
 check "old server: show loads the GUI settings" "{'bg': '#001e27', 'font': 'Test Mono:h13'}" "$(ask 'string(g:voicevim_gui)')"

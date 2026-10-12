@@ -43,8 +43,10 @@ setup step lands.
 
 1. Click into a text field, for example a Slack message box.
 2. Press **Ctrl+Option+V**. The voice-vim window appears with a note in
-   insert mode. The very first press after Hammerspoon starts also opens
-   Neovide, so it takes a moment; after that it is instant.
+   insert mode. Its first line, `to: app:…`, says where the text will go
+   (Slack's window here); the cursor waits on the line below. The very
+   first press after Hammerspoon starts also opens Neovide, so it takes a
+   moment; after that it is instant.
 3. Dictate with your usual Wispr Flow shortcut. Flow types into the note.
 4. Fix anything with Vim.
 5. Press **Ctrl-X**. The window hides, Slack comes back to the front, and
@@ -57,7 +59,8 @@ That is the whole loop. To throw the text away instead, press **Ctrl-Q**.
 There is only ever one voice-vim window. The hotkey shows it from any app
 and hides it again from the note, putting you back in the window you came
 from. A hidden note is kept as a draft: the next press brings the same note
-back, and Ctrl-X then sends it to the window you pressed from that time.
+back, and Ctrl-X then sends it to the window you pressed from that time
+(its `to:` line follows, unless you edited it).
 
 `:q` in the note also hides it; it never quits voice-vim. After you send or
 cancel, the next press starts a fresh note.
@@ -106,6 +109,23 @@ told apart.
 - After every send, the text stays on your clipboard, so you can paste it
   again elsewhere.
 
+## The `to:` line
+
+Every note starts with a line like `to: app:com.tinyspeck.slackmacgap#4242`:
+the app (its bundle id) and window you pressed the hotkey from. It reads
+`to: clipboard` when no app was captured. Only the text below it is sent.
+
+- **Send somewhere else** by editing the line: `app:<bundle id>` sends to
+  that app's front window, and `app:<bundle id>#<window id>` to that
+  window.
+- **Delete the line** and Ctrl-X sends to the window you pressed from.
+- **Hide and come back from another app**: an untouched `to:` line follows
+  you to the new window; one you edited stays as you left it.
+- **Other targets are not sent yet.** `to: clipboard`, `to: tmux:…`,
+  `to: fleet:…`, or a line voice-vim cannot read: Ctrl-X puts the text on
+  the clipboard, says "copied — target …", and leaves the note open so
+  you can fix the line or paste by hand.
+
 ## Cancelling
 
 Ctrl-Q hides the window, sends nothing, throws the note away, and puts you
@@ -132,7 +152,7 @@ On an entry in the sidebar:
 | Key | What it does |
 | --- | --- |
 | `Enter` | Insert it into your buffer |
-| `p` | Send it straight to the target app |
+| `p` | Replace your note's text with it and send it (your `to:` line stays) |
 | `y` | Copy it to the clipboard |
 | `K` | Preview the full text |
 | `d` | Delete it |

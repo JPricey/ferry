@@ -483,7 +483,7 @@ do
   local e = execs(rec, "'show' 'com.example.target' '4242'")[1]
   local seed = e and e.cmd:match("'4242' '([^']+)'")
   check("captureSelection: show gets a seed file", true, seed ~= nil)
-  check("captureSelection: note holds the selection", "picked text", ask(sock, 'getline(1)'))
+  check("captureSelection: note holds the selection below its to: line", "picked text", ask(sock, 'getline(2)'))
   check("captureSelection: seed file removed", nil, seed and io.open(seed, "r"))
   check("captureSelection: clipboard restored", "old clipboard", rec.pasteboard.contents)
   stop(sock)

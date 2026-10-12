@@ -56,11 +56,14 @@ rm -f "$work/open.log"
 pid=$(ask 'getpid()')
 
 "$host" show com.example.app 4242 >/dev/null
+check "after show: line 1 is the target header, insert mode on row 2" "to: app:com.example.app#4242 i 2" \
+  "$(ask 'getline(1)." ".mode()." ".line(".")')"
 id=$(ask 'b:voicevim.id'); waitrow "$id" open
 send 'server draft<Esc>:q<CR>'
 check ":q hides via voicevim-hide" hide "$(url_kind "$(opened)")"
 check ":q leaves the server running" "$pid" "$(ask 'getpid()')"
-check ":q keeps the draft, row stays open" "server draft open" "$(cat "$(ask 'g:voicevim_draft')" 2>&1) $(outcome "$id")"
+check ":q keeps the draft, row stays open" "to: app:com.example.app#4242
+server draft open" "$(cat "$(ask 'g:voicevim_draft')" 2>&1) $(outcome "$id")"
 
 "$host" show com.example.app 4242 >/dev/null
 send '<Esc>:wq<CR>'
@@ -70,6 +73,8 @@ check ":wq submits the resumed draft" "submit submitted" "$(url_kind "$(opened)"
 id=$(ask 'b:voicevim.id'); waitrow "$id" open
 send 'by keys<C-x>'
 check "<C-x> in insert mode submits" "submit submitted" "$(url_kind "$(opened)") $(outcome "$id")"
+check "the history row's target is the header's spec" "app:com.example.app#4242" \
+  "$("$db" get "$id" | python3 -c 'import json,sys;print(json.load(sys.stdin)["target"])')"
 
 "$host" show com.example.app 4242 >/dev/null
 id=$(ask 'b:voicevim.id'); waitrow "$id" open

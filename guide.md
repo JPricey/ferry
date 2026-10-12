@@ -10,10 +10,22 @@ with your note in insert mode, ready for dictation; the window you were in
 (not just its app) becomes the paste target. Press it again from the note to
 hide it and go back to that window.
 
+## Choose where it goes: the `to:` line
+
+The note's first line names its target, for example
+`to: app:com.tinyspeck.slackmacgap#4242` (the app and window you pressed
+from), or `to: clipboard` when no app was captured; you type below it, and
+only the text below it is sent. Edit it like any text to send elsewhere
+(`app:<bundle id>` with an optional `#<window id>`); delete it to use the
+captured window. Any other target (`clipboard`, `tmux:…`, `fleet:…`) or a
+line that does not parse is not sent yet: the text goes on the clipboard
+with a "copied — target …" message and the note stays open.
+
 ## Drafts
 
 Hiding the note (the hotkey, or `:q`) keeps it as a draft, and the next
-press brings the same note back, aimed at the window you pressed from. If
+press brings the same note back, aimed at the window you pressed from (an
+unedited `to:` line follows; one you edited is kept). If
 Flow is still recording from `Ctrl-S`, the note stays up until Flow's text
 lands, then hides; `Ctrl-X` or `Ctrl-Q` pressed meanwhile send or cancel
 instead, still after the text lands.
@@ -117,8 +129,8 @@ back.
 
 ## Reuse a past dictation
 
-In the sidebar, `<CR>` inserts the entry into your buffer, `p` submits it
-straight to the target app, `y` copies it to the clipboard, `K` previews the
+In the sidebar, `<CR>` inserts the entry into your buffer, `p` replaces the
+note's text with it (keeping the `to:` line) and sends it, `y` copies it to the clipboard, `K` previews the
 full text, and `d` deletes it. Cancelled notes with text show a `~`.
 
 ## Edit the buffer

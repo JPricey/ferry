@@ -58,7 +58,7 @@ rtp_fix="local vvr = $(luastr "$root"); if not vim.tbl_contains(vim.opt.rtp:get(
 # The note module, as a Lua expression (repo put on rtp first). A server
 # started before the module last changed (note.api differs) reloads it,
 # keeping its state and host.
-note_api=2
+note_api=3
 note_mod="(function(want) $rtp_fix; local n = require(\"voice-vim.note\"); if n.api == want then return n end; package.loaded[\"voice-vim.note\"] = nil; local ok, m = pcall(require, \"voice-vim.note\"); if not ok then package.loaded[\"voice-vim.note\"] = n; return n end; m.state = n.state; if n.host ~= n.default_host then m.host = n.host end; return m end)($note_api)"
 
 ghostty_bin() {

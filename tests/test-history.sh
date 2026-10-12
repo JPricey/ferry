@@ -24,6 +24,16 @@ check "exclude current session" "aaa" "$("$db" list --exclude bbb | python3 -c '
 check "get returns text" "first line
 second line" "$("$db" get aaa | python3 -c 'import json,sys;print(json.load(sys.stdin)["text"].rstrip())')"
 check "outcome recorded" "submitted cancelled" "$("$db" get aaa | python3 -c 'import json,sys;print(json.load(sys.stdin)["outcome"])') $("$db" get bbb | python3 -c 'import json,sys;print(json.load(sys.stdin)["outcome"])')"
+# finish takes the target spec as an optional 5th argument; app labels read specs.
+"$db" start spec1 com.tinyspeck.slackmacgap "$empty"
+"$db" finish spec1 submitted "$fin" 'app:com.tinyspeck.slackmacgap#4242'
+check "finish with a spec records it" "app:com.tinyspeck.slackmacgap#4242 Slack" "$("$db" get spec1 | python3 -c 'import json,sys;r=json.load(sys.stdin);print(r["target"],r["app"])')"
+"$db" start spec2 x "$empty"; "$db" finish spec2 submitted "$fin" clipboard
+"$db" start spec3 x "$empty"; "$db" finish spec3 submitted "$fin" 'tmux:default:%12'
+"$db" start spec4 com.example.app "$empty"; "$db" finish spec4 submitted "$fin" ''
+check "app labels: clipboard, tmux, no spec keeps the start target" "clipboard tmux app" \
+  "$(for i in spec2 spec3 spec4; do "$db" get $i | python3 -c 'import json,sys;print(json.load(sys.stdin)["app"])'; done | paste -sd' ' -)"
+for i in spec1 spec2 spec3 spec4; do "$db" delete $i; done
 "$db" delete bbb
 check "delete" "1" "$("$db" list | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')"
 check "VOICE_VIM_HISTORY=0 is a no-op" "1" "$(VOICE_VIM_HISTORY=0 "$db" start zzz x "$seed"; VOICE_VIM_HISTORY=0 "$db" finish zzz submitted "$fin"; "$db" list | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')"
@@ -48,7 +58,18 @@ out[#out + 1] = "LINE1=" .. lines[1]
 vim.api.nvim_set_current_win(h.state.win)
 for ln = 1, #lines do if lines[ln]:find("first line", 1, true) then vim.api.nvim_win_set_cursor(0, { ln, 0 }) end end
 h.insert()
-out[#out + 1] = "MAIN=" .. table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(h.state.main_win), 0, -1, false), "|")
+local main = vim.api.nvim_win_get_buf(h.state.main_win)
+out[#out + 1] = "MAIN=" .. table.concat(vim.api.nvim_buf_get_lines(main, 0, -1, false), "|")
+-- p replaces the body, keeps an edited to: line and submits to it.
+local sent = "none"
+note.host = { hide = function() end, submit = function(p)
+  sent = p.target .. "#" .. p.window .. " " .. table.concat(vim.fn.readfile(p.file), "|")
+end }
+vim.api.nvim_buf_set_lines(main, 0, 2, false, { "to: app:com.other#7", "old text" })
+vim.api.nvim_set_current_win(h.state.win)
+for ln = 1, #lines do if lines[ln]:find("first line", 1, true) then vim.api.nvim_win_set_cursor(0, { ln, 0 }) end end
+h.paste_to_target()
+out[#out + 1] = "SENT=" .. sent
 io.stdout:write(table.concat(out, "\n"), "\n")
 vim.cmd("qall!")
 LUA
@@ -56,7 +77,8 @@ out=$(VOICE_VIM_NOTES_DIR="$notes/n" VOICE_VIM_SIDEBAR=1 perl -e "alarm 20; exec
 check "note opens the sidebar, focus stays on the note" "WINS=2 ROWS=1 CUR=main" "$(grep -o 'WINS=[0-9]* ROWS=[0-9]* CUR=[a-z]*' <<<"$out")"
 check "sidebar is on the left" "LEFT=true" "$(grep -o 'LEFT=[a-z]*' <<<"$out")"
 check "sidebar shows date header" "LINE1=── Today" "$(grep '^LINE1=' <<<"$out" | sed 's/ *$//')"
-check "<CR> inserts text into the empty note" "MAIN=first line|second line" "$(grep '^MAIN=' <<<"$out")"
+check "<CR> inserts text below the to: line of the empty note" "MAIN=to: app:com.example.app#4242|first line|second line" "$(grep '^MAIN=' <<<"$out")"
+check "p replaces the body and sends it to the to: line's target" "SENT=com.other#7 first line|second line" "$(grep '^SENT=' <<<"$out")"
 
 rm -rf "$seed" "$fin" "$empty" "$notes" "$VOICE_VIM_DB"
 exit $fail
