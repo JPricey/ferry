@@ -44,14 +44,13 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 - **Targets chosen after writing: question — ANSWERED 2026-10-12: no Enter, ever** (was: press Enter after a tmux paste? Recommended: only when the pane is running `claude` (submits the prompt); other panes get the paste only. Agent defaults: picker `<C-t>`, copy-and-hide `<C-y>` (insert and normal mode); the `to:` line holds the raw spec with a human label shown beside it as virtual text; recent targets kept in memory only; copy-and-hide records the note as sent to `clipboard`.
 - **Notes and history browser: H6 failed twice** (migration script). Second failure is only the hint it prints for a non-default `--to`: it omits `FERRY_INDEX`, so following it would rebuild the default index from that folder. Recommend: allow a third attempt to make the hint `FERRY_NOTES_DIR=<dest> FERRY_INDEX=<dest>/../index-<name>.sqlite ferry-notes rebuild` (or drop the hint). Nothing else depends on H6.
 - **Rename to ferry: run the migration NOW** (R1 merged; the hotkey is dead until you do): `cd ~/Code/voice-vim && ./install.sh`. If it prints a draft path, open that file and paste the text into a new note. Then Ctrl+Option+V shows one ferry window and `<leader>h` lists your history. Tell the orchestrator when done (R2 then removes the migration code). Later, after the session: `mv ~/Code/voice-vim ~/Code/ferry && cd ~/Code/ferry && ./install.sh`.
-- **Hold to talk: Joe checks** (P1–P4 merged; P5, a false-alert fix, comes after the rename). Reload Config first, start from a Slack message field:
+- **Hold to talk: Joe checks** (P1–P5 merged, agent checks pass). Reload Config first, start from a Slack message field:
   1. Console shows `bound ctrl+alt+v` and the talk key bound (`… (talk)`).
   2. Hold Ctrl+Option+B, say "one two three four five", release: the note appears, Flow's indicator shows while held, the text lands in the note in insert mode with "one" not clipped, nothing lands in Slack. Copy the `talk:` lines and `show: host focused after` from the console.
   3. Cold start: `~/Code/ferry/bin/ferry-host stop`, quit Neovide, hold, speak at once, release before the window appears: text lands in the note, not Slack.
   4. Note in front, normal mode mid-line: hold, speak, release: inserted at the cursor, the note never hides.
   5. Hold, speak, release, Ctrl-X at once: Slack gets the whole sentence. Again with Ctrl-Q: nothing reaches Slack.
   6. Release Ctrl+Option before B, and another time B first: Flow stops both times and the text lands in the note.
-  Known until P5: Ctrl-X/Ctrl-Q or a Ctrl+Option+V tap while still holding B gives a wrong "Flow is still recording" alert 5 s later.
 - **GROUND_TRUTHS.md: proposed addition** (Joe's answer 2026-10-12): new decision 16, "Sending to a tmux pane only pastes; ferry never presses Enter (Joe, 2026-10-12)." Say yes and the orchestrator adds it.
 
 ## Diagnose paste and the hotkey
@@ -309,7 +308,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 
 ## Hold to talk
 
-- **Status:** in-progress
+- **Status:** needs-joe
 - **Needs:** One instance toggled by a hotkey
 - **Deliverable:** a second hotkey that opens ferry with Wispr Flow recording while the key is held. Joe expects this to be his most common way in (2026-10-12).
 - **Scope:**
