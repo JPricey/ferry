@@ -157,6 +157,11 @@ On an entry in the sidebar:
 | `K` | Preview the full text |
 | `d` | Delete it |
 
+The note keys also work while the sidebar is focused, and act on your note:
+`Ctrl-X`, `ZZ`, `:wq` and `:x` send it, `Ctrl-Q` and `ZQ` cancel it, `:q`
+hides, and `Ctrl-S` starts or stops Flow (focus moves back to the note, in
+insert mode at the end of the text).
+
 Cancelled notes that had text are marked with `~`. The history lives in
 `~/Library/Application Support/voice-vim/history.sqlite`.
 

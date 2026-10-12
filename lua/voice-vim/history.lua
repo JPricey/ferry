@@ -7,7 +7,14 @@
 --   K     preview the full text in a float
 --   d     delete it from history
 --   R     refresh        <Tab> back to the dictation buffer     q  close
+-- The note keys (<C-x>, ZZ, :wq, :x send; <C-q>, ZQ cancel; :q hides; <C-s>
+-- toggles Flow) act on the tab's note, as in the note (note.bind_note_keys).
 local M = {}
+
+-- Bumped when the module changes in a way a running server must pick up:
+-- the note module reloads an older one (keeping M.state). 1: open() binds
+-- the note keys on the sidebar.
+M.api = 1
 
 M.width = 38
 M.state = { win = nil, buf = nil, main_win = nil, rows = {}, preview_win = nil }
@@ -263,6 +270,8 @@ function M.open()
   map("<Tab>", M.focus_main, "back to buffer")
   map("q", M.close, "close sidebar")
   map("<Esc>", M.close_preview, "close preview")
+  -- Send, cancel, hide and Flow keys act on the note, not on this buffer.
+  pcall(function() require("voice-vim.note").bind_note_keys(st.buf) end)
 
   vim.api.nvim_create_autocmd("CursorMoved", { buffer = st.buf, callback = M.close_preview })
   vim.api.nvim_create_autocmd("BufWipeout", { buffer = st.buf, callback = function()

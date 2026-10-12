@@ -120,6 +120,90 @@ check "after Submit the window shows a fresh note" "markdown 1 2" \
 send ':q<CR>'
 check "after Submit, :q in that window hides" hide "$(url_kind "$(opened)")"
 check "after Submit, :q in that window leaves the server running" "$pid" "$(ask 'getpid()')"
+
+# Note keys pressed in the history sidebar act on the tab's note. Joe's
+# config maps normal <C-x> to :write globally; on the sidebar (a nofile
+# buffer) that failed with E382 and nothing was sent. Same map here.
+ask "luaeval('vim.keymap.set(\"n\", \"<C-x>\", vim.cmd.write) or 1')" >/dev/null
+to_sidebar() {
+  send '<Esc><Cmd>lua vim.api.nvim_set_current_win(require"voice-vim.history".state.win)<CR>'
+  ask 'execute("let v:errmsg = \"\"")' >/dev/null
+}
+side_key() { # keys text: show a note, type text, press keys in the sidebar
+  "$host" show com.example.app 4242 >/dev/null
+  id=$(ask 'b:voicevim.id'); waitrow "$id" open
+  send "$2"; to_sidebar
+  side=$(ask 'bufname()')
+  send "$1"
+}
+# Without the sidebar's own <C-x> (as before the fix), Joe's error.
+"$host" show com.example.app 4242 >/dev/null
+to_sidebar; ask "luaeval('vim.keymap.del(\"n\", \"<C-x>\", { buffer = 0 }) or bufname()')" >/dev/null
+send '<C-x>'
+check "sidebar without its <C-x> map: global :write fails (Joe's report)" \
+  "voice-vim://history E5108: Error executing lua: Vim:E382: Cannot write, 'buftype' option is set" \
+  "$(ask 'bufname()') $(ask 'v:errmsg' | head -1)"
+sleep 0.3; rm -f "$work/open.log"
+side_key '<C-x>' 'from sidebar'
+check "<C-x> in the sidebar sends the note" "voice-vim://history submit submitted" \
+  "$side $(url_kind "$(opened)") $(outcome "$id")"
+check "<C-x> in the sidebar: no error, focus on the note" " 1" "$(ask 'v:errmsg') $(ask 'exists("b:voicevim")')"
+side_key ZZ 'zz'
+check "ZZ in the sidebar sends the note" "submit submitted" "$(url_kind "$(opened)") $(outcome "$id")"
+side_key ':wq<CR>' 'wq'
+check ":wq in the sidebar sends the note" "submit submitted" "$(url_kind "$(opened)") $(outcome "$id")"
+side_key ':x<CR>' 'x'
+check ":x in the sidebar sends the note" "submit submitted" "$(url_kind "$(opened)") $(outcome "$id")"
+side_key '<C-q>' 'drop'
+check "<C-q> in the sidebar cancels the note" "hide cancelled" "$(url_kind "$(opened)") $(outcome "$id")"
+side_key ZQ 'drop'
+check "ZQ in the sidebar cancels the note" "hide cancelled" "$(url_kind "$(opened)") $(outcome "$id")"
+side_key ':q<CR>' 'kept'
+check ":q in the sidebar hides and keeps the draft, to: line and all" "hide to: app:com.example.app#4242|kept open 2" \
+  "$(url_kind "$(opened)") $(paste -sd'|' - <"$(ask 'g:voicevim_draft')" 2>&1) $(outcome "$id") $(ask 'winnr("$")')"
+side_key '<C-s>' ' more'
+# Joe stays in insert mode (GT 8), at the end of the body, off the to: line.
+check "<C-s> in the sidebar starts Flow from the note, in insert mode at the end of the body" \
+  "-g wispr-flow://start-hands-free 1 i 1 1 1" \
+  "$(opened) $(ask 'exists("b:voicevim")') $(ask "mode().' '.(line('.') == line('\$')).' '.(col('.') == col('\$')).' '.(line('.') > 1)")"
+send '<C-s>'; opened >/dev/null
+
+# Live upgrade: a server running the note at api 4 with 4f113ac's history
+# module (sidebar without note keys). show reloads the note to api 5; the
+# sidebar reopened with q then :History or <leader>h has the note keys.
+old=$work/old; mkdir -p "$old/lua/voice-vim"; ln -s "$root/bin" "$old/bin"
+for m in note history; do
+  git -C "$root" show "4f113ac:lua/voice-vim/$m.lua" >"$old/lua/voice-vim/$m.lua"
+done
+cat >"$work/old.lua" <<EOF
+local h = require("voice-vim.history"); h.close()
+local n = require("voice-vim.note")
+local on = dofile("$old/lua/voice-vim/note.lua"); on.state = n.state
+package.loaded["voice-vim.note"] = on
+package.loaded["voice-vim.history"] = dofile("$old/lua/voice-vim/history.lua")
+on.apply_options(vim.api.nvim_get_current_buf())
+EOF
+"$host" show com.example.app 4242 >/dev/null
+send '<Esc>'; ask "execute('luafile $work/old.lua')" >/dev/null
+send ':History<CR>'; to_sidebar
+check "old server: note api 4, old sidebar has no <C-x>" "4 nil 0" \
+  "$(ask 'luaeval("require\"voice-vim.note\".api")') $(ask 'luaeval("tostring(require\"voice-vim.history\".api)")') $(ask "get(maparg('<C-x>', 'n', 0, 1), 'buffer', 0)")"
+upgrade_key() { # reopen: keys that reopen the sidebar from the note
+  "$host" show com.example.app 4242 >/dev/null
+  id=$(ask 'b:voicevim.id'); waitrow "$id" open
+  send "upgraded"; to_sidebar; send 'q'
+  send "<Esc>$1"; to_sidebar
+  side="$(ask 'winnr("$")') $(ask 'bufname()')"
+  send '<C-x>'
+}
+upgrade_key ':History<CR>'
+check "after upgrade: q then :History, <C-x> in the sidebar sends the note" \
+  "5 2 voice-vim://history submit submitted " \
+  "$(ask 'luaeval("require\"voice-vim.note\".api")') $side $(url_kind "$(opened)") $(outcome "$id") $(ask 'v:errmsg')"
+upgrade_key '\h'
+check "after upgrade: q then <leader>h, <C-x> in the sidebar sends the note" \
+  "2 voice-vim://history submit submitted " "$side $(url_kind "$(opened)") $(outcome "$id") $(ask 'v:errmsg')"
+check "server still running after the sidebar keys" "$pid" "$(ask 'getpid()')"
 "$host" stop
 check "submit file survives voice-vim-host stop" "to outbox" "$(cat "$file" 2>&1)"
 

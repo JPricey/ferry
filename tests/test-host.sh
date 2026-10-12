@@ -159,10 +159,10 @@ check "an existing Normal guibg is left alone" "#123456" "$(bg)"
 
 # --- a server started before this change gets layout and GUI on show ---------
 g=$("$host" show com.example.app 4242)
-ask "luaeval('(function() local n = require\"voice-vim.note\"; n.api = 1; n.old = true; vim.g.voicevim_gui = nil; vim.cmd(\"vsplit | split\"); return 1 end)()')" >/dev/null
+ask "luaeval('(function() local n = require\"voice-vim.note\"; n.api = 4; n.old = true; vim.g.voicevim_gui = nil; vim.cmd(\"vsplit | split\"); return 1 end)()')" >/dev/null
 "$host" draft >/dev/null
 h=$("$host" show com.example.app 4242)
-check "old server: show reloads the note module and keeps the draft" "4 true $g" \
+check "old server (note api 4): show reloads the note module to 5 and keeps the draft" "5 true $g" \
   "$(ask 'luaeval("require\"voice-vim.note\".api")') $(ask 'luaeval("require\"voice-vim.note\".old == nil")') $h"
 check "old server: show applies the layout" "history $(basename "$g")" "$(wins)"
 check "old server: show loads the GUI settings" "{'bg': '#001e27', 'font': 'Test Mono:h13'}" "$(ask 'string(g:voicevim_gui)')"
@@ -218,8 +218,8 @@ u=$("$host" show com.example.app 4242)
 ask "nvim_buf_set_lines(0, 1, -1, v:false, ['upgrade draft'])" >/dev/null
 "$host" draft >/dev/null
 ask "luaeval('(function() require\"voice-vim.note\".api = 3; local f = require\"voice-vim.flow\"; f.api = nil; f.adopt_start = nil; return 1 end)()')" >/dev/null
-check "API-3 server: talk reloads note (api 4) and flow, keeps the draft and its target" \
-  "talk $u 4 2 to: app:com.example.app#4242|upgrade draft com.example.app 4242 true" \
+check "API-3 server: talk reloads note (api 5) and flow, keeps the draft and its target" \
+  "talk $u 5 2 to: app:com.example.app#4242|upgrade draft com.example.app 4242 true" \
   "$("$host" talk) $(lua 'require"voice-vim.note".api') $(lua 'require"voice-vim.flow".api') $(ask 'join(getline(1, "$"), "|")') $(ask 'b:voicevim.target." ".b:voicevim.window') $(rec)"
 check "API-3 server: release after the upgrade sends one stop" "released|-g wispr-flow://stop-hands-free" \
   "$("$host" release)|$(sleep 0.3; opened)"

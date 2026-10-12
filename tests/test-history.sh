@@ -70,6 +70,19 @@ vim.api.nvim_set_current_win(h.state.win)
 for ln = 1, #lines do if lines[ln]:find("first line", 1, true) then vim.api.nvim_win_set_cursor(0, { ln, 0 }) end end
 h.paste_to_target()
 out[#out + 1] = "SENT=" .. sent
+-- Reopened by :History (not through show), the sidebar still has the note
+-- keys, and they act on the note: <C-x> sends the body to the edited to:
+-- line. Joe's global <C-x> (:write) must not run.
+note.show({ target = "com.example.app", window = "4242" })
+local fresh = vim.api.nvim_win_get_buf(h.state.main_win)
+vim.api.nvim_buf_set_lines(fresh, 0, -1, false, { "to: app:com.third#9", "side text", "more" })
+vim.keymap.set("n", "<C-x>", vim.cmd.write)
+h.close(); vim.cmd("History")
+vim.api.nvim_set_current_win(h.state.win)
+sent = nil
+vim.v.errmsg = ""
+vim.api.nvim_feedkeys(vim.keycode("<C-x>"), "xt", false)
+out[#out + 1] = "SIDEKEY=" .. tostring(sent) .. " err=" .. vim.v.errmsg
 io.stdout:write(table.concat(out, "\n"), "\n")
 vim.cmd("qall!")
 LUA
@@ -79,6 +92,7 @@ check "sidebar is on the left" "LEFT=true" "$(grep -o 'LEFT=[a-z]*' <<<"$out")"
 check "sidebar shows date header" "LINE1=── Today" "$(grep '^LINE1=' <<<"$out" | sed 's/ *$//')"
 check "<CR> inserts text below the to: line of the empty note" "MAIN=to: app:com.example.app#4242|first line|second line" "$(grep '^MAIN=' <<<"$out")"
 check "p replaces the body and sends it to the to: line's target" "SENT=com.other#7 first line|second line" "$(grep '^SENT=' <<<"$out")"
+check "<C-x> in a sidebar opened by :History sends the body to the edited to: line" "SIDEKEY=com.third#9 side text|more err=" "$(grep '^SIDEKEY=' <<<"$out")"
 
 rm -rf "$seed" "$fin" "$empty" "$notes" "$VOICE_VIM_DB"
 exit $fail

@@ -125,7 +125,9 @@ empty note, or one unchanged from its starting text, also cancels.
 Every note is recorded. `:History` or `<leader>h` toggles a sidebar on the
 left listing past dictations newest first, grouped by day (it opens with
 the note); press `<Tab>` to jump
-back.
+back. The note keys work there too and act on the note, not the sidebar:
+`<C-x>`, `ZZ`, `:wq` and `:x` send it, `<C-q>` and `ZQ` cancel, `:q` hides
+and `<C-s>` toggles Flow from insert mode at the end of the note.
 
 ## Reuse a past dictation
 

@@ -30,28 +30,38 @@
 -- to the header's target, or to the captured one when line 1 is not a header.
 local M = {}
 
--- note.lua needs flow's api 2 (adopt_start, release). A server that loaded
--- an older voice-vim.flow before them reloads it here, keeping its state
--- (recording, the pending wait), as voice-vim-host does for this module.
-local FLOW_API = 2
-local flow = require("voice-vim.flow")
-if flow.api ~= FLOW_API then
-  local old = flow
-  package.loaded["voice-vim.flow"] = nil
-  local ok, m = pcall(require, "voice-vim.flow")
-  if ok and type(m) == "table" and m.api == FLOW_API then
+-- A module note.lua needs at api `want` or later. A running server can hold
+-- one loaded before that (api lower or unset); reload it, keeping its
+-- M.state, as voice-vim-host does for this module. If the reload fails or
+-- is no newer, the loaded one stays.
+local function current(name, want)
+  local old = require(name)
+  if (old.api or 0) >= want then return old end
+  package.loaded[name] = nil
+  local ok, m = pcall(require, name)
+  if ok and type(m) == "table" and (m.api or 0) >= want then
     m.state = old.state
-    flow = m
-  else
-    package.loaded["voice-vim.flow"] = old
+    return m
   end
+  package.loaded[name] = old
+  return old
 end
+
+-- flow api 2: adopt_start, release. Its state keeps a recording and the
+-- pending wait across the reload.
+local flow = current("voice-vim.flow", 2)
 local target = require("voice-vim.target")
 
 -- Bumped when the module changes in a way an already-running server must
 -- pick up: bin/voice-vim-host reloads the module (keeping M.state and a
 -- swapped M.host) when the loaded one reports a different api.
-M.api = 4
+M.api = 5
+
+-- history api 1: open() binds the note keys on the sidebar. Reloaded now
+-- when already loaded, so a sidebar opened from a :History command an older
+-- note module defined has them too.
+local function history() return current("voice-vim.history", 1) end
+if package.loaded["voice-vim.history"] then history() end
 
 -- The current (unfinished) note: { id = uuid, path = file, buf = bufnr,
 -- unstarted = true while it has no history row (see blank()) }.
@@ -208,9 +218,8 @@ function M.apply_options(buf)
   vim.keymap.set("n", "<leader>d", "<Cmd>Dictate<CR>", { buffer = buf, silent = true })
   vim.keymap.set({ "n", "i" }, "<C-s>", "<Cmd>lua require'voice-vim.flow'.toggle()<CR>",
     { buffer = buf, silent = true })
-  vim.api.nvim_buf_create_user_command(buf, "History", function()
-    require("voice-vim.history").toggle()
-  end, { force = true })
+  vim.api.nvim_buf_create_user_command(buf, "History", function() M.toggle_history() end,
+    { force = true })
   vim.keymap.set("n", "<leader>h", "<Cmd>History<CR>", { buffer = buf, silent = true })
   -- Submit, cancel and hide. A note never quits the server: :wq and :x
   -- submit, :q hides and keeps the draft.
@@ -277,7 +286,7 @@ end
 -- a modified buffer in one just becomes hidden. The sidebar is refreshed
 -- (after show returns) when the note changed since it was last listed.
 local function layout(opts)
-  local hist = require("voice-vim.history")
+  local hist = history()
   local note_win = vim.api.nvim_get_current_win()
   local tab = vim.api.nvim_get_current_tabpage()
   local want = sidebar_on(opts)
@@ -302,6 +311,9 @@ local function layout(opts)
     pcall(hist.open)
     if vim.api.nvim_win_is_valid(note_win) then vim.api.nvim_set_current_win(note_win) end
   end
+  -- Also here, not only in hist.open: a sidebar an older history module
+  -- opened gets the keys once the note module reloads.
+  if hist.is_open() then M.bind_note_keys(hist.state.buf) end
   M.state.listed = id
 end
 
@@ -672,6 +684,81 @@ end
 function M.cancel(buf) buf = bufnr(buf); after_flow(buf, cancel_now) end
 function M.submit(buf) buf = bufnr(buf); after_flow(buf, submit_now) end
 function M.hide(buf) buf = bufnr(buf); after_flow(buf, hide_now) end
+
+-- The note of the current tab: the buffer with b:voicevim in the sidebar's
+-- main window, else in any window of the tab, else the current note.
+-- Returns buf and its window in the tab (nil when not shown), or nil.
+function M.tab_note()
+  local tab = vim.api.nvim_get_current_tabpage()
+  local wins = vim.api.nvim_tabpage_list_wins(tab)
+  local hist = package.loaded["voice-vim.history"]
+  local main = hist and hist.state and hist.state.main_win
+  if main and vim.api.nvim_win_is_valid(main) and vim.api.nvim_win_get_tabpage(main) == tab then
+    table.insert(wins, 1, main)
+  end
+  for _, w in ipairs(wins) do
+    local b = vim.api.nvim_win_get_buf(w)
+    if type(vim.b[b].voicevim) == "table" then return b, w end
+  end
+  if M.state.note then return note_buf(M.state.note), nil end
+  return nil
+end
+
+-- Run a note key ("submit", "cancel", "hide" or "flow") from another window
+-- of the tab, such as the history sidebar: focus the tab's note (so Flow's
+-- paste lands there), then act on it, never on the window the key came from.
+function M.for_tab_note(action)
+  local buf, win = M.tab_note()
+  if not buf then
+    vim.notify("voice-vim: no note to " .. action, vim.log.levels.WARN)
+    return
+  end
+  if win then vim.api.nvim_set_current_win(win) else display(buf) end
+  if action == "flow" then
+    -- Joe stays in insert mode (GT 8), at the end of the body: never on
+    -- the to: line, where Flow's paste would change the target.
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    if #lines == 1 and target.split(lines) then
+      vim.api.nvim_buf_set_lines(buf, 1, 1, false, { "" })
+      lines[2] = ""
+    end
+    vim.api.nvim_win_set_cursor(0, { #lines, 0 })
+    vim.cmd("startinsert!")
+    return flow.toggle()
+  end
+  M[action](buf)
+end
+
+-- :History and <leader>h in a note: toggle the sidebar, with the note keys
+-- on it whichever history module opened it.
+function M.toggle_history()
+  local hist = history()
+  hist.toggle()
+  if hist.is_open() then M.bind_note_keys(hist.state.buf) end
+end
+
+-- The note keys on a buffer that is not a note (the history sidebar), so a
+-- global mapping (e.g. <C-x> = :write) or :wq never hits that buffer.
+function M.bind_note_keys(buf)
+  if not (buf and vim.api.nvim_buf_is_valid(buf)) then return end
+  for name, action in pairs({ Submit = "submit", Cancel = "cancel", Hide = "hide" }) do
+    vim.api.nvim_buf_create_user_command(buf, name, function() M.for_tab_note(action) end,
+      { force = true, bang = true })
+  end
+  local o = { buffer = buf, silent = true, nowait = true }
+  vim.keymap.set("n", "ZZ", "<Cmd>Submit<CR>", o)
+  vim.keymap.set("n", "<C-x>", "<Cmd>Submit<CR>", o)
+  vim.keymap.set("n", "ZQ", "<Cmd>Cancel<CR>", o)
+  vim.keymap.set("n", "<C-q>", "<Cmd>Cancel<CR>", o)
+  vim.keymap.set("n", "<C-s>", function() M.for_tab_note("flow") end, o)
+  vim.api.nvim_buf_call(buf, function()
+    for lhs, rhs in pairs({ wq = "Submit", x = "Submit", q = "Hide" }) do
+      vim.cmd(string.format(
+        "cnoreabbrev <buffer> <expr> %s getcmdtype() ==# ':' && getcmdline() ==# '%s' ? '%s' : '%s'",
+        lhs, lhs, rhs, lhs))
+    end
+  end)
+end
 
 -- Neovide sends Cmd+V as <D-v>; terminals never do. Paste the + register,
 -- which is where Wispr Flow puts the dictation, then tell flow a paste
