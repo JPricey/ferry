@@ -102,6 +102,8 @@ check "fresh: no missing lines" 0 "$(grep -c '^missing:' <<<"$out")"
 check "fresh: manual checklist printed" 1 "$(grep -c 'Accessibility for Hammerspoon' <<<"$out")"
 check "fresh: no Ghostty Automation step" 0 "$(grep -c 'Automation for Ghostty' <<<"$out")"
 check "fresh: Ghostty ok as optional" 1 "$(grep -c '^ok  *Ghostty (optional' <<<"$out")"
+check "fresh: python3 ok" 1 "$(grep -cx 'ok  *python3' <<<"$out")"
+check "fresh: no sqlite3 CLI check" 0 "$(grep -c 'sqlite3' <<<"$out")"
 # ferry.app: Info.plist keys, executable symlinked to Neovide's binary, icon.
 fapp="$s/home/Applications/ferry.app"
 plist_key() { plutil -extract "$2" raw -o - "$1/Contents/Info.plist" 2>&1; }
@@ -170,6 +172,13 @@ check "no apps: only Wispr Flow counted missing" 1 "$(grep -c '^1 item(s) need y
 check "no apps: Wispr Flow missing line" 1 "$(grep -c '^missing: *Wispr Flow: get it from https://wisprflow.ai' <<<"$out")"
 check "no apps: neither installed" 0 "$(grep -ciE 'ghostty|wispr' "$s/calls")"
 check "no apps: neither app created" no "$([ -e "$s/apps/Ghostty.app" ] || [ -e "$s/apps/Wispr Flow.app" ] && echo yes || echo no)"
+
+# A python3 without its sqlite3 module is a missing: line.
+setup nosqlite
+apps_ghostty_flow
+printf '#!/bin/bash\nexit 1\n' > "$s/bin/python3"; chmod +x "$s/bin/python3"
+out=$(bash "$install" 2>&1)
+check "no sqlite3 module: python3 missing line" 1 "$(grep -c '^missing: *python3 (with sqlite3)' <<<"$out")"
 
 # An init.lua with the old Option+V line: line removed with a .bak, and no
 # second block is added.

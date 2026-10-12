@@ -64,7 +64,7 @@ Keep prompts short. Give paths to read, not file contents. Ask for short reports
 
 ### Implementer
 
-> You are implementing one task in the ferry repo at `~/Code/ferry`. Read `AGENTS.md` first and follow it, especially "Do not touch the live system". Use a temp `FERRY_DB` and test nvim servers for every run.
+> You are implementing one task in the ferry repo at `~/Code/ferry`. Read `AGENTS.md` first and follow it, especially "Do not touch the live system". Use a temp `FERRY_NOTES_DIR` and `FERRY_INDEX` (and a temp `FERRY_DB` only for tests that still touch the old history database: `ferry-migrate-history` and old-tree upgrade tests) and test nvim servers for every run.
 > Task: `<task line>`. Milestone: `<milestone name>` in `milestones.md`. Read `planning.md` → "Next direction" and `<linked sections>` for background.
 > Make the change, add or update tests, and run `<verification>`. Do not commit.
 > Report in 5 lines or fewer: what changed (files), the verification command and its result, and anything you could not do.

@@ -250,7 +250,7 @@ mappings live in `lua/ferry/note.lua`.
 ## Install and permissions
 
 `./install.sh` installs what is missing (Hammerspoon, Neovide, Neovim via
-Homebrew), checks for Wispr Flow, `python3` and `sqlite3` (Ghostty is
+Homebrew), checks for Wispr Flow and `python3` (Ghostty is
 optional: Neovide copies its font and colour), links the module, adds the `init.lua` block once, removes an old Option+V line and
 starts or reloads Hammerspoon; a second run changes nothing, and `--check`
 only reports. An install from before the rename to ferry is moved over once

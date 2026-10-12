@@ -102,14 +102,13 @@ else
   say missing: "Wispr Flow: get it from https://wisprflow.ai"
 fi
 
-# 5. Tools the scripts use: python3 and sqlite3.
-for tool in python3 sqlite3; do
-  if command -v "$tool" >/dev/null 2>&1; then
-    say ok "$tool"
-  else
-    say missing: "$tool: install the Xcode command line tools (xcode-select --install)"
-  fi
-done
+# 5. python3 with its sqlite3 module: ferry-notes, ferry-corrections and
+# ferry-migrate-history use it. The sqlite3 command-line tool is not needed.
+if command -v python3 >/dev/null 2>&1 && python3 -B -c 'import sqlite3' >/dev/null 2>&1; then
+  say ok "python3"
+else
+  say missing: "python3 (with sqlite3): install the Xcode command line tools (xcode-select --install)"
+fi
 
 # 6. Link the Hammerspoon module into ~/.hammerspoon. A correct link is
 # left alone; a regular file is never overwritten.

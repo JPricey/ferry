@@ -33,7 +33,7 @@ press, and does nothing else.
 
 `install.sh` is the one setup script. It needs Homebrew (and stops with the
 command to install it if missing), installs Hammerspoon, Neovide and Neovim
-if missing, checks for Wispr Flow, `python3` and `sqlite3`, notes whether
+if missing, checks for Wispr Flow and `python3`, notes whether
 Ghostty is there (optional: Neovide copies its font and colour), symlinks
 the module into `~/.hammerspoon/`, builds `~/Applications/ferry.app` (a
 wrapper whose executable is a symlink to Neovide's real binary, with the
