@@ -16,6 +16,10 @@ cleanup() {
   rm -rf "$work"
 }
 trap cleanup EXIT
+# nvim keeps its socket in a temp dir that it leaves behind when killed or
+# on os.exit; keep those in ours too.
+export TMPDIR=$work/tmp
+mkdir -p "$TMPDIR"
 
 mkdir -p "$work/fakes"
 for f in osascript open neovide; do

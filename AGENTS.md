@@ -58,7 +58,7 @@ touching `lua/ferry/delivery.lua` or the Hammerspoon module,
 `bash tests/test-tmux.sh` after touching `lua/ferry/tmux.lua` (its own `tmux -L ferry-test` server only),
 and `bash tests/test-host.sh`, `bash tests/test-note.sh` and
 `bash tests/test-instance.sh` after touching `bin/ferry-host`,
-`lua/ferry/note.lua`, `lua/ferry/gui.lua` or `hammerspoon/instance.lua`,
+`lua/ferry/note.lua`, `lua/ferry/notice.lua`, `lua/ferry/gui.lua` or `hammerspoon/instance.lua`,
 `bash tests/test-host-neovide.sh` after touching `hammerspoon/hosts/neovide.lua`,
 `bash tests/test-edit.sh` after touching `lua/ferry/edit.lua`, and
 `bash tests/test-ferry-edit.sh` after touching `bin/ferry-edit` or `lua/ferry/edit.lua`.

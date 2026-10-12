@@ -54,7 +54,7 @@ local function flow()
 end
 
 local function alert(msg)
-  vim.schedule(function() vim.notify(msg, vim.log.levels.ERROR) end)
+  vim.schedule(function() require("ferry.notice").notify(msg, vim.log.levels.ERROR) end)
 end
 
 -- Write "<code>\n" to done whole: a temp file renamed over it, so a

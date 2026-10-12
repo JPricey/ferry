@@ -5,9 +5,13 @@
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 spec="$root/tests/store_spec.lua"
-work=$(mktemp -d "${TMPDIR:-/tmp}/ferrystore.XXXXXX")
+work=$(mktemp -d /tmp/ferrystore.XXXX)
 [ -n "$work" ] && [ -d "$work" ] || { echo "mktemp failed" >&2; exit 1; }
 trap 'rm -rf "$work"' EXIT
+# nvim keeps its socket in a temp dir that it leaves behind when killed or
+# on os.exit; keep those in ours too.
+export TMPDIR=$work/tmp
+mkdir -p "$TMPDIR"
 fail=0
 ran=0
 run() { # label cmd...

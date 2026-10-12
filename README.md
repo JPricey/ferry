@@ -93,6 +93,8 @@ commands live in `lua/ferry/note.lua`.
   running instance and waits until it is saved (exit 0) or cancelled (1).
 - `lua/ferry/edit.lua` — that edit inside the server: its tab, keys, and
   the done file the client polls.
+- `lua/ferry/notice.lua` — notices on one screen line (full text in
+  `:messages`), so a narrow window never asks for Enter.
 - `lua/ferry/gui.lua` — makes Neovide look like the terminal.
 - `lua/ferry/history.lua` — the notes browser sidebar (list, search,
   open, send again, pin, delete).

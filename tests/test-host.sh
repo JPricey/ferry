@@ -23,12 +23,19 @@ uipids=
 # A note file's body (after the frontmatter), and a frontmatter value.
 fbody() { awk 'NR == 1 && $0 == "---" { f = 1; next } f && $0 == "---" { f = 0; next } !f' "$1" 2>&1; }
 fkey() { sed -n "/^$2: /{s/^$2: //p;q;}" "$1" 2>/dev/null; }
+# FERRY_TEST_SHOW_GAP=1.1 sleeps between shows that must not depend on
+# landing in the same second (Q1).
+gap() { [ -z "${FERRY_TEST_SHOW_GAP:-}" ] || sleep "$FERRY_TEST_SHOW_GAP"; }
 cleanup() {
   pkill -f -- "--listen $work/" 2>/dev/null
   for p in $uipids; do kill "$p" 2>/dev/null; done
   rm -rf "$work"
 }
 trap cleanup EXIT
+# nvim keeps its socket in a temp dir that it leaves behind when killed or
+# on os.exit; keep those in ours too.
+export TMPDIR=$work/tmp
+mkdir -p "$TMPDIR"
 
 # A fake ghostty first on PATH: prints Ghostty-style config, fails (mode
 # file says fail) or hangs (hang). The real one is never run.
@@ -140,29 +147,34 @@ f=$("$host" show com.example.app 4242)
 check "show closes extra splits and a file tree: sidebar left, note right" "history $(basename "$f")" "$(wins)"
 check "after show the note window is current, in insert mode" "$f i" "$(ask 'expand("%:p")') $(ask 'mode()')"
 ask "execute('vsplit')" >/dev/null
-"$host" show com.example.app 4242 >/dev/null
+# A blank note with no file takes each show's time in its name, so every
+# check below names the path the latest show printed.
+gap
+f=$("$host" show com.example.app 4242)
 check "a second show keeps the sidebar and drops the new split" "history $(basename "$f")" "$(wins)"
 nvim --server "$FERRY_SOCK" --remote-send '<Esc>:wincmd t<CR>'
 for _ in $(seq 100); do [ "$(ask 'expand("%:t")')" = history ] && break; sleep 0.05; done
 nvim --server "$FERRY_SOCK" --remote-send '<Tab>'
 for _ in $(seq 100); do [ "$(ask 'expand("%:t")')" = "$(basename "$f")" ] && break; sleep 0.05; done
 check "<Tab> in the sidebar jumps back to the note" "$(basename "$f")" "$(ask 'expand("%:t")')"
-check "FERRY_SIDEBAR=0: show leaves only the note" "$(basename "$f")" \
-  "$(FERRY_SIDEBAR=0 "$host" show com.example.app 4242 >/dev/null; wins)"
+gap
+f=$(FERRY_SIDEBAR=0 "$host" show com.example.app 4242)
+check "FERRY_SIDEBAR=0: show leaves only the note" "$(basename "$f")" "$(wins)"
 
 # --- GUI appearance ------------------------------------------------------------
 # A stand-in UI over the socket (raw msgpack): with a name it first names its
 # client so (Neovide names itself "neovide"); without, it is like a terminal
-# --remote-ui. It attaches, then drains redraws until killed.
+# --remote-ui. It attaches (UIW columns, default 80), then drains redraws
+# until killed.
 cat > "$work/ui.py" <<'PY'
-import socket, sys
+import os, socket, sys
 def fs(b): return bytes([0xa0 | len(b)]) + b
 s = socket.socket(socket.AF_UNIX)
 s.connect(sys.argv[1])
 if len(sys.argv) > 2:
     s.sendall(bytes([0x94, 0, 1]) + fs(b"nvim_set_client_info") + bytes([0x95])
               + fs(sys.argv[2].encode()) + bytes([0x80]) + fs(b"ui") + bytes([0x80, 0x80]))
-s.sendall(bytes([0x94, 0, 2]) + fs(b"nvim_ui_attach") + bytes([0x93, 80, 24, 0x80]))
+s.sendall(bytes([0x94, 0, 2]) + fs(b"nvim_ui_attach") + bytes([0x93, int(os.environ.get("UIW", "80")), 24, 0x80]))
 while s.recv(65536):
     pass
 PY
@@ -207,13 +219,60 @@ sleep 0.2
 check "terminal UI after Neovide: window title untouched" "0 1" "$(title)$(uis)"
 kill "$termui"; waitfor uis 0
 
+# --- notices: one screen line (Q2c) ---------------------------------------------
+# In a 40-column UI a notice longer than the command line would stop at a
+# Press ENTER prompt (mode r; the server answers nothing until Enter, so
+# askt gives up after 3 s and prints blocked). A long notice shows cut to
+# one line instead; :messages keeps the full text.
+askt() {
+  local r
+  r=$({ perl -e 'alarm 3; exec @ARGV' nvim --server "$FERRY_SOCK" --remote-expr "$1" & wait $!; } 2>/dev/null) \
+    && printf '%s\n' "$r" || echo blocked
+}
+# After a failed check: press Enter at a prompt so the rest can run.
+dismiss() {
+  for _ in 1 2 3; do
+    [ "$(askt 1)" = blocked ] || return 0
+    nvim --server "$FERRY_SOCK" --remote-send '<CR>'
+  done
+}
+UIW=40 ui; narrow=$uipid
+waitfor uis 1
+n=$("$host" show com.example.app 4242)
+ask "nvim_buf_set_lines(0, 0, -1, v:false, ['notice draft'])" >/dev/null
+"$host" draft >/dev/null
+long="ferry: an error notice far longer than forty columns, cut to one line"
+ask "luaeval('vim.schedule(function() require\"ferry.notice\".notify(_A, vim.log.levels.ERROR) end) or 1', '$long')" >/dev/null
+sleep 0.3
+check "columns=40, a long error notice in normal mode: no Press ENTER (mode n), full text in :messages" \
+  "40 n yes" "$(askt '&columns') $(askt 'mode(1)') $(askt "execute('messages')" | grep -qF "$long" && echo yes)"
+dismiss
+check "the cut line fits the command line and ends in …" "yes" \
+  "$(askt "luaeval('(function() local c = require\"ferry.notice\".cut(_A, 28); return vim.fn.strdisplaywidth(c) <= 28 and vim.endswith(c, \"…\") and \"yes\" or c end)()', '$long')")"
+# The longest note notice, in insert mode: the file changed outside while
+# typing, so checktime forks the typing to a conflict file. It is raised
+# inside the autosave's `silent write`, which used to swallow it.
+"$host" show com.example.app 4242 >/dev/null
+perl -pi -e 's/^notice draft$/edited outside/' "$n"
+ask "nvim_input('typed ')" >/dev/null
+sleep 0.1
+ask "execute('checktime')" >/dev/null
+sleep 0.5
+check "columns=40, the fork notice in insert mode: mode i, the typing kept, full notice in :messages" \
+  "i typed notice draft yes" \
+  "$(askt 'mode(1)') $(askt 'getline(1)') $(askt "execute('messages')" | grep -qF "ferry: $(basename "$n") was changed outside ferry and is kept as it is; your text is in $(basename "$n" .md).conflict-" && echo yes)"
+dismiss
+kill "$narrow"; waitfor uis 0
+
 # --- a server started before this change gets layout and GUI on show ---------
 g=$("$host" show com.example.app 4242)
+ask "nvim_buf_set_lines(0, 0, -1, v:false, ['api 7 draft'])" >/dev/null
 ask "luaeval('(function() local n = require\"ferry.note\"; n.api = 7; n.old = true; vim.g.ferry_gui = nil; vim.cmd(\"vsplit | split\"); return 1 end)()')" >/dev/null
 "$host" draft >/dev/null
+gap
 h=$("$host" show com.example.app 4242)
-check "old server (note api 7): show reloads the note module to the current api and keeps the draft" "$napi true $g" \
-  "$(ask 'luaeval("require\"ferry.note\".api")') $(ask 'luaeval("require\"ferry.note\".old == nil")') $h"
+check "old server (note api 7): show reloads the note module to the current api and keeps the draft" "$napi true $g api 7 draft" \
+  "$(ask 'luaeval("require\"ferry.note\".api")') $(ask 'luaeval("require\"ferry.note\".old == nil")') $h $(ask 'join(getline(1, "$"), "|")')"
 check "old server: show applies the layout" "history $(basename "$g")" "$(wins)"
 check "old server: show loads the GUI settings" "{'bg': '#001e27', 'font': 'Test Mono:h13'}" "$(ask 'string(g:ferry_gui)')"
 
@@ -222,6 +281,15 @@ lua() { ask "luaeval('tostring($1)')"; }
 rec() { lua 'require"ferry.flow".recording()'; }
 cur() { ask 'line(".").":".(col(".") - 1)." ".mode()'; }
 opened() { cat "$work/open.log" 2>/dev/null; rm -f "$work/open.log"; }
+# The fake open runs async (flow's queue): wait up to 2 s for it to log $1
+# lines (default 1), then print and clear the log like opened.
+opened_wait() {
+  for _ in $(seq 40); do
+    [ "$(cat "$work/open.log" 2>/dev/null | wc -l | tr -d ' ')" -ge "${1:-1}" ] && break
+    sleep 0.05
+  done
+  opened
+}
 # Flow's paste into the note (a bracketed paste reaches nvim as vim.paste),
 # then wait for flow's release wait to end.
 paste() {
@@ -234,7 +302,7 @@ t=$("$host" show --talk com.example.app 4242)
 check "show --talk com.example.app 4242: mode i on row 1, Flow recording, no URL opened" "1:0 i true " \
   "$(cur) $(rec) $(opened)"
 check "release: prints released, one stop-hands-free" "released|-g wispr-flow://stop-hands-free" \
-  "$("$host" release)|$(sleep 0.3; opened)"
+  "$("$host" release)|$(opened_wait)"
 paste "talked"
 check "after Flow's paste the text is in the body; a second release prints idle, opens nothing" \
   "talked idle " "$(ask 'join(getline(1, "$"), "|")') $("$host" release) $(opened)"
@@ -252,17 +320,17 @@ ask "nvim_win_set_cursor(0, [1, 0])" >/dev/null
 check "show --talk resuming a draft: insert where the draft left the cursor" \
   "$t 1:0 i true" "$("$host" show --talk com.example.app 4242) $(cur) $(rec)"
 "$host" release >/dev/null; paste "?"
-check "each of the two releases above sent one stop" 2 "$(opened | grep -c stop-hands-free)"
+check "each of the two releases above sent one stop" 2 "$(opened_wait 2 | grep -c stop-hands-free)"
 ask "luaeval('require\"ferry.note\".forget()')" >/dev/null
 check "talk without a note prints no note, Flow untouched" "no note false " "$("$host" talk) $(rec) $(opened)"
 check "flow-state after the talk releases' pastes prints stopped; release --force prints forced, one stop, then waiting" \
   "stopped forced waiting|-g wispr-flow://stop-hands-free" \
-  "$("$host" flow-state) $("$host" release --force) $("$host" flow-state)|$(sleep 0.3; opened)"
+  "$("$host" flow-state) $("$host" release --force) $("$host" flow-state)|$(opened_wait)"
 paste "forced"
 ask "luaeval('require\"ferry.flow\".assume_recording()')" >/dev/null
 check "flow-state while recording prints recording; release --force then prints released, one stop" \
   "recording released|-g wispr-flow://stop-hands-free" \
-  "$("$host" flow-state) $("$host" release --force)|$(sleep 0.3; opened)"
+  "$("$host" flow-state) $("$host" release --force)|$(opened_wait)"
 paste "x"
 check "after the paste of a stop not of a talk hold: flow-state idle" idle "$("$host" flow-state)"
 # P5: a talk hold ended by a Submit's stop: stopped once its paste landed,
@@ -273,7 +341,7 @@ check "talk, then a stray paste: flow-state recording" recording "$("$host" flow
 ask "luaeval('(function() require\"ferry.note\".host = { submit = function() vim.g.ferry_sub = 1 end, hide = function() end }; return 1 end)()')" >/dev/null
 ask "luaeval('require\"ferry.note\".submit()')" >/dev/null
 check "Submit during the hold: flow-state waiting, one stop" "waiting|-g wispr-flow://stop-hands-free" \
-  "$("$host" flow-state)|$(sleep 0.3; opened)"
+  "$("$host" flow-state)|$(opened_wait)"
 paste "held"
 check "after the Submit's paste: submitted, flow-state stopped, no other URL" "1 stopped " \
   "$(ask 'get(g:, "ferry_sub", 0)') $("$host" flow-state) $(opened)"
@@ -285,11 +353,11 @@ u=$("$host" show com.example.app 4242)
 ask "nvim_buf_set_lines(0, 0, -1, v:false, ['upgrade draft'])" >/dev/null
 "$host" draft >/dev/null
 ask "luaeval('(function() require\"ferry.note\".api = 3; local f = require\"ferry.flow\"; f.api = nil; f.adopt_start = nil; return 1 end)()')" >/dev/null
-check "API-3 server: talk reloads note (current api) and flow (api 5), keeps the draft and its target" \
-  "talk $u $napi 5 upgrade draft com.example.app 4242 true" \
+check "API-3 server: talk reloads note (current api) and flow (api 6), keeps the draft and its target" \
+  "talk $u $napi 6 upgrade draft com.example.app 4242 true" \
   "$("$host" talk) $(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api') $(ask 'join(getline(1, "$"), "|")') $(ask 'b:ferry.target." ".b:ferry.window') $(rec)"
 check "API-3 server: release after the upgrade sends one stop" "released|-g wispr-flow://stop-hands-free" \
-  "$("$host" release)|$(sleep 0.3; opened)"
+  "$("$host" release)|$(opened_wait)"
 paste " done"
 "$host" stop
 
@@ -385,6 +453,34 @@ ask "luaeval('(function() require\"ferry.note\".host = { submit = function(p) vi
 ask "luaeval('require\"ferry.note\".submit()')" >/dev/null
 check "upgrade from api 11: Submit sends the whole buffer to the captured target" \
   "com.example.app 4242 api 11 draft|second!" "$(ask 'get(g:, "ferry_sub", "")')"
+"$live/bin/ferry-host" stop
+
+# Live upgrade from af9efd3 (note api 12, flow api 5): the next show
+# reloads note to the current api and flow to 6 (Q1, Q2c), keeping the draft.
+live=$work/live-api12; old_tree af9efd3 "$live"
+"$live/bin/ferry-host" ensure >/dev/null
+p12=$("$live/bin/ferry-host" show com.example.app 4242)
+ask "nvim_buf_set_lines(0, 0, -1, v:false, ['api 12 draft'])" >/dev/null
+"$live/bin/ferry-host" draft >/dev/null
+check "af9efd3 server: note api 12, flow api 5" "12 5" "$(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api')"
+upgrade "$live"
+check "upgrade from api 12: show reloads note to the current api and flow to 6, keeps the draft and its target" \
+  "$p12 $napi 6 api 12 draft com.example.app 4242" \
+  "$("$live/bin/ferry-host" show com.example.app 4242) $(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api') $(body) $(ask 'b:ferry.target." ".b:ferry.window')"
+"$live/bin/ferry-host" stop
+
+# Live upgrade from 57e7b8c (main at H5: note api 14, flow api 5): the next
+# show reloads note to the current api and flow to 6, keeping the draft.
+live=$work/live-api14; old_tree 57e7b8c "$live"
+"$live/bin/ferry-host" ensure >/dev/null
+p14=$("$live/bin/ferry-host" show com.example.app 4242)
+ask "nvim_buf_set_lines(0, 0, -1, v:false, ['api 14 draft'])" >/dev/null
+"$live/bin/ferry-host" draft >/dev/null
+check "57e7b8c server: note api 14, flow api 5" "14 5" "$(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api')"
+upgrade "$live"
+check "upgrade from api 14: show reloads note to the current api and flow to 6, keeps the draft and its target" \
+  "$p14 $napi 6 api 14 draft com.example.app 4242" \
+  "$("$live/bin/ferry-host" show com.example.app 4242) $(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api') $(body) $(ask 'b:ferry.target." ".b:ferry.window')"
 "$live/bin/ferry-host" stop
 
 # Live upgrade from af9efd3 with the history sidebar open (history api 2:

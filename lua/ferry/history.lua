@@ -61,7 +61,7 @@ local function notes_cmd(args)
   local r = ok and obj:wait(10000) or nil
   if not r or r.code ~= 0 then
     local why = r and (r.stderr or ""):match("[^\n]+") or tostring(obj)
-    vim.notify("ferry: notes command failed: " .. table.concat(args, " ") .. (why and ": " .. why or ""),
+    require("ferry.notice").notify("ferry: notes command failed: " .. table.concat(args, " ") .. (why and ": " .. why or ""),
       vim.log.levels.WARN)
     return nil
   end
@@ -184,7 +184,7 @@ end
 local function body_of(r)
   local meta, lines = require("ferry.store").read(r.path)
   if not meta then
-    vim.notify("ferry: cannot read " .. r.path .. ": " .. tostring(lines), vim.log.levels.WARN)
+    require("ferry.notice").notify("ferry: cannot read " .. r.path .. ": " .. tostring(lines), vim.log.levels.WARN)
     return nil
   end
   while #lines > 1 and lines[#lines] == "" do lines[#lines] = nil end
@@ -235,11 +235,11 @@ function M.yank()
   local text = table.concat(lines, "\n")
   local n = note()
   if not n.to_clipboard(text) then
-    vim.notify(n.CLIP_FAIL, vim.log.levels.ERROR)
+    require("ferry.notice").notify(n.CLIP_FAIL, vim.log.levels.ERROR)
     return
   end
   pcall(vim.fn.setreg, '"', text)
-  vim.notify(string.format("ferry: copied %d words", r.words or 0))
+  require("ferry.notice").notify(string.format("ferry: copied %d words", r.words or 0))
 end
 
 -- P: pin or unpin the note (frontmatter `pinned`).

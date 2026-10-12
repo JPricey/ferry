@@ -377,6 +377,8 @@ flow.release(buf)
 opened(1)
 vim.wait(1500, function() return flow.state.waiting == nil end, 10)
 check("stopped: a wait that timed out does not set it", "nil false", tostring(flow.state.waiting) .. " " .. tostring(flow.stopped()))
+vim.paste({ "late" }, -1)
+check("timed-out wait, then paste → not stopped", "false nil", tostring(flow.stopped()) .. " " .. tostring(flow.state.stop_gen))
 flow.paste_timeout_ms = 4000
 idle()
 -- Ctrl-S stops an adopted recording; its paste (no wait) sets it.

@@ -344,6 +344,9 @@ Open the Hammerspoon console (menu bar icon → Console). ferry logs its
 steps there under `ferry`: the mode it started in, each show and hide
 with how long it took, the target, the window, each check, the paste.
 
+Notices in the note take one line at the bottom of the window. A long one
+ends in `…`; type `:messages` to read it in full.
+
 - **Nothing was pasted.** Look for "copied — paste manually". The text is
   on your clipboard; paste it by hand. The console shows which check
   failed.

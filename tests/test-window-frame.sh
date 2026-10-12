@@ -5,8 +5,12 @@
 # the real Hammerspoon, opens no windows, sends no keystrokes.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-tmp=$(mktemp -d -t ferry-wf)
+tmp=$(mktemp -d /tmp/ferrywf.XXXX)
 trap 'rm -rf "$tmp"' EXIT
+# nvim keeps its socket in a temp dir that it leaves behind when killed or
+# on os.exit; keep those in ours too.
+export TMPDIR=$tmp/tmp
+mkdir -p "$TMPDIR"
 
 cat > "$tmp/spec.lua" <<'LUA'
 local root = assert(os.getenv("FERRY_ROOT"))

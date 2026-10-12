@@ -188,6 +188,10 @@ unsaved typing the note reloads it; otherwise your text goes to
 notice names both files. If Cancel cannot save the file, the note stays
 open and a copy waits in the outbox.
 
+ferry's notices take one screen line: a longer one is cut with `…` and
+its full text is in `:messages`, so a narrow window never stops at a
+"Press ENTER" prompt.
+
 ## Bring old history into notes
 
 `bin/ferry-migrate-history` turns each row of the old history database into

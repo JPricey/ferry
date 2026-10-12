@@ -545,6 +545,27 @@ local fm = store.read(fconf()[1] or "") or {}
 check("fork's first write failed: the next save writes the fork's id and conflict_of, original untouched",
   "true " .. idf .. " " .. T .. "outside first",
   tostring(fid ~= idf and rawget(fm, "id") == fid) .. " " .. tostring(rawget(fm, "conflict_of")) .. " " .. nfile(pf))
+-- The forked note's buffer wiped and its conflict file deleted outside:
+-- show reloads it without b:ferry; the next save names and writes the
+-- fork's id and conflict_of, so no two files share an id (H3b edge).
+os.remove(fconf()[1] or "")
+vim.cmd("bwipeout! " .. bf)
+local pw = show()
+body({ "after wipe" })
+vim.cmd("write")
+local wm = store.read(pw) or {}
+local function ids_in_notes(id)
+  local n = 0
+  for name in vim.fs.dir(notes) do
+    if rawget(store.read(notes .. "/" .. name) or {}, "id") == id then n = n + 1 end
+  end
+  return n
+end
+check("wiped buffer + conflict file deleted outside: the next save has the fork's id and conflict_of, one file per id",
+  "true true " .. idf .. " 1 1 after wipe",
+  tostring(vim.fs.basename(pw):find(fid:sub(1, 8), 1, true) ~= nil) .. " " .. tostring(rawget(wm, "id") == fid)
+  .. " " .. tostring(rawget(wm, "conflict_of")) .. " " .. ids_in_notes(fid) .. " " .. ids_in_notes(idf)
+  .. " " .. table.concat(select(2, store.read(pw)) or {}, "|"))
 vim.cmd("Cancel")
 
 -- ferry remembers the bytes it wrote, not the file re-read after: an

@@ -7,6 +7,10 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d /tmp/ferryf.XXXX)
 [ -n "$work" ] && [ -d "$work" ] || { echo "mktemp failed" >&2; exit 1; }
 trap 'rm -rf "$work"' EXIT
+# nvim keeps its socket in a temp dir that it leaves behind when killed or
+# on os.exit; keep those in ours too.
+export TMPDIR=$work/tmp
+mkdir -p "$TMPDIR"
 
 mkdir -p "$work/bin"
 cat >"$work/bin/open" <<EOF

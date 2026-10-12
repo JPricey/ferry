@@ -44,13 +44,16 @@
 -- on a paste; or, with no wait, a paste after a Ctrl-S stop). Key up treats
 -- it as done, so a Submit that finished while the talk key was held gives
 -- no "still recording" alert. A stray paste never sets it (no stop of ours
--- was due), nor does a wait that timed out; adopt_start, start and
--- assume_recording clear it.
+-- was due), nor does a wait that timed out or whose buffer was wiped (nor
+-- a paste after such a wait); adopt_start, start and assume_recording
+-- clear it.
 local M = {}
 
 -- Bumped when note.lua needs functions an older flow lacks; note.lua
 -- reloads a stale flow module in a running server (keeping M.state).
-M.api = 5
+-- api 6: a timed-out or wiped wait forgets its stop (stop_gen), and
+-- notices are one screen line (ferry.notice).
+M.api = 6
 
 M.paste_timeout_ms = 4000
 M.settle_ms = 150
@@ -74,6 +77,7 @@ M.NO_DICTATION = "ferry: no dictation arrived"
 -- module (live reload) lacks them: nil reads as none.
 M.state = { recording = false, adopted = false, waiting = nil, gen = 0, stop_gen = nil, stopped = false }
 local attached = {}
+local function say(msg, level) require("ferry.notice").notify(msg, level) end
 
 -- One `open` at a time, in call order, so a quick start/stop pair cannot
 -- reach Flow as stop/start.
@@ -84,12 +88,12 @@ local function run_next()
   busy = true
   local ok, err = pcall(vim.system, { "open", "-g", url }, { timeout = M.open_timeout_ms }, function(obj)
     vim.schedule(function()
-      if obj.code ~= 0 then vim.notify("ferry: could not open " .. url, vim.log.levels.WARN) end
+      if obj.code ~= 0 then say("ferry: could not open " .. url, vim.log.levels.WARN) end
       run_next()
     end)
   end)
   if not ok then
-    vim.notify("ferry: could not open " .. url .. ": " .. tostring(err), vim.log.levels.WARN)
+    say("ferry: could not open " .. url .. ": " .. tostring(err), vim.log.levels.WARN)
     run_next()
   end
 end
@@ -238,11 +242,13 @@ function M.finish_then(buf, fn, kind)
   M.state.waiting = w
 
   -- pasted: the wait ended on a paste (not a timeout or a wiped buffer).
+  -- With no paste, our stop is over all the same: a later stray paste must
+  -- not count as its paste (stopped() stays false).
   local function done(notice, pasted)
     if M.state.waiting ~= w then return end
     stop_waiting()
-    if pasted then paste_after_stop() end
-    if notice then vim.notify(notice, vim.log.levels.WARN) end
+    if pasted then paste_after_stop() else M.state.stop_gen = nil end
+    if notice then say(notice, vim.log.levels.WARN) end
     w.fn()
   end
   -- One paste arrived (signalled, or changes that settled). With more

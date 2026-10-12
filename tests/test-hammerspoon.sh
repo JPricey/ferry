@@ -14,6 +14,10 @@ cleanup() {
   rm -rf "$tmp" "$swork"
 }
 trap cleanup EXIT
+# nvim keeps its socket in a temp dir that it leaves behind when killed or
+# on os.exit; keep those in ours too.
+export TMPDIR=$swork/tmp
+mkdir -p "$TMPDIR"
 export FERRY_DB="$tmp/history.sqlite"
 # Recording, failing fakes first on PATH: nothing reaches other apps.
 mkdir -p "$swork/fakes" "$swork/empty"

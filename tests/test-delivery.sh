@@ -4,6 +4,11 @@
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 spec="$root/tests/delivery_spec.lua"
+# nvim keeps its socket in a temp dir that it leaves behind on os.exit;
+# give it one of ours, removed on exit.
+TMPDIR=$(mktemp -d /tmp/ferryv.XXXX) || exit 1
+export TMPDIR
+trap 'rm -rf "$TMPDIR"' EXIT
 fail=0
 ran=0
 run() { # label cmd...

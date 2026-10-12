@@ -2,6 +2,13 @@
 # History: the notes browser (the Neovim sidebar) on the notes index.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+work=$(mktemp -d /tmp/ferryhist.XXXX)
+[ -n "$work" ] && [ -d "$work" ] || { echo "mktemp failed" >&2; exit 1; }
+trap 'rm -rf "$work"' EXIT
+# Every temp dir (ours from mktemp -t, nvim's socket dirs) under $work, so
+# none is left behind even when a run is cut short.
+export TMPDIR=$work/tmp
+mkdir -p "$TMPDIR"
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: want '$2' got '$3'"; fail=1; fi; }
 

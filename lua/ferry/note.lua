@@ -75,20 +75,24 @@ local function current(name, want, adopt)
 end
 
 -- flow api 5: adopt_start, release, a quick second hold during a release
--- wait, a stray paste keeps an adopted recording, stopped(). Its state
+-- wait, a stray paste keeps an adopted recording, stopped(); api 6: a
+-- timed-out wait forgets its stop, one-line notices. Its state
 -- keeps a recording and the pending wait across the reload.
 -- The old module's vim.paste hook stays installed, so its on_paste forwards
 -- to the new one (which counts a paste reported by both hooks once).
-local flow = current("ferry.flow", 5, function(old, new)
+local flow = current("ferry.flow", 6, function(old, new)
   old.on_paste = function(b) return new.on_paste(b) end
 end)
 local target = require("ferry.target")
 local store = require("ferry.store")
+-- Notices: one screen line, the full text in :messages (ferry.notice).
+local function say(msg, level) require("ferry.notice").notify(msg, level) end
 
 -- Bumped when the module changes in a way an already-running server must
 -- pick up: bin/ferry-host reloads the module (keeping M.state and a
 -- swapped M.host) when the loaded one reports a different api.
-M.api = 14
+-- 15: one-line notices; a wiped buffer's note keeps its fork's file id.
+M.api = 15
 
 -- history api 4: the browser on the notes index (open, send, pin, ...,
 -- / search; opening syncs). A sidebar the old module opened keeps its
@@ -229,7 +233,7 @@ end
 -- (BufWriteCmd) or a vim.cmd, an error message would abort the caller
 -- halfway (a Cancel would stop before keeping the note).
 local function alert(msg)
-  vim.schedule(function() vim.notify(msg, vim.log.levels.ERROR) end)
+  vim.schedule(function() say(msg, vim.log.levels.ERROR) end)
 end
 
 -- --- outside edits ------------------------------------------------------
@@ -306,9 +310,9 @@ local function fork(buf, path)
   rename(buf, new)
   vim.b[buf].ferry_disk = nil
   local note = M.state.note
-  if note and note.buf == buf then note.path, note.file_id = new, id end
+  if note and note.buf == buf then note.path, note.file_id, note.conflict_of = new, id, orig end
   index(path)
-  vim.notify(string.format("ferry: %s was changed outside ferry and is kept as it is; your text is in %s",
+  say(string.format("ferry: %s was changed outside ferry and is kept as it is; your text is in %s",
     vim.fn.fnamemodify(path, ":t"), vim.fn.fnamemodify(new, ":t")), vim.log.levels.WARN)
   return meta, new
 end
@@ -430,7 +434,7 @@ local function changed_outside(buf)
       save(buf)
     elseif not ours(buf, path) then
       load(buf)
-      vim.notify("ferry: reloaded " .. vim.fn.fnamemodify(path, ":t") .. " (changed outside ferry)",
+      say("ferry: reloaded " .. vim.fn.fnamemodify(path, ":t") .. " (changed outside ferry)",
         vim.log.levels.INFO)
     end
   end)
@@ -569,9 +573,9 @@ function M.default_host.submit(p)
     if f then f:close() end
     if to_clipboard((text:gsub("\n$", ""))) then
       os.remove(p.file)
-      vim.notify("ferry: copied — paste manually", vim.log.levels.WARN)
+      say("ferry: copied — paste manually", vim.log.levels.WARN)
     else
-      vim.notify("ferry: could not reach Hammerspoon or copy to the clipboard — text kept in "
+      say("ferry: could not reach Hammerspoon or copy to the clipboard — text kept in "
         .. p.file, vim.log.levels.ERROR)
     end
   end)
@@ -579,7 +583,7 @@ end
 
 function M.default_host.hide()
   open_url("hammerspoon://ferry-hide", function()
-    vim.notify("ferry: could not reach Hammerspoon to hide", vim.log.levels.WARN)
+    say("ferry: could not reach Hammerspoon to hide", vim.log.levels.WARN)
   end)
 end
 
@@ -761,7 +765,11 @@ local function resume(opts)
   if not readable(note.path) and is_blank(select(2, parts(buf))) then place(note, notes_dir(opts)) end
   display(buf)
   M.apply_options(buf)
-  local meta = vim.b[buf].ferry or { id = note.id, seed = "", created = note.created }
+  -- A wiped buffer reloads without b:ferry: a fork's file id and
+  -- conflict_of come from the note (fork keeps them there), so a conflict
+  -- file deleted outside is recreated as the fork, not under note.id.
+  local meta = vim.b[buf].ferry or { id = note.id, file_id = note.file_id, conflict_of = note.conflict_of,
+    seed = "", created = note.created }
   meta.target, meta.window = opts.target or "", opts.window or ""
   vim.b[buf].ferry = meta
   note.unstarted = nil
@@ -921,13 +929,13 @@ end
 -- shown). Returns the buffer, or nil after a notice.
 function M.open(path)
   if flow.recording() or flow.state.waiting then
-    vim.notify("ferry: Flow is still recording; open the note when it is done", vim.log.levels.WARN)
+    say("ferry: Flow is still recording; open the note when it is done", vim.log.levels.WARN)
     return nil
   end
   path = vim.fn.fnamemodify(path, ":p")
   local meta = readable(path) and store.read(path)
   if not meta then
-    vim.notify("ferry: cannot read " .. path, vim.log.levels.WARN)
+    say("ferry: cannot read " .. path, vim.log.levels.WARN)
     return nil
   end
   local prev = M.state.note
@@ -946,7 +954,7 @@ function M.open(path)
   if prev then
     old = note_buf(prev)
     if not save(old) then
-      vim.notify("ferry: could not save the current note, so it stays open", vim.log.levels.ERROR)
+      say("ferry: could not save the current note, so it stays open", vim.log.levels.ERROR)
       if vim.fn.bufwinid(old) == -1 then display(old) end
       return nil
     end
@@ -1099,7 +1107,7 @@ end
 -- does not take, the note stays current and shown, and its row open.
 local function copy_body(buf, body, text)
   if not to_clipboard(text) then
-    vim.notify(CLIP_FAIL, vim.log.levels.ERROR)
+    say(CLIP_FAIL, vim.log.levels.ERROR)
     return
   end
   local file = to_tempfile(buf, body)
@@ -1173,7 +1181,7 @@ end
 function M.for_tab_note(action)
   local buf, win = M.tab_note()
   if not buf then
-    vim.notify("ferry: no note to " .. action, vim.log.levels.WARN)
+    say("ferry: no note to " .. action, vim.log.levels.WARN)
     return
   end
   drop_header(buf)

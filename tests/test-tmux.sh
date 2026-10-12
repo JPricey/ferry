@@ -19,6 +19,10 @@ unset TMUX TMUX_PANE
 T() { "$real" -L ferry-test -f /dev/null "$@"; }
 cleanup() { T kill-server 2>/dev/null; rm -rf "$work"; }
 trap cleanup EXIT
+# nvim keeps its socket in a temp dir that it leaves behind when killed or
+# on os.exit; keep those in ours too.
+export TMPDIR=$work/tmp
+mkdir -p "$TMPDIR"
 T kill-server 2>/dev/null # a leftover from an aborted run
 
 mkdir -p "$work/bin"
