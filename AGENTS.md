@@ -282,9 +282,10 @@ the terminal. A Submit with non-blank text is also recorded (edit api 4,
 E5): after the done file and teardown, `edit.lua` writes a new note file
 through `store.lua` (named and keyed as `note.lua`'s: id, `state: sent`,
 created = edit start, updated and sent = now,
-`target: editor:<basename>`; the body is the final text) in `start`'s `dir`
-(`ferry-edit` passes `FERRY_NOTES_DIR` or `~/notes/scratchpads`; else
-`note.dir()`), then runs `ferry-notes index` in the background. Cancel,
+`target: editor:<basename>`; the body is the final text) in the server's
+`note.dir()` (`start`'s optional `dir` overrides it; `ferry-edit` never
+passes one, so the record lands in the folder the browser lists, a
+Hammerspoon `notesDir` included), then runs `ferry-notes index` in the background. Cancel,
 abort, a wiped buffer and blank text record nothing; a failed record is
 one notice and never fails the edit. `editor:` is only a record
 (`target.lua` parses and labels it; nothing delivers to it): the

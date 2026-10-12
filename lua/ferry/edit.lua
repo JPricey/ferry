@@ -267,7 +267,7 @@ local function absolute(p) return type(p) == "string" and p:sub(1, 1) == "/" end
 -- Start editing opts.file (absolute path; a missing file starts empty and
 -- is created on Submit). opts.done (absolute path) gets the exit code when
 -- the edit ends. opts.dir: the notes folder a Submit is recorded in
--- (default note.dir()). Returns "ok", "busy", or "error <why>".
+-- (default note.dir(), the server's; bin/ferry-edit never passes one). Returns "ok", "busy", or "error <why>".
 function M.start(opts)
   opts = opts or {}
   if not (absolute(opts.file) and absolute(opts.done)) then

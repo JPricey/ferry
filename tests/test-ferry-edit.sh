@@ -126,14 +126,27 @@ check "Ctrl-Q: exit 1, file unchanged" "1 same" \
 f=$work/c.txt
 printf 'front\n' >"$f"
 echo local.ferry >"$work/front"
-FERRY_NOTES_DIR=$work/notes2 run "$f"
+# The server (started with FERRY_NOTES_DIR=$work/notes, as Hammerspoon's
+# notesDir does) owns the notes folder. This client has FERRY_NOTES_DIR
+# unset, so its own default would be $HOME/notes/scratchpads.
+mkdir -p "$work/home"
+unset FERRY_NOTES_DIR
+HOME=$work/home run "$f"
+export FERRY_NOTES_DIR=$work/notes
 started; sleep 0.5
 check "ferry frontmost (lsappinfo), no FocusGained: shown, no fallback" "running shown" \
   "$(running) $(ask "luaeval('require\"ferry.edit\".state.edit.shown and \"shown\" or \"pending\"')")"
 send 'x<C-x>'
 check "then Ctrl-X: exit 0" "0 xfront" "$(code) $(cat "$f")"
-check "FERRY_NOTES_DIR of ferry-edit (not the server's) holds the record" "1 1" \
-  "$(records | grep -c .) $(records "$work/notes2" | grep -c .)"
+check "client FERRY_NOTES_DIR unset: the record lands in the server's folder, none in the client's default" \
+  "2 absent" "$(records | grep -c .) $([ -e "$work/home/notes" ] && echo present || echo absent)"
+# A client FERRY_NOTES_DIR different from the server's is ignored too.
+printf 'front2\n' >"$f"
+FERRY_NOTES_DIR=$work/notes2 run "$f"
+started; sleep 0.5
+send 'y<C-x>'
+check "client FERRY_NOTES_DIR=notes2: exit 0, the record still in the server's folder" "0 3 absent" \
+  "$(code) $(records | grep -c .) $([ -e "$work/notes2" ] && echo present || echo absent)"
 rm -f "$work/front"
 
 # --- fallbacks ------------------------------------------------------------------
