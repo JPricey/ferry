@@ -114,6 +114,11 @@ check "list: time and date label" "True True" \
   "$("$notes" list | py '" ".join(str(bool(x)) for x in (d[0]["time"], d[0]["date_label"]))')"
 check "list --limit" "55aa66bb 3f9a1c2e" "$("$notes" list --limit 2 | ids)"
 check "list --exclude" "3f9a1c2e" "$("$notes" list --exclude 55aa66bb-77cc-48dd-99ee-00ff11aa22bb --limit 1 | ids)"
+# a bad --limit: one line on stderr, nothing on stdout, exit 2, no traceback
+check "list --limit abc: message and exit 2" "ferry-notes: --limit needs a number|2" \
+  "$({ "$notes" list --limit abc 2>&1 >/dev/null; echo $?; } | paste -sd'|' -)"
+check "list --limit with no value: message and exit 2" "ferry-notes: --limit needs a number|2" \
+  "$({ "$notes" list --limit 2>&1 >/dev/null; echo $?; } | paste -sd'|' -)"
 
 # --- search ---------------------------------------------------------------
 check "--query matches a body word" "3f9a1c2e" "$("$notes" list --query neovide | ids)"
