@@ -376,6 +376,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-12: Joe: notes folder is `~/notes/scratchpads/` (asked "why not in this repo?"; told the risks: `git clean -fdx`, worktrees, secrets beside code). The folder does not exist yet; voice-vim creates it and owns it.
   - 2026-10-12: H1 done and verified (`lua/voice-vim/store.lua` + 11 fixtures; meta is one table, keys in its array part; contract round trip with `target.split/join` checked). Verifier note folded into H3: always store a `target`, else a body line `to: …` becomes a header on reload.
   - 2026-10-12: H2 done and verified (`bin/voice-vim-notes`; parser matches store.lua byte for byte on all fixtures; a note without `id` uses its file name; `pin off` removes the key; pin/state never touch `updated`; a missing or old index rebuilds itself; `--query` words are quoted prefix terms, all must match; `app` is the last bundle component). Minor: `list --limit abc` prints a traceback.
+  - 2026-10-12: H6 verify FAILED (1st): with a non-default `--to`, the final rebuild wrote that folder into the default index, hiding Joe's real notes until a later sync. Sent to a new implementer in the same worktree.
 
 ## Targets chosen after writing
 
