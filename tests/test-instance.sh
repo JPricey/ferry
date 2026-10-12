@@ -897,6 +897,96 @@ do
   stop(sock)
 end
 
+-- P5: a Submit/Cancel/Hide whose wait finishes while the talk key is still
+-- held. At key up nvim is no longer recording or waiting; flow-state says
+-- `stopped` (our stop ended the adopted recording and its paste landed), so
+-- key up ends quietly: no "still recording" alert.
+local function noteHost(sock)
+  luaRun(sock, "talkhost.lua", [[
+    require("ferry.note").host = {
+      hide = function() vim.g.ferry_hidden = (vim.g.ferry_hidden or 0) + 1 end,
+      submit = function() vim.g.ferry_submitted = (vim.g.ferry_submitted or 0) + 1 end,
+    }
+    return 1
+  ]])
+end
+local function waitFor(sock, expr)
+  for _ = 1, 100 do
+    if ask(sock, expr) ~= "0" then return end
+    sh("sleep 0.02")
+  end
+end
+local function flowState(sock)
+  return luaRun(sock, "talkfs.lua", 'return require("ferry.note").flow_state()')
+end
+
+-- Ctrl-X while held: one submit, the note hides, then key up: no alert.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  recordFlow(sock)
+  noteHost(sock)
+  c.talkDown()
+  finishStart(rec)
+  ask(sock, 'luaeval("require(\\"ferry.note\\").submit()")')  -- Ctrl-X, talk key held
+  paste(sock, "held words")
+  waitFor(sock, 'get(g:, "ferry_submitted", 0)')
+  rec.focusedWindow = nil  -- Hammerspoon hid the note to deliver
+  check("Ctrl-X while held: one submit, one stop, flow-state stopped", "1 1 stopped",
+    ask(sock, 'get(g:, "ferry_submitted", 0)') .. " " .. stops(sock) .. " " .. flowState(sock))
+  c.talkUp()
+  rec:runTimers()
+  check("Ctrl-X while held: key up ends quietly, one submit, no release, no alert", "1 0 0 true",
+    ask(sock, 'get(g:, "ferry_submitted", 0)') .. " " .. #execs(rec, "'release'") .. " " .. #rec.alerts .. " "
+      .. tostring(rec:hasLog("i", "talk: no release needed: nvim already stopped Flow (stopped)")))
+  check("Ctrl-X while held: still one stop", 1, stops(sock))
+  stop(sock)
+end
+
+-- Ctrl+Option+V tap while held: draft waits for Flow, the note hides after
+-- the paste, then key up: no alert.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  c.bindURLs()
+  recordFlow(sock)
+  noteHost(sock)
+  c.talkDown()
+  finishStart(rec)
+  c.toggle()  -- the main hotkey, talk key held
+  check("hotkey tap while held: draft waits for flow, not hidden yet", "0 0",
+    count(t.order, "host.hide") .. " " .. ask(sock, 'get(g:, "ferry_hidden", 0)'))
+  paste(sock, "held words")
+  waitFor(sock, 'get(g:, "ferry_hidden", 0)')
+  check("hotkey tap while held: the note asks to hide after the paste", "1", ask(sock, 'get(g:, "ferry_hidden", 0)'))
+  rec:openURL("ferry-hide", {})  -- what the note's hide URL does
+  check("hotkey tap while held: hidden, flow-state stopped", "1 stopped",
+    count(t.order, "host.hide") .. " " .. flowState(sock))
+  c.talkUp()
+  rec:runTimers()
+  check("hotkey tap while held: key up ends quietly, no release, no alert, one stop", "0 0 1",
+    #execs(rec, "'release'") .. " " .. #rec.alerts .. " " .. stops(sock))
+  stop(sock)
+end
+
+-- A stray paste never reads as stopped: the note hidden by hand after a
+-- stray paste, key up still alerts once (a stop now would paste elsewhere).
+do
+  local t = setup({ talkStopTimeout = 0.3 })
+  local rec, c, sock = t.rec, t.c, t.sock
+  recordFlow(sock)
+  c.talkDown()
+  finishStart(rec)
+  paste(sock, "stray")
+  check("stray paste: flow-state recording, not stopped", "recording", flowState(sock))
+  rec.focusedWindow = nil  -- the note went away without a stop
+  c.talkUp()
+  rec:runTimers()
+  check("stray paste, note gone: no release, no stop, exactly one alert", "0 0 1",
+    #execs(rec, "'release'") .. " " .. stops(sock) .. " " .. #rec.alerts)
+  stop(sock)
+end
+
 -- Up without down, and a disabled controller: nothing.
 do
   local t = setup()

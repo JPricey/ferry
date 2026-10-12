@@ -38,11 +38,19 @@
 -- An adopted recording (talk key held) ends only by our own stop: a paste
 -- with no wait running (a late paste from an earlier hold, or a Cmd+V into
 -- the note) leaves it recording, so key up and a Submit still stop Flow.
+--
+-- stopped(): the latest adopted recording was ended by our own stop and its
+-- paste arrived (a Submit, Cancel or Hide wait, or a release, that finished
+-- on a paste; or, with no wait, a paste after a Ctrl-S stop). Key up treats
+-- it as done, so a Submit that finished while the talk key was held gives
+-- no "still recording" alert. A stray paste never sets it (no stop of ours
+-- was due), nor does a wait that timed out; adopt_start, start and
+-- assume_recording clear it.
 local M = {}
 
 -- Bumped when note.lua needs functions an older flow lacks; note.lua
 -- reloads a stale flow module in a running server (keeping M.state).
-M.api = 4
+M.api = 5
 
 M.paste_timeout_ms = 4000
 M.settle_ms = 150
@@ -60,7 +68,11 @@ M.NO_DICTATION = "ferry: no dictation arrived"
 -- waiting: the pending finish_then, { timer = uv timer, buf, fn = action,
 -- pasted = fn, kind = "finish" | "release", more = pastes still due after
 -- the next one (a recording stopped during this wait) } or nil.
-M.state = { recording = false, adopted = false, waiting = nil }
+-- gen counts adopt_start calls; stop_gen is the gen of the adopted
+-- recording our last stop ended (nil once its paste arrived); stopped is
+-- true once that paste arrived (see stopped()). A state from an older
+-- module (live reload) lacks them: nil reads as none.
+M.state = { recording = false, adopted = false, waiting = nil, gen = 0, stop_gen = nil, stopped = false }
 local attached = {}
 
 -- One `open` at a time, in call order, so a quick start/stop pair cannot
@@ -92,11 +104,18 @@ function M.recording() return M.state.recording end
 -- True while a deep link is in flight or queued.
 function M.busy() return busy or #queue > 0 end
 
+-- A new recording: an earlier one's stopped() no longer says anything.
+local function new_recording()
+  M.state.stopped, M.state.stop_gen = false, nil
+end
+
 -- Flow was started elsewhere (Hammerspoon's talk key). With the queue idle
 -- nothing is sent: Flow is already recording. With a link in flight or
 -- queued (say a stop), Flow may see that link after the outside start, so
 -- one start is queued behind it. Already recording: nothing.
 function M.adopt_start()
+  M.state.gen = (M.state.gen or 0) + 1
+  new_recording()
   M.state.adopted = true
   if M.state.recording then return end
   M.state.recording = true
@@ -104,17 +123,32 @@ function M.adopt_start()
 end
 
 -- Treat a Flow recording started elsewhere as ours (tests use it).
-function M.assume_recording() M.state.recording = true end
+function M.assume_recording()
+  new_recording()
+  M.state.recording = true
+end
 
 function M.start()
+  new_recording()
   M.state.recording, M.state.adopted = true, false
   M.open(M.START_URL)
 end
 
 function M.stop()
+  if M.state.adopted then M.state.stop_gen = M.state.gen or 0 end
   M.state.recording, M.state.adopted = false, false
   M.open(M.STOP_URL)
 end
+
+-- The paste after our stop of an adopted recording arrived: that recording
+-- is over, unless a new one was adopted or started since.
+local function paste_after_stop()
+  local s = M.state
+  if s.stop_gen ~= nil and s.stop_gen == (s.gen or 0) and not s.recording then s.stopped = true end
+  s.stop_gen = nil
+end
+
+function M.stopped() return M.state.stopped == true end
 
 function M.toggle()
   if M.state.recording then M.stop() else M.start() end
@@ -129,6 +163,7 @@ function M.on_paste(buf)
   local w = M.state.waiting
   if not w then
     if not M.state.adopted then M.state.recording = false end
+    paste_after_stop()
   elseif w.buf == buf then
     vim.schedule(w.pasted)
   end
@@ -202,9 +237,11 @@ function M.finish_then(buf, fn, kind)
   local w = { timer = timer, buf = buf, fn = fn, kind = kind, more = 0 }
   M.state.waiting = w
 
-  local function done(notice)
+  -- pasted: the wait ended on a paste (not a timeout or a wiped buffer).
+  local function done(notice, pasted)
     if M.state.waiting ~= w then return end
     stop_waiting()
+    if pasted then paste_after_stop() end
     if notice then vim.notify(notice, vim.log.levels.WARN) end
     w.fn()
   end
@@ -221,7 +258,7 @@ function M.finish_then(buf, fn, kind)
       start, last_tick, last_change = now_ms(), t, nil
       return
     end
-    done()
+    done(nil, true)
   end
   w.pasted = paste_seen
 

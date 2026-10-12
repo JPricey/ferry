@@ -209,7 +209,7 @@ g=$("$host" show com.example.app 4242)
 ask "luaeval('(function() local n = require\"ferry.note\"; n.api = 7; n.old = true; vim.g.ferry_gui = nil; vim.cmd(\"vsplit | split\"); return 1 end)()')" >/dev/null
 "$host" draft >/dev/null
 h=$("$host" show com.example.app 4242)
-check "old server (note api 7): show reloads the note module to 9 and keeps the draft" "9 true $g" \
+check "old server (note api 7): show reloads the note module to 10 and keeps the draft" "10 true $g" \
   "$(ask 'luaeval("require\"ferry.note\".api")') $(ask 'luaeval("require\"ferry.note\".old == nil")') $h"
 check "old server: show applies the layout" "history $(basename "$g")" "$(wins)"
 check "old server: show loads the GUI settings" "{'bg': '#001e27', 'font': 'Test Mono:h13'}" "$(ask 'string(g:ferry_gui)')"
@@ -258,8 +258,8 @@ check "show --talk resuming a draft whose cursor was on the header: insert at th
 check "each of the three releases above sent one stop" 3 "$(opened | grep -c stop-hands-free)"
 ask "luaeval('require\"ferry.note\".forget()')" >/dev/null
 check "talk without a note prints no note, Flow untouched" "no note false " "$("$host" talk) $(rec) $(opened)"
-check "flow-state while idle prints idle; release --force prints forced, one stop, then waiting" \
-  "idle forced waiting|-g wispr-flow://stop-hands-free" \
+check "flow-state after the talk releases' pastes prints stopped; release --force prints forced, one stop, then waiting" \
+  "stopped forced waiting|-g wispr-flow://stop-hands-free" \
   "$("$host" flow-state) $("$host" release --force) $("$host" flow-state)|$(sleep 0.3; opened)"
 paste "forced"
 ask "luaeval('require\"ferry.flow\".assume_recording()')" >/dev/null
@@ -267,7 +267,20 @@ check "flow-state while recording prints recording; release --force then prints 
   "recording released|-g wispr-flow://stop-hands-free" \
   "$("$host" flow-state) $("$host" release --force)|$(sleep 0.3; opened)"
 paste "x"
-check "after the paste: flow-state idle" idle "$("$host" flow-state)"
+check "after the paste of a stop not of a talk hold: flow-state idle" idle "$("$host" flow-state)"
+# P5: a talk hold ended by a Submit's stop: stopped once its paste landed,
+# while the stray paste before it leaves the hold recording.
+"$host" show --talk com.example.app 4242 >/dev/null
+paste "stray"
+check "talk, then a stray paste: flow-state recording" recording "$("$host" flow-state)"
+ask "luaeval('(function() require\"ferry.note\".host = { submit = function() vim.g.ferry_sub = 1 end, hide = function() end }; return 1 end)()')" >/dev/null
+ask "luaeval('require\"ferry.note\".submit()')" >/dev/null
+check "Submit during the hold: flow-state waiting, one stop" "waiting|-g wispr-flow://stop-hands-free" \
+  "$("$host" flow-state)|$(sleep 0.3; opened)"
+paste "held"
+check "after the Submit's paste: submitted, flow-state stopped, no other URL" "1 stopped " \
+  "$(ask 'get(g:, "ferry_sub", 0)') $("$host" flow-state) $(opened)"
+ask "luaeval('(function() local n = require\"ferry.note\"; n.host = n.default_host; return 1 end)()')" >/dev/null
 
 # A server holding the API-3 note module (and a flow module from before
 # hold to talk) reloads both on talk, keeping the draft and its target.
@@ -275,8 +288,8 @@ u=$("$host" show com.example.app 4242)
 ask "nvim_buf_set_lines(0, 1, -1, v:false, ['upgrade draft'])" >/dev/null
 "$host" draft >/dev/null
 ask "luaeval('(function() require\"ferry.note\".api = 3; local f = require\"ferry.flow\"; f.api = nil; f.adopt_start = nil; return 1 end)()')" >/dev/null
-check "API-3 server: talk reloads note (api 9) and flow (api 4), keeps the draft and its target" \
-  "talk $u 9 4 to: app:com.example.app#4242|upgrade draft com.example.app 4242 true" \
+check "API-3 server: talk reloads note (api 10) and flow (api 5), keeps the draft and its target" \
+  "talk $u 10 5 to: app:com.example.app#4242|upgrade draft com.example.app 4242 true" \
   "$("$host" talk) $(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api') $(ask 'join(getline(1, "$"), "|")') $(ask 'b:ferry.target." ".b:ferry.window') $(rec)"
 check "API-3 server: release after the upgrade sends one stop" "released|-g wispr-flow://stop-hands-free" \
   "$("$host" release)|$(sleep 0.3; opened)"
@@ -285,7 +298,7 @@ paste " done"
 
 # Live upgrade from main 54d10b6 (note api 5, flow api 2, history api 1): a
 # server started from that code keeps running while the repo under it moves
-# to this code (note 9, flow 4). The next host call reloads both modules.
+# to this code (note 10, flow 5). The next host call reloads both modules.
 # Draft, target and to: line are kept, a recording in progress and a pending
 # release wait survive, each release sends exactly one stop, and a paste the
 # old and the new paste hook both report counts once.
@@ -322,8 +335,8 @@ opened >/dev/null
 live=$work/live1; old_server "$live"
 "$live/bin/ferry-host" talk >/dev/null
 upgrade "$live"
-check "upgrade with a recording: release reloads to note 9, flow 4, keeps draft, to: line and target, one stop" \
-  "released 9 4 to: app:com.example.app#4242|live draft com.example.app 4242 true|-g wispr-flow://stop-hands-free" \
+check "upgrade with a recording: release reloads to note 10, flow 5, keeps draft, to: line and target, one stop" \
+  "released 10 5 to: app:com.example.app#4242|live draft com.example.app 4242 true|-g wispr-flow://stop-hands-free" \
   "$("$live/bin/ferry-host" release) $(apis) $(body) $(ask 'b:ferry.target." ".b:ferry.window') $(waiting)|$(sleep 0.3; opened)"
 # A quick second hold during that wait: the new talk adds the new paste hook
 # beside the old one, so the first paste is reported twice.
@@ -354,7 +367,7 @@ check "54d10b6 server: release sends one stop and waits" "true -g wispr-flow://s
   "$(waiting) $(sleep 0.3; opened)"
 upgrade "$live"
 check "upgrade with a pending release wait: release reloads, keeps draft and target, the wait, sends no second stop" \
-  "released 9 4 to: app:com.example.app#4242|live draft com.example.app 4242 true " \
+  "released 10 5 to: app:com.example.app#4242|live draft com.example.app 4242 true " \
   "$("$live/bin/ferry-host" release) $(apis) $(body) $(ask 'b:ferry.target." ".b:ferry.window') $(waiting) $(sleep 0.3; opened)"
 vpaste " landed"
 check "upgrade: Flow's paste ends the old wait, lands once, recording off" \
@@ -376,8 +389,8 @@ check "1dd6f9b server: note api 8, raw draft file in the old folder" "8 $work/ol
 upgrade "$live"
 mkdir -p "$FERRY_NOTES_DIR"; before=$(ls "$FERRY_NOTES_DIR" | wc -l | tr -d ' ')
 new=$("$live/bin/ferry-host" show com.example.app 4242)
-check "upgrade from api 8: show reloads to 9, keeps the draft and target, names a note file in the notes folder" \
-  "9 to: app:com.example.app#4242|api 8 draft com.example.app 4242 yes" \
+check "upgrade from api 8: show reloads to 10, keeps the draft and target, names a note file in the notes folder" \
+  "10 to: app:com.example.app#4242|api 8 draft com.example.app 4242 yes" \
   "$(lua 'require"ferry.note".api') $(body) $(ask 'b:ferry.target." ".b:ferry.window') $(case $new in "$FERRY_NOTES_DIR"/????-??-??-??????-*.md) echo yes ;; *) echo "no ($new)" ;; esac)"
 ask "nvim_input('<Esc>A and more')" >/dev/null
 sleep 1.5

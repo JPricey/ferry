@@ -94,10 +94,11 @@
 --               front), one alert worded by cause (Flow slow to start, note
 --               did not appear, note not ready); Flow records on until
 --               stopped. The one quiet end: nvim took this hold's recording
---               and `flow-state` says `waiting` (asked when the note loses
---               focus and at the timeout): a Submit, Cancel or Hide wait
---               took over and sent the stop, so no release and no alert.
---               An idle answer is not trusted. A show that failed and the host
+--               and `flow-state` says `waiting` or `stopped` (asked when the
+--               note loses focus and at the timeout): a Submit, Cancel or
+--               Hide wait took over and sent the stop (`stopped`: and its
+--               paste has landed, e.g. Ctrl-X while the key is still held),
+--               so no release and no alert. An idle answer is not trusted. A show that failed and the host
 --               not focused: alert at once. A release that fails or prints
 --               anything else: alert. So every hold ends in one stop (two
 --               after a Ctrl-S while held) or one alert. A talk press's
@@ -726,10 +727,11 @@ function I.new(cfg)
       log.i("talk: no release needed: " .. why)
     end
 
-    -- nvim's view of Flow: "recording", "waiting", "idle", or nil (no answer).
+    -- nvim's view of Flow: "recording", "waiting", "stopped", "idle", or nil
+    -- (no answer).
     local function flowState()
       local ok, out = runSync("talk", { "flow-state" })
-      if ok and (out == "recording" or out == "waiting" or out == "idle") then return out end
+      if ok and (out == "recording" or out == "waiting" or out == "stopped" or out == "idle") then return out end
       return nil
     end
 
@@ -764,11 +766,13 @@ function I.new(cfg)
     end
 
     -- nvim took this hold's recording and a Submit, Cancel or Hide wait
-    -- took over (that wait sent the stop): nothing to release. Idle is not
-    -- trusted: Flow may still be recording.
+    -- took over (that wait sent the stop; `stopped`: and its paste landed):
+    -- nothing to release. Idle is not trusted: Flow may still be recording
+    -- (a stray paste never makes nvim say `stopped`).
     local function stoppedInNvim(press)
       if not press.adopted then return nil end
-      if flowState() == "waiting" then return "nvim already stopped Flow (waiting)" end
+      local st = flowState()
+      if st == "waiting" or st == "stopped" then return "nvim already stopped Flow (" .. st .. ")" end
       return nil
     end
 

@@ -227,7 +227,10 @@ Flow queue, so Ctrl-X/Ctrl-Q right after take over its wait. A paste with
 no wait running never clears an adopted recording in `flow.lua`. Not ready
 5 s after key up: no stop (it could beat the start, or Flow's paste would
 land elsewhere), one alert by cause. A Submit/Cancel/Hide wait already
-running in nvim (`flow-state` waiting): no stop, no alert. Without an instance, talkDown alerts like a press and
+running in nvim (`flow-state` waiting), or one that already got Flow's
+paste while the key was held (`stopped`: `flow.lua` remembers that its own
+stop ended the adopted recording and the paste arrived; a stray paste never
+sets it, `adopt_start` clears it): no stop, no alert. Without an instance, talkDown alerts like a press and
 never starts Flow.
 
 **Delivery.** `ferry-submit?file=&target=&window=` hides Neovide, then
