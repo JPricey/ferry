@@ -238,45 +238,6 @@ check "<C-s> in the sidebar starts Flow from the note, in insert mode at the end
   "$(opened) $(ask 'exists("b:ferry")') $(ask "mode().' '.(line('.') == line('\$')).' '.(col('.') == col('\$')).' '.(line('.') > 1)")"
 send '<C-s>'; opened >/dev/null
 
-# Live upgrade: a server running the note at api 4 with 4f113ac's history
-# module (sidebar without note keys). show reloads the note to api 11; the
-# sidebar reopened with q then :History or <leader>h has the note keys.
-# 4f113ac predates the rename to ferry: its old name is read from its lua/
-# folder and mapped to ferry in both files.
-old=$work/old; mkdir -p "$old/lua/ferry"; ln -s "$root/bin" "$old/bin"
-was=$(git -C "$root" ls-tree --name-only 4f113ac lua/ | sed 's#^lua/##')
-for m in note history; do
-  git -C "$root" show "4f113ac:lua/$was/$m.lua" |
-    perl -pe "s/\Q$was\E/ferry/g; s/\Q${was//-/}\E/ferry/g" >"$old/lua/ferry/$m.lua"
-done
-cat >"$work/old.lua" <<EOF
-local h = require("ferry.history"); h.close()
-local n = require("ferry.note")
-local on = dofile("$old/lua/ferry/note.lua"); on.state = n.state
-package.loaded["ferry.note"] = on
-package.loaded["ferry.history"] = dofile("$old/lua/ferry/history.lua")
-on.apply_options(vim.api.nvim_get_current_buf())
-EOF
-"$host" show com.example.app 4242 >/dev/null
-send '<Esc>'; ask "execute('luafile $work/old.lua')" >/dev/null
-send ':History<CR>'; to_sidebar
-check "old server: note api 4, old sidebar has no <C-x>" "4 nil 0" \
-  "$(ask 'luaeval("require\"ferry.note\".api")') $(ask 'luaeval("tostring(require\"ferry.history\".api)")') $(ask "get(maparg('<C-x>', 'n', 0, 1), 'buffer', 0)")"
-upgrade_key() { # reopen: keys that reopen the sidebar from the note
-  "$host" show com.example.app 4242 >/dev/null
-  id=$(ask 'b:ferry.id'); waitrow "$id" open
-  send "upgraded"; to_sidebar; send 'q'
-  send "<Esc>$1"; to_sidebar
-  side="$(ask 'winnr("$")') $(ask 'bufname()')"
-  send '<C-x>'
-}
-upgrade_key ':History<CR>'
-check "after upgrade: q then :History, <C-x> in the sidebar sends the note" \
-  "11 2 ferry://history submit submitted " \
-  "$(ask 'luaeval("require\"ferry.note\".api")') $side $(url_kind "$(opened)") $(outcome "$id") $(ask 'v:errmsg')"
-upgrade_key '\h'
-check "after upgrade: q then <leader>h, <C-x> in the sidebar sends the note" \
-  "2 ferry://history submit submitted " "$side $(url_kind "$(opened)") $(outcome "$id") $(ask 'v:errmsg')"
 check "server still running after the sidebar keys" "$pid" "$(ask 'getpid()')"
 "$host" stop
 check "submit file survives ferry-host stop" "to outbox" "$(cat "$file" 2>&1)"

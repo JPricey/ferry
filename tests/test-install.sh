@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Tests for install.sh. Every run uses a temp HOME and TMPDIR, a fake
-# Applications dir (FERRY_APPS_DIR), recording fakes for brew, open, hs
-# and pgrep and a filtering ps first on PATH, so the real system (Homebrew,
-# /Applications, ~/.hammerspoon, the running server and any other process,
-# Hammerspoon itself) is never touched.
+# Applications dir (FERRY_APPS_DIR) and recording fakes for brew, open, hs
+# and pgrep first on PATH, so the real system (Homebrew, /Applications,
+# ~/.hammerspoon, Hammerspoon itself) is never touched.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 install="$root/install.sh"
@@ -42,30 +41,21 @@ cat > "$fakes/pgrep" <<'SH'
 echo "pgrep $*" >> "$FAKE_CALLS"
 [ "${FAKE_HS_RUNNING:-0}" = 1 ]
 SH
-# ps lists only processes whose command line contains $FAKE_PS_KEEP (none
-# when unset), so install.sh never sees Joe's own processes.
-cat > "$fakes/ps" <<'SH'
-#!/bin/bash
-[ -n "${FAKE_PS_KEEP:-}" ] || exit 0
-/bin/ps "$@" | grep -F -- "$FAKE_PS_KEEP"
-exit 0
-SH
 chmod +x "$fakes"/*
 
 # setup <name> [fake...]: a scenario dir $s with home/, apps/, bin/ (the
-# given fakes, default all four, and always ps) and an empty calls log;
-# exports the env.
+# given fakes, default all four) and an empty calls log; exports the env.
 setup() {
   s="$tmp/$1"; shift
   mkdir -p "$s/home" "$s/apps" "$s/bin" "$s/tmp"
   : > "$s/calls"
   local f
-  for f in ${*:-brew open hs pgrep} ps; do cp "$fakes/$f" "$s/bin/"; done
+  for f in ${*:-brew open hs pgrep}; do cp "$fakes/$f" "$s/bin/"; done
   export HOME="$s/home" FERRY_APPS_DIR="$s/apps" FAKE_CALLS="$s/calls" \
     FAKE_BIN="$s/bin" PATH="$s/bin:/usr/bin:/bin" FAKE_HS_RUNNING=0 TMPDIR="$s/tmp"
-  unset FERRY_INSTALL_DRY_RUN FAKE_PS_KEEP
+  unset FERRY_INSTALL_DRY_RUN
   # Guard: the system tools must resolve to the fakes, or not at all.
-  for f in brew open hs pgrep ps nvim; do
+  for f in brew open hs pgrep nvim; do
     case "$(command -v "$f" || echo none)" in
       "$s/bin/"* | none) ;;
       *) echo "FAIL guard: $f resolves outside the fakes; aborting"; exit 1 ;;
@@ -299,152 +289,6 @@ setup bundledir; apps_ghostty_flow
 out=$(FERRY_BUNDLE_DIR="$s/elsewhere" bash "$install" 2>&1)
 check "bundle dir: built in FERRY_BUNDLE_DIR, not ~/Applications" "local.ferry no" \
   "$(plist_key "$s/elsewhere/ferry.app" CFBundleIdentifier) $([ -e "$s/home/Applications/ferry.app" ] && echo yes || echo no)"
-
-# >>> BEGIN one-time migration from voice-vim (R2 removes this section) >>>
-# A fake old install in a temp HOME and a short temp TMPDIR (socket paths
-# max out at 104 bytes): the old link, the old init.lua block (and an
-# existing init.lua.bak), the old data folder, old notes with an outbox, an
-# old headless nvim server on $TMPDIR/voice-vim.sock whose stub
-# voice-vim.note has a draft() that writes a note file, a fake old Neovide
-# (argv has --server <old socket>) and an unrelated one that must survive.
-# The fake ps shows install.sh only the processes under $mroot.
-if [ -n "$real_nvim" ]; then
-  mroot=$(mktemp -d /tmp/fim.XXXX); bg_pids=""
-  trap 'kill $bg_pids 2>/dev/null; rm -rf "$tmp" "$mroot"' EXIT
-  # The stub module, outside TMPDIR so snapshots of it stay about the install.
-  mkdir -p "$tmp/stub/lua/voice-vim"
-  cat > "$tmp/stub/lua/voice-vim/note.lua" <<'LUA'
-return { draft = function()
-  local p = (os.getenv("TMPDIR") or "/tmp"):gsub("/$", "") .. "/voice-vim-notes/2026-10-12-draft.md"
-  local f = assert(io.open(p, "w")); f:write("live draft\n"); f:close()
-  return p
-end }
-LUA
-  # use_real_nvim: nvim on PATH runs the real one; ps shows $mroot only.
-  use_real_nvim() {
-    printf '#!/bin/sh\nexec %s "$@"\n' "$real_nvim" > "$s/bin/nvim"; chmod +x "$s/bin/nvim"
-    export FAKE_PS_KEEP=$mroot
-  }
-  # start_old <dir>: an old server under TMPDIR=<dir> on <dir>/voice-vim.sock;
-  # sets server_pid.
-  start_old() {
-    mkdir -p "$1/voice-vim-notes"
-    TMPDIR=$1 nvim --headless --clean --listen "$1/voice-vim.sock" --cmd "set rtp^=$tmp/stub" </dev/null >/dev/null 2>&1 &
-    server_pid=$!; bg_pids+=" $server_pid"
-    for _ in $(seq 100); do [ "$(nvim --server "$1/voice-vim.sock" --remote-expr 1 2>/dev/null)" = 1 ] && break; sleep 0.05; done
-  }
-  draft_line() { echo "installed  your draft from the old server: $1 (open it and paste it into a ferry note)"; }
-
-  setup migrate; apps_ghostty_flow; use_real_nvim
-  mtmp=$mroot/m; mkdir -p "$mtmp"; export TMPDIR=$mtmp FAKE_HS_RUNNING=1
-  osock=$mtmp/voice-vim.sock
-  start_old "$mtmp"
-  mkdir -p "$mtmp/voice-vim-notes/outbox"
-  echo "queued" > "$mtmp/voice-vim-notes/outbox/abc.md"
-  perl -e 'sleep 600' -- --server "$osock" & neovide_pid=$!
-  perl -e 'sleep 600' -- --server "$mtmp/other.sock" & other_pid=$!
-  bg_pids+=" $neovide_pid $other_pid"
-  mkdir -p "$s/home/.hammerspoon" "$s/home/Library/Application Support/voice-vim"
-  ln -s "$s/oldrepo/hammerspoon/voice-vim.lua" "$s/home/.hammerspoon/voice-vim.lua"
-  echo "rows" > "$s/home/Library/Application Support/voice-vim/history.sqlite"
-  cat > "$(init_lua)" <<'LUA'
-hs.loadSpoon("Foo")
-
--- voice-vim: dictate into an ephemeral Neovim buffer, then paste back.
-require("hs.ipc") -- enables the `hs` CLI for reloading and debugging
-require("voice-vim").start({
-  autoStartFlow = false,
-})
-LUA
-  cp "$(init_lua)" "$s/orig.lua"; echo "older backup" > "$(init_lua).bak"
-  migrated_init='hs.loadSpoon("Foo")
-
--- ferry: dictate into an ephemeral Neovim buffer, then paste back.
-require("hs.ipc") -- enables the `hs` CLI for reloading and debugging
-require("ferry").start({
-  autoStartFlow = false,
-})'
-  alive() { kill -0 "$1" 2>/dev/null && echo up || echo gone; }
-  snap_all() { snapshot; (cd "$mtmp" && find . | sort | while read -r p; do
-    if [ -f "$p" ]; then echo "tmp:$p $(cksum < "$p")"; else echo "tmp:$p"; fi; done); }
-
-  # --check: reports the old install and changes nothing.
-  before=$(snap_all)
-  out=$(bash "$install" --check 2>&1)
-  check "migrate --check: reports the old install" 1 "$(grep -c '^missing: *old install found: run ./install.sh to migrate' <<<"$out")"
-  check "migrate --check: no fake calls" "" "$(cat "$s/calls")"
-  check "migrate --check: nothing changed, server and Neovide still up" "$before up up" "$(snap_all) $(alive $server_pid) $(alive $neovide_pid)"
-
-  out=$(bash "$install" 2>&1); st=$?
-  check "migrate: exits 0" 0 $st
-  check "migrate: prints the draft's new path once, the draft is there" "1 live draft" \
-    "$(grep -cxF "$(draft_line "$mtmp/ferry-notes/2026-10-12-draft.md")" <<<"$out") $(cat "$mtmp/ferry-notes/2026-10-12-draft.md" 2>&1)"
-  check "migrate: draft and outbox copied to the new notes dirs" "live draft queued" \
-    "$(cat "$mtmp/ferry-notes/2026-10-12-draft.md" "$mtmp/ferry-notes/outbox/abc.md" 2>&1 | tr '\n' ' ' | sed 's/ $//')"
-  sleep 0.2
-  check "migrate: old Neovide stopped, the unrelated one kept" "gone up" "$(alive $neovide_pid) $(alive $other_pid)"
-  check "migrate: old server stopped, socket gone" "gone gone" "$(alive $server_pid) $([ -e "$osock" ] && echo present || echo gone)"
-  check "migrate: data folder moved" "rows no" \
-    "$(cat "$s/home/Library/Application Support/ferry/history.sqlite" 2>&1) $([ -e "$s/home/Library/Application Support/voice-vim" ] && echo yes || echo no)"
-  check "migrate: old link removed, new link made" "no $root/hammerspoon/ferry.lua" \
-    "$([ -L "$s/home/.hammerspoon/voice-vim.lua" ] && echo yes || echo no) $(readlink "$s/home/.hammerspoon/ferry.lua")"
-  check "migrate: init.lua block and comment renamed" "$migrated_init" "$(cat "$(init_lua)")"
-  check "migrate: existing .bak kept, original in .bak.<time>" "older backup same" \
-    "$(cat "$(init_lua).bak") $(for b in "$(init_lua)".bak.*; do cmp -s "$s/orig.lua" "$b" && echo same; done)"
-  check "migrate: window frame moved by hs -c before the reload" "1 1 1" \
-    "$(grep -c 'hs.settings.set("ferry.windowFrame", v)' "$s/calls") $(grep -c 'hs.settings.clear("voice-vim.windowFrame")' "$s/calls") \
-$(grep -nE 'windowFrame|hs.reload' "$s/calls" | cut -d: -f1 | tr '\n' ' ' | awk '{print ($1 < $2) ? 1 : 0}')"
-  check "migrate: Hammerspoon reloaded once" 1 "$(grep -cx 'hs -t 5 -c hs.reload()' "$s/calls")"
-  check "migrate: no second init.lua block" 0 "$(grep -c '^installed *ferry block' <<<"$out")"
-  check "migrate: no missing lines" 0 "$(grep -c '^missing:' <<<"$out")"
-
-  # A second run finds nothing to migrate and changes nothing.
-  before=$(snap_all); : > "$s/calls"
-  out=$(bash "$install" 2>&1); st=$?
-  check "migrate again: exits 0, nothing to migrate" "0 1" "$st $(grep -c '^ok *no voice-vim install to migrate' <<<"$out")"
-  check "migrate again: no installed lines, no settings call" "0 0" \
-    "$(grep -c '^installed' <<<"$out") $(grep -c windowFrame "$s/calls")"
-  check "migrate again: files unchanged" "$before" "$(snap_all)"
-  check "migrate again: the unrelated Neovide still up" up "$(alive $other_pid)"
-  kill $other_pid 2>/dev/null
-
-  # An old server started under another TMPDIR than install.sh runs with:
-  # found by the socket's basename in process args, its draft saved and
-  # copied to the new notes dir, it and its Neovide stopped. A real nvim on
-  # ferry.sock and a Neovide on another socket survive.
-  setup migrate-elsewhere; apps_ghostty_flow; use_real_nvim
-  odir=$mroot/o ndir=$mroot/n; mkdir -p "$odir" "$ndir"
-  osock=$odir/voice-vim.sock
-  start_old "$odir"
-  perl -e 'sleep 600' -- --server "$osock" & neovide_pid=$!
-  perl -e 'sleep 600' -- --server "$odir/voice-vim.sock.old" & other_pid=$!
-  nvim --headless --clean --listen "$ndir/ferry.sock" </dev/null >/dev/null 2>&1 & unrelated_pid=$!
-  bg_pids+=" $neovide_pid $other_pid $unrelated_pid"
-  for _ in $(seq 100); do [ "$(nvim --server "$ndir/ferry.sock" --remote-expr 1 2>/dev/null)" = 1 ] && break; sleep 0.05; done
-  export TMPDIR=$ndir
-  out=$(bash "$install" 2>&1); st=$?
-  check "migrate elsewhere: exits 0, no missing lines" "0 0" "$st $(grep -c '^missing:' <<<"$out")"
-  check "migrate elsewhere: prints the new draft path, the draft is there" "1 live draft" \
-    "$(grep -cxF "$(draft_line "$ndir/ferry-notes/2026-10-12-draft.md")" <<<"$out") $(cat "$ndir/ferry-notes/2026-10-12-draft.md" 2>&1)"
-  check "migrate elsewhere: old server stopped by its own socket path" "1 gone gone" \
-    "$(grep -cxF "installed  stopped the old server ($osock)" <<<"$out") $(alive $server_pid) $([ -e "$osock" ] && echo present || echo gone)"
-  check "migrate elsewhere: old Neovide stopped, the others kept" "gone up up" \
-    "$(alive $neovide_pid) $(alive $other_pid) $(alive $unrelated_pid)"
-  check "migrate elsewhere: the nvim on ferry.sock still answers" 1 \
-    "$(nvim --server "$ndir/ferry.sock" --remote-expr 1 2>/dev/null)"
-  kill $other_pid $unrelated_pid 2>/dev/null
-
-  # Both data folders: neither is touched, and a missing: line says so.
-  setup migrate-both; apps_ghostty_flow
-  mkdir -p "$s/home/Library/Application Support/voice-vim" "$s/home/Library/Application Support/ferry"
-  out=$(bash "$install" 2>&1)
-  check "both data folders: reported, both kept" "1 yes yes" \
-    "$(grep -c '^missing: *both .* exist: merge them by hand' <<<"$out") $(cd "$s/home/Library/Application Support" && [ -d voice-vim ] && echo yes) $([ -d "$s/home/Library/Application Support/ferry" ] && echo yes)"
-  rm -rf "$mroot"
-else
-  echo "skip migration (nvim not found)"
-fi
-# <<< END one-time migration from voice-vim <<<
 
 [ $fail -eq 0 ] && echo "all ok" || echo "FAILED"
 exit $fail

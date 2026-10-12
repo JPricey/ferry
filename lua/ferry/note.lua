@@ -90,11 +90,8 @@ local store = require("ferry.store")
 -- swapped M.host) when the loaded one reports a different api.
 M.api = 11
 
--- history api 1: open() binds the note keys on the sidebar. Reloaded now
--- when already loaded, so a sidebar opened from a :History command an older
--- note module defined has them too.
+-- history api 1: open() binds the note keys on the sidebar.
 local function history() return current("ferry.history", 1) end
-if package.loaded["ferry.history"] then history() end
 
 -- The current (unfinished) note: { id = uuid, path = file, buf = bufnr,
 -- created = Unix time its file name was stamped with (nil: a note from

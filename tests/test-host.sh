@@ -296,90 +296,16 @@ check "API-3 server: release after the upgrade sends one stop" "released|-g wisp
 paste " done"
 "$host" stop
 
-# Live upgrade from main 54d10b6 (note api 5, flow api 2, history api 1): a
-# server started from that code keeps running while the repo under it moves
-# to this code (note 11, flow 5). The next host call reloads both modules.
-# Draft, target and to: line are kept, a recording in progress and a pending
-# release wait survive, each release sends exactly one stop, and a paste the
-# old and the new paste hook both report counts once.
-waiting() { lua 'require"ferry.flow".state.waiting ~= nil'; }
-vpaste() { ask "luaeval('vim.paste({\"$1\"}, -1)')" >/dev/null; sleep 0.4; }
-apis() { echo "$(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api')"; }
-body() { ask 'join(getline(1, "$"), "|")'; }
-# old_tree <commit> <dir>: that commit's tree in <dir>. Commits before the
-# rename to ferry used another name: it is read from the commit's lua/
-# folder and mapped to ferry in paths and file contents.
-old_tree() {
-  mkdir -p "$2"; git -C "$root" archive "$1" | tar -x -C "$2"
-  local was flat upper p
-  was=$(git -C "$root" ls-tree --name-only "$1" lua/ | sed 's#^lua/##')
-  [ "$was" = ferry ] && return
-  flat=${was//-/}; upper=$(echo "${was//-/_}" | tr '[:lower:]' '[:upper:]')
-  find "$2" -depth -name "*$was*" | while read -r p; do
-    mv "$p" "$(dirname "$p")/$(basename "$p" | sed "s/$was/ferry/g")"
-  done
-  find "$2" -type f -exec perl -pi -e "s/\Q$was\E/ferry/g; s/\Q$flat\E/ferry/g; s/\Q$upper\E/FERRY/g" {} +
-}
-old_server() { # dir: 54d10b6's tree there, its host shows a note with a draft
-  old_tree 54d10b6 "$1"
-  "$1/bin/ferry-host" ensure >/dev/null
-  "$1/bin/ferry-host" show com.example.app 4242 >/dev/null
-  ask "nvim_buf_set_lines(0, 1, -1, v:false, ['live draft'])" >/dev/null
-  "$1/bin/ferry-host" draft >/dev/null
-  check "54d10b6 server: note api 5, flow api 2" "5 2" "$(apis)"
-}
-upgrade() { cp -R "$root/lua" "$root/bin" "$1/"; }
-opened >/dev/null
-
-# A recording in progress at the upgrade.
-live=$work/live1; old_server "$live"
-"$live/bin/ferry-host" talk >/dev/null
-upgrade "$live"
-check "upgrade with a recording: release reloads to note 11, flow 5, keeps draft, to: line and target, one stop" \
-  "released 11 5 to: app:com.example.app#4242|live draft com.example.app 4242 true|-g wispr-flow://stop-hands-free" \
-  "$("$live/bin/ferry-host" release) $(apis) $(body) $(ask 'b:ferry.target." ".b:ferry.window') $(waiting)|$(sleep 0.3; opened)"
-# A quick second hold during that wait: the new talk adds the new paste hook
-# beside the old one, so the first paste is reported twice.
-"$live/bin/ferry-host" talk >/dev/null
-check "upgrade: a quick second hold's release sends one stop" "released|-g wispr-flow://stop-hands-free" \
-  "$("$live/bin/ferry-host" release)|$(sleep 0.3; opened)"
-vpaste " one"
-check "upgrade: the first paste, reported by both hooks, counts once (still waiting for the second)" \
-  "true false" "$(waiting) $(rec)"
-# A third hold before the second paste: that paste ends the wait but must
-# not clear the new recording (the old hook forwards to the new module).
-"$live/bin/ferry-host" talk >/dev/null
-vpaste " two"
-check "upgrade: the second paste ends the wait and keeps the third hold recording" \
-  "false true" "$(waiting) $(rec)"
-check "upgrade: the third hold's release sends one stop" "released|-g wispr-flow://stop-hands-free" \
-  "$("$live/bin/ferry-host" release)|$(sleep 0.3; opened)"
-vpaste " three"
-check "upgrade: the last paste ends its wait, each paste in the note once" \
-  "false false 1 1 1" "$(waiting) $(rec) $(echo $(for w in one two three; do body | grep -o $w | grep -c .; done))"
-"$live/bin/ferry-host" stop
-
-# A pending release wait (the old module already sent its stop) at the upgrade.
-live=$work/live2; old_server "$live"
-"$live/bin/ferry-host" talk >/dev/null
-"$live/bin/ferry-host" release >/dev/null
-check "54d10b6 server: release sends one stop and waits" "true -g wispr-flow://stop-hands-free" \
-  "$(waiting) $(sleep 0.3; opened)"
-upgrade "$live"
-check "upgrade with a pending release wait: release reloads, keeps draft and target, the wait, sends no second stop" \
-  "released 11 5 to: app:com.example.app#4242|live draft com.example.app 4242 true " \
-  "$("$live/bin/ferry-host" release) $(apis) $(body) $(ask 'b:ferry.target." ".b:ferry.window') $(waiting) $(sleep 0.3; opened)"
-vpaste " landed"
-check "upgrade: Flow's paste ends the old wait, lands once, recording off" \
-  "false false 1" "$(waiting) $(rec) $(body | grep -o landed | grep -c .)"
-"$live/bin/ferry-host" stop
-
 # Live upgrade from main 1dd6f9b (note api 8, notes as raw scratch files in
-# ${TMPDIR}/ferry-notes): the next call with this code reloads note to 11,
-# keeps the draft (to: line, text, target), and the draft gets a note file
-# in the notes folder on its next change. The old scratch file is left as
-# it was.
-live=$work/live3; old_tree 1dd6f9b "$live"
+# ${TMPDIR}/ferry-notes): a server started from that commit's tree keeps
+# running while the tree under it moves to this code. The next call reloads
+# note to 11, keeps the draft (to: line, text, target), and the draft gets a
+# note file in the notes folder on its next change. The old scratch file is
+# left as it was.
+body() { ask 'join(getline(1, "$"), "|")'; }
+upgrade() { cp -R "$root/lua" "$root/bin" "$1/"; }
+old_tree() { mkdir -p "$2"; git -C "$root" archive "$1" | tar -x -C "$2"; } # <commit> <dir>
+live=$work/live; old_tree 1dd6f9b "$live"
 FERRY_NOTES_DIR=$work/oldnotes "$live/bin/ferry-host" ensure >/dev/null
 FERRY_NOTES_DIR=$work/oldnotes "$live/bin/ferry-host" show com.example.app 4242 >/dev/null
 ask "nvim_buf_set_lines(0, 1, -1, v:false, ['api 8 draft'])" >/dev/null
