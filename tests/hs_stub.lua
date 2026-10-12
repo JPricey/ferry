@@ -50,6 +50,22 @@
 --                      popen close fails, which LuaJIT never reports
 --   app opts.windows   list returned by app:allWindows() (default {window})
 --   window opts.size   {w, h} for win:frame() (default 800x600)
+--
+-- Window frame additions (hammerspoon/window-frame.lua):
+--   rec.settings       key -> value for hs.settings.get/set (in memory)
+--   rec.screens        nil, or list of {x, y, w, h}: hs.screen.allScreens
+--                      returns these; mainScreen stays rec.screen
+--   rec.setFrames      {win, frame, duration} for win:setFrame(rect, duration)
+--   rec.fullScreenSets {win, value} for win:setFullScreen(value)
+--   rec.watchers       watcher stubs from win:newWatcher(fn, userData):
+--                      {win, fn, userData, events, started, stopped}
+--   rec:fireWatcher(win, event)  call win's started, unstopped watchers as
+--                      Hammerspoon would: fn(win, event, watcher, userData)
+--   rec:placeWindow(win, {x, y, w, h})  move a window as the user would (no
+--                      setFrames record, no watcher event)
+--   window opts.fullScreen      initial win:isFullScreen() (default false)
+--   window opts.stayFullScreen  setFullScreen(false) is recorded but ignored
+--   hs.uielement.watcher.windowMoved / windowResized / elementDestroyed
 
 local S = {}
 
@@ -106,11 +122,11 @@ function S.app(rec, opts)
   return a
 end
 
--- Screen stub: frame()/fullFrame() return rec.screen.
-function S.screen(rec)
+-- Screen stub: frame()/fullFrame() return rect (default rec.screen).
+function S.screen(rec, rect)
   local s = {}
-  function s:frame() return copy(rec.screen) end
-  function s:fullFrame() return copy(rec.screen) end
+  function s:frame() return copy(rect or rec.screen) end
+  function s:fullFrame() return copy(rect or rec.screen) end
   return s
 end
 
@@ -135,6 +151,30 @@ function S.window(rec, opts)
     self._topLeft = copy(pt)
     return self
   end
+  w._fullScreen = opts.fullScreen == true
+  function w:isFullScreen() return self._fullScreen end
+  function w:setFullScreen(v)
+    rec.fullScreenSets[#rec.fullScreenSets + 1] = { win = self, value = v }
+    if not (opts.stayFullScreen and not v) then self._fullScreen = v and true or false end
+    return self
+  end
+  function w:setFrame(f, duration)
+    rec.setFrames[#rec.setFrames + 1] = { win = self, frame = copy(f), duration = duration }
+    self._topLeft = { x = f.x, y = f.y }
+    self._size = { w = f.w, h = f.h }
+    return self
+  end
+  function w:newWatcher(fn, userData)
+    local wt = { win = self, fn = fn, userData = userData, events = nil, started = false, stopped = false }
+    function wt:start(events)
+      self.events = copy(events)
+      self.started = true
+      return self
+    end
+    function wt:stop() self.stopped = true; return self end
+    rec.watchers[#rec.watchers + 1] = wt
+    return wt
+  end
   function w:focus()
     rec.focuses[#rec.focuses + 1] = self
     if opts.focusOnFocus ~= false then
@@ -155,6 +195,7 @@ function S.install()
     pasteboardSets = {}, activations = {}, focuses = {}, timers = {},
     apps = {}, windows = {}, windowGets = 0, accessibility = true,
     hides = {}, unhides = {}, moves = {}, tasks = {},
+    settings = {}, setFrames = {}, fullScreenSets = {}, watchers = {},
     pasteboard = { contents = nil, changeCount = 0 },
     clock = 1000, screen = { x = 0, y = 0, w = 1440, h = 900 },
   }
@@ -166,6 +207,16 @@ function S.install()
     if w then w._closed = true end
     self.windows[id] = nil
     if self.focusedWindow == w then self.focusedWindow = nil end
+  end
+
+  function rec:fireWatcher(win, event)
+    for _, wt in ipairs(self.watchers) do
+      if wt.win == win and wt.started and not wt.stopped then wt.fn(win, event, wt, wt.userData) end
+    end
+  end
+  function rec:placeWindow(win, f)
+    win._topLeft = { x = f.x, y = f.y }
+    win._size = { w = f.w, h = f.h }
   end
 
   -- Logs at `level` whose message contains `needle` (plain match).
@@ -327,7 +378,26 @@ function S.install()
 
   hs.screen = {
     mainScreen = function() return S.screen(rec) end,
-    allScreens = function() return { S.screen(rec) } end,
+    allScreens = function()
+      if not rec.screens then return { S.screen(rec) } end
+      local out = {}
+      for i, r in ipairs(rec.screens) do out[i] = S.screen(rec, r) end
+      return out
+    end,
+  }
+
+  hs.settings = {
+    get = function(key) return copy(rec.settings[key]) end,
+    set = function(key, v) rec.settings[key] = copy(v) end,
+    clear = function(key) rec.settings[key] = nil; return true end,
+  }
+
+  hs.uielement = {
+    watcher = {
+      windowMoved = "AXWindowMoved",
+      windowResized = "AXWindowResized",
+      elementDestroyed = "AXUIElementDestroyed",
+    },
   }
 
   hs.task = {
