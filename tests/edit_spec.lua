@@ -61,8 +61,8 @@ local function ended(d) vim.wait(3000, function() return not edit.pending() end,
 -- --- a note draft is kept ------------------------------------------------
 local npath = note.show({ target = "com.example.app", window = "4242", seed = "" })
 vim.cmd("stopinsert")
-vim.api.nvim_buf_set_lines(0, 1, -1, false, { "my draft", "second" })
-vim.api.nvim_win_set_cursor(0, { 3, 2 })
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { "my draft", "second" })
+vim.api.nvim_win_set_cursor(0, { 2, 2 })
 local nbuf, nwin, nid = vim.api.nvim_get_current_buf(), vim.api.nvim_get_current_win(), vim.b.ferry.id
 vim.o.showtabline = 1
 
@@ -95,7 +95,7 @@ check("Submit: file holds the text, done=0, one hide", "edited text\nline two\n|
 check("Submit: tab gone, tab line restored, not pending, status done", "1 1 false done",
   table.concat({ tabs(), vim.o.showtabline, tostring(edit.pending()), edit.status({ done = done }) }, " "))
 check("after the edit the note is still current, shown, with its cursor",
-  "true true true 3,2 true", table.concat({ tostring(note.current() and note.current().id == nid),
+  "true true true 2,2 true", table.concat({ tostring(note.current() and note.current().id == nid),
     tostring(vim.api.nvim_get_current_buf() == nbuf), tostring(vim.api.nvim_get_current_win() == nwin),
     table.concat(vim.api.nvim_win_get_cursor(nwin), ","), tostring(vim.g.ferry_draft == npath) }, " "))
 check("the edit buffer is wiped", -1, vim.fn.bufnr(file))
@@ -197,6 +197,44 @@ edit.start({ file = file, done = done })
 vim.cmd("bwipeout!")
 check(":bwipeout of the edit buffer ends it with done=1", "false 1\n 1",
   tostring(edit.pending()) .. " " .. tostring(readfile(done)) .. " " .. vim.o.showtabline)
+
+-- --- front: ferry already frontmost, no FocusGained ------------------------
+evs()
+file, done = files("front\n")
+edit.start({ file = file, done = done })
+check("status front=0 stays pending", "pending", edit.status({ done = done, front = 0 }))
+check("status front=1 marks it shown", "shown shown",
+  edit.status({ done = done, front = 1 }) .. " " .. edit.status({ done = done }))
+edit.abort({ done = done })
+check("abort after front=1 hides", "hide", evs())
+
+-- --- abort while Flow records in the edit ----------------------------------
+file, done = files("flow abort\n")
+edit.start({ file = file, done = done })
+flow.toggle()
+paste_later(" late words", 300)
+check("abort while recording: aborting, still pending", "aborting true",
+  edit.abort({ done = done }) .. " " .. tostring(edit.pending()))
+check("abort while recording: done=1 after the paste, file unchanged, Flow idle",
+  "1\n|flow abort\n|false nil", tostring(ended(done)) .. "|" .. tostring(readfile(file)) .. "|"
+  .. tostring(flow.recording()) .. " " .. tostring(flow.state.waiting))
+check("abort while recording: start, stop, paste, no hide (never shown)",
+  "start-hands-free,stop-hands-free,paste", evs())
+file, done = files("next\n")
+check("start after that abort: ok", "ok", edit.start({ file = file, done = done }))
+edit.abort({ done = done })
+
+-- Flow recording in the note (not the edit): abort ends the edit at once and
+-- leaves the note's recording alone.
+file, done = files("note flow\n")
+edit.start({ file = file, done = done })
+vim.cmd("tabnext 1")
+flow.assume_recording()
+check("abort with Flow recording in the note: aborted at once, Flow still recording",
+  "aborted false true", edit.abort({ done = done }) .. " " .. tostring(edit.pending()) .. " "
+  .. tostring(flow.recording()))
+vim.paste({ " x" }, -1)
+evs()
 
 say(fail == 0 and "edit_spec: all ok" or "edit_spec: FAILED")
 os.exit(fail)

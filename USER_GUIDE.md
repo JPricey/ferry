@@ -248,6 +248,36 @@ already in Flow's Dictionary are left out. It reads a private copy of
 Flow's database and never changes the original. Add the words you want
 in Flow's own Dictionary (in the Wispr Flow app).
 
+## ferry as your editor
+
+Tools that open an editor, like Claude Code's Ctrl-G and `git commit`, can
+open it in ferry instead. Add this to your shell profile (`~/.zshrc`), with
+the full path to your copy of ferry:
+
+```sh
+export EDITOR=~/Code/ferry/bin/ferry-edit
+export VISUAL=$EDITOR GIT_EDITOR=$EDITOR
+```
+
+The file opens in ferry over your terminal, in insert mode, in a tab of
+its own without the history sidebar. Your note is put aside as a draft and
+comes back untouched. Dictate with Ctrl-S as in a note. Then:
+
+- **Ctrl-X** (or `ZZ`, `:wq`, `:x`) saves the file, hides ferry and returns
+  to the terminal. The tool sees exit code 0.
+- **Ctrl-Q** (or `ZQ`) leaves the file exactly as it was and exits 1. Git
+  then reports a problem with the editor and does not commit.
+- `:q` hides ferry and leaves the edit open; the terminal keeps waiting.
+- Ctrl-C in the terminal ends the edit in ferry without saving.
+
+One edit at a time. When ferry cannot take the edit, `ferry-edit` opens
+plain `nvim` in the same terminal instead: over SSH, when Hammerspoon is
+not running, when ferry.app and Neovide are missing, when an edit is
+already open or Flow is recording in your note, or when ferry did not show
+within 5 seconds. Set `FERRY_EDIT_FALLBACK` to use another terminal editor
+(for example `FERRY_EDIT_FALLBACK=vim`), and `FERRY_EDIT_TERMINAL=1` to
+always use it.
+
 ## The window
 
 The first time, the window opens centred on your main screen at half its

@@ -89,6 +89,10 @@ commands live in `lua/ferry/note.lua`.
   Submit, Cancel, Hide, layout.
 - `lua/ferry/flow.lua` — Wispr Flow hands-free start/stop and waiting
   for its last paste.
+- `bin/ferry-edit` — `$EDITOR` mode client: opens one file in the
+  running instance and waits until it is saved (exit 0) or cancelled (1).
+- `lua/ferry/edit.lua` — that edit inside the server: its tab, keys, and
+  the done file the client polls.
 - `lua/ferry/gui.lua` — makes Neovide look like the terminal.
 - `lua/ferry/history.lua` — the history sidebar.
 - `bin/ferry-db` — owns the SQLite history database (start, finish,

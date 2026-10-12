@@ -73,7 +73,7 @@ check "start from a note in insert mode: ok, edit buffer current, insert mode" "
 send 'typed <C-x>'
 check "Ctrl-X after typing: file holds the text, done=0, one hide" "typed hello|0|1" \
   "$(cat "$f")|$(done_code "$d")|$(hides)"
-check "after Ctrl-X the note is back with its draft" "note text" "$(ask 'getline(2)')"
+check "after Ctrl-X the note is back with its draft" "note text" "$(ask 'getline(1)')"
 
 rm -f "$work/open.log"
 f=$work/k2.txt d=$work/done/k2

@@ -59,8 +59,9 @@ touching `lua/ferry/delivery.lua` or the Hammerspoon module,
 and `bash tests/test-host.sh`, `bash tests/test-note.sh` and
 `bash tests/test-instance.sh` after touching `bin/ferry-host`,
 `lua/ferry/note.lua`, `lua/ferry/gui.lua` or `hammerspoon/instance.lua`,
-`bash tests/test-host-neovide.sh` after touching `hammerspoon/hosts/neovide.lua`, and
-`bash tests/test-edit.sh` after touching `lua/ferry/edit.lua`.
+`bash tests/test-host-neovide.sh` after touching `hammerspoon/hosts/neovide.lua`,
+`bash tests/test-edit.sh` after touching `lua/ferry/edit.lua`, and
+`bash tests/test-ferry-edit.sh` after touching `bin/ferry-edit` or `lua/ferry/edit.lua`.
 Hammerspoon is installed and the module is linked into `~/.hammerspoon/`;
 Accessibility permission must be granted manually, and Hammerspoon must be
 relaunched after granting it.
@@ -247,6 +248,17 @@ window is looked up once per submit. If it never comes to front, or
 delivery.lua fails to load or errors, nothing is pasted and it alerts
 "copied — paste manually". The clipboard is not restored. Each step is
 logged to the `ferry` logger.
+
+**$EDITOR mode.** `bin/ferry-edit <file>` runs `ferry-host ensure`, calls
+`lua/ferry/edit.lua` `start{file, done}` over the socket (reloading an
+older loaded module by `api`), opens `-g hammerspoon://ferry-edit`
+(`c.showEdit()`), waits up to `FERRY_EDIT_SHOW_TIMEOUT` (5 s) for
+`status` `shown` (FocusGained in nvim, or `front = 1` when `lsappinfo`
+sees ferry.app's bundle frontmost), then polls the done file and exits
+with its code (0 saved, 1 Ctrl-Q). INT/TERM/HUP call `abort` (which
+first stops a Flow recording in the edit and waits for its paste) and
+exit 130; a server gone after shown exits 1. Every failure before shown
+runs `${FERRY_EDIT_FALLBACK:-nvim}` in the terminal.
 
 **History.** The note calls `bin/ferry-db start` when a note gets
 going and `finish` on submit or cancel, recording target, seed, final

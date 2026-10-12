@@ -27,7 +27,9 @@
 --
 -- A FocusGained while the edit is pending marks it shown: the client waits
 -- for that before it trusts the window is up (status(); not state(): M.state
--- is the module's data, kept across reloads).
+-- is the module's data, kept across reloads). With ferry already in front
+-- no FocusGained comes, so the client also passes front = 1 to status()
+-- when it sees ferry frontmost (lsappinfo); that marks it shown as well.
 --
 -- One edit at a time. start answers `busy` while one is pending, or while
 -- Flow is busy in the note (recording, or a finish still waiting for its
@@ -36,7 +38,7 @@ local M = {}
 
 -- Bumped when callers (note.lua, bin/ferry-edit) need functions an older
 -- loaded module lacks; a reload keeps M.state.
-M.api = 1
+M.api = 2
 
 -- The pending edit: { file, done, buf, tab = edit tab, prev_tab = the tab
 -- it came from, showtabline = value before, shown = FocusGained since } or
@@ -256,24 +258,40 @@ function M.show()
   return e.file
 end
 
--- End the edit with done file opts.done at once, as Cancel would (code 1,
--- the file left alone), without waiting for Flow. It hides ferry only
--- when the edit had been shown. Returns "aborted", or "none" when no
+-- End the edit with done file opts.done as Cancel would (code 1, the file
+-- left alone): at once, unless Flow is recording in the edit or a
+-- Submit/Cancel/Hide of it is waiting for Flow's paste. Then Flow is
+-- stopped (or that wait taken over) and the edit ends once the paste has
+-- landed, so Flow is idle and the next start is not busy. It hides ferry
+-- only when the edit had been shown. Returns "aborted", "aborting" (ends
+-- after Flow's paste, within flow.paste_timeout_ms), or "none" when no
 -- pending edit has that done file.
 function M.abort(opts)
   local e = M.state.edit
   if not (e and opts and e.done == opts.done) then return "none" end
-  local shown = e.shown
-  finish(e, 1)
-  if shown then note().host.hide({}) end
+  local function cancel(cur)
+    local shown = cur.shown
+    finish(cur, 1)
+    if shown then note().host.hide({}) end
+  end
+  local f = flow()
+  local w = f.state.waiting
+  if (w and w.buf == e.buf) or (not w and f.recording() and vim.api.nvim_get_current_buf() == e.buf) then
+    after_flow(e.buf, cancel)
+    return M.state.edit == e and "aborting" or "aborted"
+  end
+  cancel(e)
   return "aborted"
 end
 
 -- "pending" (started, no FocusGained yet), "shown", or "done" when no
 -- pending edit has done file opts.done (it ended, or never started).
+-- opts.front (1/true: the client saw ferry frontmost) marks it shown.
 function M.status(opts)
   local e = M.state.edit
   if not (e and opts and e.done == opts.done) then return "done" end
+  local front = opts.front
+  if front == true or front == 1 or front == "1" then e.shown = true end
   return e.shown and "shown" or "pending"
 end
 
