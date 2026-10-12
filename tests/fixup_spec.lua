@@ -38,6 +38,15 @@ check("comma end joins, trailing space trimmed", "so, then (1)",
   j(F.join_breaks({ "so,  ", "then" })))
 check("blank line not joined", "a||b (3)", j(F.join_breaks({ "a", "", "b" })))
 check("indented next line not joined", "a|  b (2)", j(F.join_breaks({ "a", "  b" })))
+check("fence line not joined to text around it", "see|```|foo|bar|```|after (6)",
+  j(F.join_breaks({ "see", "```", "foo", "bar", "```", "after" })))
+check("lines after a closed fence join again", "```|x|```|a b. (4)",
+  j(F.join_breaks({ "```", "x", "```", "a", "b." })))
+check("~~~ fence", "~~~|a|b|~~~ (4)", j(F.join_breaks({ "~~~", "a", "b", "~~~" })))
+check("Latin-1 lowercase start joins", "we went élan. (1)",
+  j(F.join_breaks({ "we went", "élan." })))
+check("curly closing quote after . not joined", "he said “go.”|then (2)",
+  j(F.join_breaks({ "he said “go.”", "then" })))
 local input = { "x", "y" }
 F.join_breaks(input)
 check("input not changed", "x|y (2)", j(input))
@@ -62,8 +71,31 @@ check("quote before letter", '"Yes," she said. (1)', j(F.sentence_case({ '"yes,"
 check("mid-sentence capitals kept", "Use NASA and Bob. (1)",
   j(F.sentence_case({ "use NASA and Bob." })))
 
+check("hawaiʻi keeps its i", "Hawaiʻi is far (1)", j(F.sentence_case({ "hawaiʻi is far" })))
+check("i after curly quote -> I", "He said “I am” (1)", j(F.sentence_case({ "he said “i am”" })))
+check("i’m -> I’m", "I’m here (1)", j(F.sentence_case({ "i’m here" })))
+check("Latin-1 sentence start élan -> Élan", "Élan. Über alles (1)",
+  j(F.sentence_case({ "élan. über alles" })))
+check("curly quote before letter", "“Yes,” she said. (1)", j(F.sentence_case({ "“yes,” she said." })))
+check("after .” starts a sentence", "“Go.” Then (1)", j(F.sentence_case({ "“go.” then" })))
+check("fenced lines left alone", "```|git push. then|```|Ok (4)",
+  j(F.sentence_case({ "```", "git push. then", "```", "ok" })))
+
 -- strip_fillers
 local fl = F.DEFAULT_FILLERS
+check("we ship, um. -> we ship.", "we ship. (1)", j(F.strip_fillers({ "we ship, um." }, fl)))
+check("ok, you know? -> ok?", "ok? (1)", j(F.strip_fillers({ "ok, you know?" }, fl)))
+check("if you know, you know. -> if you know.", "if you know. (1)",
+  j(F.strip_fillers({ "if you know, you know." }, fl)))
+check("uh-huh stays", "uh-huh, sure (1)", j(F.strip_fillers({ "uh-huh, sure" }, fl)))
+check("um-hmm stays", "so um-hmm right (1)", j(F.strip_fillers({ "so um-hmm right" }, fl)))
+check("(um) yes -> yes", "yes (1)", j(F.strip_fillers({ "(um) yes" }, fl)))
+check("we (uh) ship -> we ship", "we ship (1)", j(F.strip_fillers({ "we (uh) ship" }, fl)))
+check("Uh. -> empty", " (1)", j(F.strip_fillers({ "Uh." }, fl)))
+check("Umm... yes -> yes", "yes (1)", j(F.strip_fillers({ "Umm... yes" }, fl)))
+check("Umm… yes -> yes", "yes (1)", j(F.strip_fillers({ "Umm… yes" }, fl)))
+check("done. Um. so -> done. so", "done. so (1)", j(F.strip_fillers({ "done. Um. so" }, fl)))
+check("fenced um stays", "```|um = 1|``` (3)", j(F.strip_fillers({ "```", "um = 1", "```" }, fl)))
 check("um so we, you know, ship -> so we ship", "so we ship (1)",
   j(F.strip_fillers({ "um so we, you know, ship" }, fl)))
 check("so, um, we -> so we", "so we (1)", j(F.strip_fillers({ "so, um, we" }, fl)))
@@ -86,7 +118,23 @@ check("they're -> their (wraps)", "their", F.cycle_word("they're", g))
 check("curly they’re -> their", "their", F.cycle_word("they\226\128\153re", g))
 check("Their -> There", "There", F.cycle_word("Their", g))
 check("THEIR -> THERE", "THERE", F.cycle_word("THEIR", g))
+check("THEY’RE -> THEIR", "THEIR", F.cycle_word("THEY\226\128\153RE", g))
+check("They’re -> Their", "Their", F.cycle_word("They\226\128\153re", g))
+check("It’s -> Its", "Its", F.cycle_word("It\226\128\153s", g))
+check("curly source keeps curly: we’re -> we’ll", "we\226\128\153ll",
+  F.cycle_word("we\226\128\153re", { { "we're", "we'll" } }))
 check("unknown word -> nil", nil, F.cycle_word("ship", g))
+local function span(line, col)
+  local s, e = F.word_at(line, col)
+  return s and line:sub(s, e) or nil
+end
+check("word_at ‘their’ -> their", "their", span("so ‘their’ dog", 7))
+check("word_at their—dog -> their", "their", span("their—dog", 2))
+check("word_at their—dog on dog", "dog", span("their—dog", 10))
+check("word_at “your” -> your", "your", span("“your”", 5))
+check("word_at they’re keeps inner ’", "they’re", span("they’re", 1))
+check("word_at on a curly quote -> nil", nil, span("“your”", 2))
+check("word_at hawaiʻi whole", "hawaiʻi", span("hawaiʻi", 7))
 check("word_at their", "4-8", (function()
   local s, e = F.word_at("so their dog", 6); return s .. "-" .. e end)())
 check("word_at strips outer quote", "2-8", (function()
@@ -207,6 +255,21 @@ vim.api.nvim_win_set_cursor(0, { 1, 0 })
 keys("viw\\fw")
 check("<leader>fw (x) Its -> It's", "It's fine (1)", get())
 check("back in normal mode", "n", vim.api.nvim_get_mode().mode)
+set({ "so ‘their’ dog" })
+vim.api.nvim_win_set_cursor(0, { 1, 7 })
+keys("\\fw")
+check("<leader>fw inside ‘their’", "so ‘there’ dog (1)", get())
+set({ "their—dog" })
+vim.api.nvim_win_set_cursor(0, { 1, 1 })
+keys("\\fw")
+check("<leader>fw on their—dog", "there—dog (1)", get())
+set({ "THEY’RE here" })
+vim.api.nvim_win_set_cursor(0, { 1, 2 })
+keys("\\fw")
+check("<leader>fw THEY’RE -> THEIR", "THEIR here (1)", get())
+-- Under nvim, letters outside Latin-1 are capitalized via vim.fn.toupper
+-- (pure LuaJIT leaves them).
+check("nvim: Greek sentence start", "Αλφα. Βήτα (1)", j(F.sentence_case({ "αλφα. βήτα" })))
 set({ "ship it" })
 vim.api.nvim_win_set_cursor(0, { 1, 0 })
 keys("\\fw")
