@@ -181,6 +181,11 @@ end
 
 local function is_blank(body) return not table.concat(body, "\n"):find("%S") end
 
+-- sha256 of buf's text (a note opened from the browser remembers it).
+local function body_sum(buf)
+  return vim.fn.sha256(table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n"))
+end
+
 local function readable(path) return path ~= "" and vim.fn.filereadable(path) == 1 end
 
 -- --- note files ---------------------------------------------------------
@@ -347,24 +352,26 @@ end
 
 -- Save a note as it stands (a draft keeps its state): when it changed
 -- since the last save, or has text but no file yet. A blank note without
--- a file gets none.
+-- a file gets none. Returns false when the write failed (after its error
+-- notice; the buffer keeps its text), else true.
 local function save(buf)
-  if not (buf and vim.api.nvim_buf_is_valid(buf)) then return end
+  if not (buf and vim.api.nvim_buf_is_valid(buf)) then return true end
   local path = vim.api.nvim_buf_get_name(buf)
   local _, body = parts(buf)
   if not readable(path) then
     if is_blank(body) then
       vim.bo[buf].modified = false
-      return
+      return true
     end
   elseif not vim.bo[buf].modified then
-    return
+    return true
   end
   -- Through :write! (so BufWriteCmd, write_note), not write_note itself:
   -- only a write nvim knows of clears its "file exists" (E13) guard on a
   -- buffer whose file appeared after it was loaded, so a later :w works.
   -- With BufWriteCmd set, BufWritePre/Post (formatters) do not run.
   vim.api.nvim_buf_call(buf, function() vim.cmd("silent keepalt write!") end)
+  return readable(vim.api.nvim_buf_get_name(buf)) and not vim.bo[buf].modified
 end
 
 -- Autosave: about 1 s after the last change (swappable for tests).
@@ -939,9 +946,10 @@ end
 -- was current is saved as a draft first (an untouched blank one is
 -- dropped) and its buffer let go once the opened one is shown. The opened
 -- note takes the target captured at the latest show; its file keeps its
--- state until its text changes (then draft). Not while Flow is recording
--- or a finish waits for its paste. Returns the buffer, or nil after a
--- notice.
+-- state until its text changes (then draft), and a Cancel before then
+-- leaves the file as it is. Not while Flow is recording, a finish waits
+-- for its paste, or the current note cannot be saved (it stays current and
+-- shown). Returns the buffer, or nil after a notice.
 function M.open(path)
   if flow.recording() or flow.state.waiting then
     vim.notify("ferry: Flow is still recording; open the note when it is done", vim.log.levels.WARN)
@@ -968,7 +976,11 @@ function M.open(path)
   local old
   if prev then
     old = note_buf(prev)
-    save(old)
+    if not save(old) then
+      vim.notify("ferry: could not save the current note, so it stays open", vim.log.levels.ERROR)
+      if vim.fn.bufwinid(old) == -1 then display(old) end
+      return nil
+    end
   end
   local buf = vim.fn.bufadd(path)
   if buf == old then old = nil end
@@ -983,7 +995,8 @@ function M.open(path)
   local note = { id = id, path = path, buf = buf, created = created > 0 and created or os.time() }
   display(buf)
   M.apply_options(buf)
-  vim.b[buf].ferry = { id = id, target = cap.target, window = cap.window, seed = "", created = note.created }
+  vim.b[buf].ferry = { id = id, target = cap.target, window = cap.window, seed = "", created = note.created,
+    opened = body_sum(buf) }
   M.state.note, M.state.cursor, M.state.listed = note, nil, id
   vim.cmd("stopinsert")
   vim.api.nvim_win_set_cursor(0, { vim.api.nvim_buf_line_count(buf), 0 })
@@ -1018,7 +1031,8 @@ end
 -- End a note: record the outcome, write its file as sent (submitted) or
 -- cancelled, with spec as its target, and drop its buffer. The file is
 -- kept, except a blank Cancel's, which is deleted (unless it was changed
--- outside ferry). If it was the current note, a blank note replaces it in
+-- outside ferry). A Cancel of a note opened from the browser whose text
+-- is unchanged since (and saved) leaves its file and history row alone. If it was the current note, a blank note replaces it in
 -- its windows. Returns true; false when a Cancel could not write the file,
 -- which leaves the note as it was (buffer, history row, current note).
 local function finish(buf, outcome, file, spec)
@@ -1029,7 +1043,11 @@ local function finish(buf, outcome, file, spec)
   if current then adopt(note) end
   local path = vim.api.nvim_buf_get_name(buf)
   stop_timer(buf)
-  if outcome == "cancelled" and is_blank(select(2, parts(buf))) then
+  local untouched = outcome == "cancelled" and meta.opened ~= nil and not vim.bo[buf].modified
+    and meta.opened == body_sum(buf)
+  if untouched then
+    -- Nothing to write or record.
+  elseif outcome == "cancelled" and is_blank(select(2, parts(buf))) then
     if readable(path) and ours(buf, path) then
       os.remove(path)
       index(path)
@@ -1039,7 +1057,7 @@ local function finish(buf, outcome, file, spec)
       sent = outcome == "submitted", target = spec })
     if not ok and outcome == "cancelled" then return false end
   end
-  if meta.id then
+  if meta.id and not untouched then
     -- A blank note submitted before any show has no row yet.
     if current and note.unstarted then history_start(meta.id, spec, "") end
     history_finish(meta.id, outcome, file, spec)

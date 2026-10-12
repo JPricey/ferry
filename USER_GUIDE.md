@@ -224,7 +224,9 @@ On a note in the sidebar:
 | `q` | Close the sidebar (`:q` hides the whole window) |
 | `Esc` | Close the preview |
 
-A sent note you open and change becomes a draft again until you send it.
+A sent note you open and change becomes a draft again until you send it;
+cancel one you have not changed and it stays as it was. If the note you
+were writing cannot be saved, `Enter` keeps it open and shows an error.
 
 The note keys also work while the sidebar is focused, and act on your note:
 `Ctrl-X`, `ZZ`, `:wq` and `:x` send it, `Ctrl-Q` and `ZQ` cancel it, `:q`

@@ -159,7 +159,8 @@ it, `<C-q>` and `ZQ` cancel, `:q` hides and `<C-s>` toggles Flow.
 ## Reuse a past note
 
 In the sidebar, `<CR>` opens the note for editing (the current one is saved
-as a draft; the opened one goes to the app of the latest show), `s` opens
+as a draft; the opened one goes to the app of the latest show, and once
+edited is a draft until sent again), `s` opens
 it and sends it again, `y` copies it, `P` pins or unpins it, `d` deletes it
 after a confirm (to `.trash`), `K` previews it (`Esc` closes), `i` inserts
 it into the current note, `R` refreshes and `q` closes the sidebar.

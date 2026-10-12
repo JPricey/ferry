@@ -192,5 +192,27 @@ vim.fn.system({ root .. "/bin/ferry-notes", "index", paths.echo })
 press("alpha sent", "R")
 check("R refreshes", true, rows():find("echo outside", 1, true) ~= nil)
 
+-- Cancel on a note opened unchanged: its file (state sent) is left as is.
+local alpha_bytes = table.concat(vim.fn.readfile(paths.alpha, "b"), "\n")
+press("alpha sent", "<CR>")
+local ab = vim.api.nvim_get_current_buf()
+note.cancel(ab)
+check("Cancel on an opened, unchanged sent note keeps its file (state sent, bytes as they were)",
+  "sent true", fmeta(paths.alpha, "state") .. " "
+  .. tostring(table.concat(vim.fn.readfile(paths.alpha, "b"), "\n") == alpha_bytes))
+
+-- <CR> when the current note cannot be saved: refused, nothing lost.
+local keep = vim.api.nvim_win_get_buf(h.state.main_win)
+vim.api.nvim_buf_set_lines(keep, 0, -1, false, { "unsaved here" })
+vim.fn.setfperm(dir, "r-xr-xr-x")
+notices = {}
+press("alpha sent", "<CR>")
+vim.wait(100)
+vim.fn.setfperm(dir, "rwxr-xr-x")
+check("<CR> with an unwritable notes folder: refused, the previous note still current and shown with its text",
+  "true true unsaved here true", tostring(note.current() ~= nil and note.current().buf == keep) .. " "
+  .. tostring(vim.api.nvim_win_get_buf(h.state.main_win) == keep) .. " " .. buflines(keep) .. " "
+  .. tostring(table.concat(notices, "|"):find("could not save", 1, true) ~= nil))
+
 io.stdout:write("RESULT=" .. fail .. "\n")
 vim.cmd("qall!")
