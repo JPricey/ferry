@@ -73,6 +73,10 @@
 --   window opts.closeError   win:close() raises this message
 --   window opts.closeResult  win:close() returns this (default true; a
 --                            true close acts like rec:closeWindow(id))
+--
+-- Neovide host additions (hammerspoon/hosts/neovide.lua):
+--   rec.bundlePaths    bundle id -> app path, for
+--                      hs.application.pathForBundleID (default: none)
 
 local S = {}
 
@@ -210,7 +214,7 @@ function S.install()
     pasteboardSets = {}, activations = {}, focuses = {}, timers = {},
     apps = {}, windows = {}, windowGets = 0, accessibility = true,
     hides = {}, unhides = {}, moves = {}, tasks = {},
-    settings = {}, setFrames = {}, fullScreenSets = {}, watchers = {}, closes = {},
+    settings = {}, bundlePaths = {}, setFrames = {}, fullScreenSets = {}, watchers = {}, closes = {},
     pasteboard = { contents = nil, changeCount = 0 },
     clock = 1000, screen = { x = 0, y = 0, w = 1440, h = 900 },
   }
@@ -345,6 +349,7 @@ function S.install()
   hs.application = {
     frontmostApplication = function() return rec.frontmost end,
     get = function(hint) return rec.apps[hint] end,
+    pathForBundleID = function(bundle) return rec.bundlePaths[bundle] end,
   }
 
   hs.window = {
