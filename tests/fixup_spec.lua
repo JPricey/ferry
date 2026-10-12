@@ -56,36 +56,6 @@ local input = { "x", "y" }
 F.join_breaks(input)
 check("input not changed", "x|y (2)", j(input))
 
--- sentence_case
-check("sentence starts capitalized", "Hello there. How are you? Fine! (1)",
-  j(F.sentence_case({ "hello there. how are you? fine!" })))
-check("lone i -> I", "I think I'm right, I'd say (1)",
-  j(F.sentence_case({ "i think i'm right, i'd say" })))
-check("i.e. and e.g. left alone", "Use it, i.e. now, e.g. today (1)",
-  j(F.sentence_case({ "use it, i.e. now, e.g. today" })))
-check("so do i.", "So do I. (1)", j(F.sentence_case({ "so do i." })))
-check("next line after . starts a sentence", "One.|Two (2)",
-  j(F.sentence_case({ "one.", "two" })))
-check("next line mid-sentence stays", "One|two (2)", j(F.sentence_case({ "one", "two" })))
-check("after blank line starts a sentence", "A||B (3)", j(F.sentence_case({ "a", "", "b" })))
-check("prev mid-sentence: first line stays", "and more. Then (1)",
-  j(F.sentence_case({ "and more. then" }, "we went")))
-check("prev ends sentence: first line capitalized", "And (1)",
-  j(F.sentence_case({ "and" }, "Done.")))
-check("quote before letter", '"Yes," she said. (1)', j(F.sentence_case({ '"yes," she said.' })))
-check("mid-sentence capitals kept", "Use NASA and Bob. (1)",
-  j(F.sentence_case({ "use NASA and Bob." })))
-
-check("hawaiʻi keeps its i", "Hawaiʻi is far (1)", j(F.sentence_case({ "hawaiʻi is far" })))
-check("i after curly quote -> I", "He said “I am” (1)", j(F.sentence_case({ "he said “i am”" })))
-check("i’m -> I’m", "I’m here (1)", j(F.sentence_case({ "i’m here" })))
-check("Latin-1 sentence start élan -> Élan", "Élan. Über alles (1)",
-  j(F.sentence_case({ "élan. über alles" })))
-check("curly quote before letter", "“Yes,” she said. (1)", j(F.sentence_case({ "“yes,” she said." })))
-check("after .” starts a sentence", "“Go.” Then (1)", j(F.sentence_case({ "“go.” then" })))
-check("fenced lines left alone", "```|git push. then|```|Ok (4)",
-  j(F.sentence_case({ "```", "git push. then", "```", "ok" })))
-
 -- strip_fillers
 local fl = F.DEFAULT_FILLERS
 check("we ship, um. -> we ship.", "we ship. (1)", j(F.strip_fillers({ "we ship, um." }, fl)))
@@ -241,16 +211,13 @@ set({ "x", "y", "z" })
 vim.cmd("1,2FixJoin")
 check(":1,2FixJoin", "x y|z (2)", get())
 
--- :FixCase, :FixFillers on a range.
-set({ "hello. i am here" })
-vim.cmd("%FixCase")
-check(":FixCase", "Hello. I am here (1)", get())
+-- :FixFillers on a range.
 set({ "um so we, you know, ship" })
 vim.cmd("%FixFillers")
 check(":FixFillers", "so we ship (1)", get())
 
 -- Maps exist in n and x.
-for _, k in ipairs({ "fj", "fc", "ff", "fw" }) do
+for _, k in ipairs({ "fj", "ff", "fw" }) do
   for _, m in ipairs({ "n", "x" }) do
     check("map " .. m .. " <leader>" .. k, true,
       vim.fn.maparg("\\" .. k, m, false, true).buffer == 1)
@@ -299,9 +266,6 @@ set({ "THEY’RE here" })
 vim.api.nvim_win_set_cursor(0, { 1, 2 })
 keys("\\fw")
 check("<leader>fw THEY’RE -> THEIR", "THEIR here (1)", get())
--- Under nvim, letters outside Latin-1 are capitalized via vim.fn.toupper
--- (pure LuaJIT leaves them).
-check("nvim: Greek sentence start", "Αλφα. Βήτα (1)", j(F.sentence_case({ "αλφα. βήτα" })))
 set({ "ship it" })
 vim.api.nvim_win_set_cursor(0, { 1, 0 })
 keys("\\fw")

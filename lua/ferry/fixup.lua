@@ -9,10 +9,6 @@
 --                                 bracket) to a next line that starts with a
 --                                 lowercase letter, with one space; never
 --                                 into or out of a "# heading" line
---   sentence_case(lines, prev)    capitalize sentence starts and a lone "i";
---                                 prev is the line before the range (the
---                                 first line starts a sentence when prev is
---                                 nil, blank or ends a sentence)
 --   strip_fillers(lines, list)    remove filler words, with a comma pair
 --                                 around them ("we, you know, ship" -> "we
 --                                 ship"); a one-word filler goes anywhere
@@ -26,10 +22,9 @@
 --                                 Capitalized / UPPER case and curly ’;
 --                                 nil if none
 --
--- All three line functions leave ``` / ~~~ fences and fenced lines alone.
+-- Both line functions leave ``` / ~~~ fences and fenced lines alone.
 -- Text is UTF-8: curly quotes and dashes are not letters, other non-ASCII
--- characters are. Sentence case uppercases ASCII and Latin-1 (é -> É)
--- everywhere, and other letters only under nvim (vim.fn.toupper).
+-- characters are.
 --
 -- The list: $FERRY_FIXUPS, default ~/.config/ferry/fixups.txt. `#` starts
 -- a comment. A `filler: a, b c` line adds fillers (comma separated, so a
@@ -38,9 +33,9 @@
 -- the built-in groups; one with filler lines replaces the built-in
 -- fillers. A missing or unreadable file means the built-ins, no error.
 --
--- setup(buf) (needs nvim): buffer-local :FixJoin, :FixCase, :FixFillers.
+-- setup(buf) (needs nvim): buffer-local :FixJoin and :FixFillers.
 -- With no range they act on '[,'] (the last change, normally Flow's
--- paste), else on the paragraph at the cursor. Maps <leader>fj, fc, ff in
+-- paste), else on the paragraph at the cursor. Maps <leader>fj, ff in
 -- normal (default range) and visual (the selection) mode, and <leader>fw
 -- cycles the word at the cursor (or the one-line selection) through its
 -- group. The list is read on each use, so edits apply at once.
@@ -118,23 +113,6 @@ local function letter(ch)
   return not (NONWORD[ch] or DASH[ch] or APOS[ch])
 end
 
--- Uppercase one character: ASCII, Latin-1 (é -> É) anywhere; others via
--- vim.fn.toupper when running in nvim, else unchanged.
-local function upper_char(ch)
-  if #ch == 1 then return ch:upper() end
-  local b1, b2 = ch:byte(1, 2)
-  if #ch == 2 and b1 == 0xC3 then
-    if b2 >= 0xA0 and b2 <= 0xBE and b2 ~= 0xB7 then return string.char(0xC3, b2 - 0x20) end
-    return ch
-  end
-  local v = rawget(_G, "vim")
-  if type(v) == "table" and v.fn then
-    local ok, u = pcall(v.fn.toupper, ch)
-    if ok and type(u) == "string" and u ~= "" then return u end
-  end
-  return ch
-end
-
 -- Starts with a lowercase letter (ASCII or Latin-1 à-ÿ, ß).
 local function lower_start(line)
   if line:match("^%l") then return true end
@@ -156,11 +134,6 @@ end
 local function ends_clause(line)
   local s = strip_closers(line)
   return s:match("[%.!%?:;]$") ~= nil or s:sub(-#ELLIPSIS) == ELLIPSIS
-end
-
-local function ends_sentence(line)
-  local s = strip_closers(line)
-  return s:match("[%.!%?]$") ~= nil or s:sub(-#ELLIPSIS) == ELLIPSIS
 end
 
 -- true for each line that is a ``` or ~~~ fence or inside a fenced block.
@@ -190,66 +163,6 @@ function M.join_breaks(lines)
       out[#out + 1] = line
     end
     open = not skip
-  end
-  return out
-end
-
--- Abbreviations whose period does not end a sentence (lowercase, with the
--- final period).
-local ABBREV = { ["e.g."] = true, ["i.e."] = true, ["etc."] = true, ["vs."] = true }
-
--- Capitalize the first letter of word, after any opening quotes/brackets.
-local function cap_word(word)
-  local i = 1
-  while OPENERS[char_at(word, i)] do i = i + #char_at(word, i) end
-  local ch = char_at(word, i)
-  if ch == "" then return word end
-  return word:sub(1, i - 1) .. upper_char(ch) .. word:sub(i + #ch)
-end
-
-local function cap_line(line, start)
-  -- A lone i (and i'm, i've, i'd, i'll) is always I; not i.e., i-th, or
-  -- the i in hawaiʻi.
-  line = line:gsub("()i()", function(p, q)
-    local before, after = char_before(line, p - 1), char_at(line, q)
-    if letter(before) or APOS[before] or letter(after) then return nil end
-    local next2 = line:sub(q, q + 1)
-    if next2:match("^[%-%.]") and not next2:match("^%.%s") and next2 ~= "." then
-      return nil
-    end
-    return "I"
-  end)
-  local out, pos, at_start = {}, 1, start
-  while pos <= #line do
-    local s, e = line:find("^%s+", pos)
-    if s then
-      out[#out + 1] = line:sub(s, e)
-      pos = e + 1
-    else
-      local ws, we = line:find("^%S+", pos)
-      local word = line:sub(ws, we)
-      if at_start then word = cap_word(word) end
-      out[#out + 1] = word
-      at_start = ends_sentence(word) and not ABBREV[strip_closers(word):lower()]
-      pos = we + 1
-    end
-  end
-  return table.concat(out), at_start
-end
-
-function M.sentence_case(lines, prev)
-  local out, mask = {}, fenced(lines)
-  local start = prev == nil or not prev:match("%S") or ends_sentence(prev)
-  for i, line in ipairs(lines) do
-    if mask[i] then
-      out[i] = line
-      start = true
-    elseif not line:match("%S") then
-      out[i] = line
-      start = true
-    else
-      out[i], start = cap_line(line, start)
-    end
   end
   return out
 end
@@ -564,12 +477,6 @@ M.ops = {
   join = function(buf, s, e)
     return apply(buf, s, e, function(lines) return M.join_breaks(lines) end)
   end,
-  case = function(buf, s, e)
-    return apply(buf, s, e, function(lines, first)
-      local prev = first > 1 and vim.api.nvim_buf_get_lines(buf, first - 2, first - 1, false)[1] or nil
-      return M.sentence_case(lines, prev)
-    end)
-  end,
   fillers = function(buf, s, e)
     local list = M.load()
     return apply(buf, s, e, function(lines) return M.strip_fillers(lines, list.fillers) end)
@@ -611,8 +518,8 @@ local function cycle_visual(buf)
   return cycle_span(buf, a[2], s, e)
 end
 
-local COMMANDS = { FixJoin = "join", FixCase = "case", FixFillers = "fillers" }
-local KEYS = { j = "FixJoin", c = "FixCase", f = "FixFillers" }
+local COMMANDS = { FixJoin = "join", FixFillers = "fillers" }
+local KEYS = { j = "FixJoin", f = "FixFillers" }
 
 function M.setup(buf)
   if buf == nil or buf == 0 then buf = vim.api.nvim_get_current_buf() end
