@@ -38,7 +38,6 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   4. Quit Neovide, Ctrl+Option+V: same place and size, `frame: restored …`.
   5. With an external monitor: drag it there, quit Neovide, unplug, Ctrl+Option+V: on the laptop screen, `frame: moved onto main screen`.
   6. Submit once into Slack: the paste still lands.
-- **Targets chosen after writing: question — ANSWERED 2026-10-12: no Enter, ever** (was: press Enter after a tmux paste? Recommended: only when the pane is running `claude` (submits the prompt); other panes get the paste only. Agent defaults: picker `<C-t>`, copy-and-hide `<C-y>` (insert and normal mode); the `to:` line holds the raw spec with a human label shown beside it as virtual text; recent targets kept in memory only; copy-and-hide records the note as sent to `clipboard`.
 - **Hold to talk: Joe checks** (P1–P5 merged, agent checks pass). Reload Config first, start from a Slack message field:
   1. Console shows `bound ctrl+alt+v` and the talk key bound (`… (talk)`).
   2. Hold Ctrl+Option+B, say "one two three four five", release: the note appears, Flow's indicator shows while held, the text lands in the note in insert mode with "one" not clipped, nothing lands in Slack. Copy the `talk:` lines and `show: host focused after` from the console.
