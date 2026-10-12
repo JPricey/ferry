@@ -7,7 +7,8 @@
 --   join_breaks(lines)            join a line with no end punctuation
 --                                 (. ! ? : ; … maybe then a closing quote or
 --                                 bracket) to a next line that starts with a
---                                 lowercase letter, with one space
+--                                 lowercase letter, with one space; never
+--                                 into or out of a "# heading" line
 --   sentence_case(lines, prev)    capitalize sentence starts and a lone "i";
 --                                 prev is the line before the range (the
 --                                 first line starts a sentence when prev is
@@ -16,10 +17,11 @@
 --                                 around them ("we, you know, ship" -> "we
 --                                 ship"); a one-word filler goes anywhere
 --                                 outside a word ("uh-huh" stays), a phrase
---                                 only when set off by punctuation or a line
---                                 edge ("do you know" stays); punctuation
---                                 left with nothing to end goes too ("Uh."
---                                 -> "", "we ship, um." -> "we ship.")
+--                                 only when set off by punctuation, a dash,
+--                                 a quote or a line edge ("do you know"
+--                                 stays); punctuation, dashes, quotes and
+--                                 brackets left with nothing to do go too
+--                                 (see settle below)
 --   cycle_word(word, groups)      next word of its homophone group, keeping
 --                                 Capitalized / UPPER case and curly ’;
 --                                 nil if none
@@ -174,16 +176,20 @@ local function fenced(lines)
   return mask
 end
 
+-- A Markdown heading: "# Title", "## next steps".
+local function heading(line) return line:match("^%s*#+%s") ~= nil end
+
 function M.join_breaks(lines)
   local out, mask, open = {}, fenced(lines), false
   for i, line in ipairs(lines) do
+    local skip = mask[i] or heading(line)
     local last = out[#out]
-    if not mask[i] and open and last:match("%S") and not ends_clause(last) and lower_start(line) then
+    if not skip and open and last:match("%S") and not ends_clause(last) and lower_start(line) then
       out[#out] = last:gsub("%s+$", "") .. " " .. line
     else
       out[#out + 1] = line
     end
-    open = not mask[i]
+    open = not skip
   end
   return out
 end
@@ -248,96 +254,192 @@ function M.sentence_case(lines, prev)
   return out
 end
 
--- Part of a word next to a filler: letters, apostrophes and dashes, so
--- "umbrella", "uh-huh" and "um—" are left whole.
-local function filler_joins(ch)
-  return letter(ch) or APOS[ch] or ch == "-" or DASH[ch] or false
-end
+local function norm(w) return (w:lower():gsub(RSQUO, "'")) end
 
--- Pattern for a filler: its words (escaped, lowercase) joined by %s+.
-local function filler_pattern(f)
-  local parts = {}
-  for w in f:lower():gmatch("%S+") do
-    parts[#parts + 1] = (w:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0"))
-  end
-  return table.concat(parts, "%s+"), #parts > 1
-end
+-- Fillers work on tokens in one pass: split the line into tokens, drop
+-- each filler and the punctuation it leaves with nothing to do, then
+-- rejoin. A token is { t = text, k = kind, sp = whitespace before it }:
+--   w  word: letters with inner ' . : (they're, e.g) and any - or dash
+--      (uh-huh, um— stay whole, so never match a filler)
+--   p  punctuation run: , . ; : ! ? …
+--   d  dash run with nothing glued on its left: - -- – —
+--   o  opener ( [ “ ‘ «, or " ' starting a quote
+--   c  closer ) ] ” ’ », or " ' ending one
+--   x  anything else
+local PUNCT = { [","] = true, ["."] = true, [";"] = true, [":"] = true,
+  ["!"] = true, ["?"] = true, [ELLIPSIS] = true }
 
-local function strip_one(line, pat, phrase)
-  local from = 1
-  while true do
-    local a, b = line:lower():find(pat, from)
-    if not a then return line end
-    local ok = not filler_joins(char_before(line, a - 1)) and not filler_joins(char_at(line, b + 1))
-    if ok and phrase then
-      local lc = line:sub(1, a - 1):match("([^%s]?)%s*$")
-      local rc = line:sub(b + 1):match("^%s*([^%s]?)")
-      ok = (lc == "" or lc:match("[,%.;:!%?%(]") ~= nil)
-        and (rc == "" or rc:match("[,%.;:!%?%)]") ~= nil)
-    end
-    if not ok then
-      from = a + 1
+local function dashy(ch) return ch == "-" or DASH[ch] or false end
+
+-- Tokens of line, and the whitespace after the last one.
+local function tokenize(line)
+  local toks, i, sp = {}, 1, ""
+  while i <= #line do
+    local ch = char_at(line, i)
+    local j = i + #ch
+    if ch:match("^%s$") then
+      sp = sp .. ch
     else
-      local left, right = line:sub(1, a - 1), line:sub(b + 1)
-      -- Brackets around only the filler go with it: "(um) yes" -> "yes".
-      local open = left:match("([%(%[])%s*$")
-      if open then
-        local close = right:match("^%s*%" .. (open == "(" and ")" or "]"))
-        if close then
-          left = left:gsub("%" .. open .. "%s*$", "")
-          right = right:sub(#close + 1)
+      local k
+      if letter(ch) then
+        k = "w"
+        while j <= #line do
+          local c = char_at(line, j)
+          local inner = (APOS[c] or c == "." or c == ":") and letter(char_at(line, j + #c))
+          if not (letter(c) or dashy(c) or inner) then break end
+          j = j + #c
         end
-      end
-      local rcomma = right:match("^%s*,")
-      if rcomma then
-        right = right:sub(#rcomma + 1)
-        left = left:gsub(",%s*$", "")
-      elseif right:match("^%s*[%.!%?;:]") then
-        -- "we ship, um." -> "we ship."
-        left = left:gsub(",%s*$", "")
-      end
-      -- Nothing before needs the filler's punctuation: "Uh." -> "",
-      -- "Umm... yes" -> "yes", "done. um. so" -> "done. so".
-      local lt = left:gsub("%s+$", "")
-      if lt:match("^%s*$") or ends_clause(lt) then
-        repeat
-          local r = right:gsub("^%s*[%.!%?;:]+", "")
-          if r == right then r = right:gsub("^%s*" .. ELLIPSIS, "") end
-          local same = r == right
-          right = r
-        until same
-      end
-      right = right:gsub("^%s+", "")
-      if left:match("^%s*$") then
-        line = left .. right
+      elseif PUNCT[ch] or dashy(ch) then
+        local same = PUNCT[ch] and function(c) return PUNCT[c] end or dashy
+        k = PUNCT[ch] and "p" or "d"
+        while same(char_at(line, j)) do j = j + #char_at(line, j) end
+      elseif ch == '"' or ch == "'" then
+        -- Opens a quote after a space, a line start or another opener,
+        -- when text follows; else closes one.
+        local prev, after = toks[#toks], char_at(line, j)
+        local opens = (not prev or sp ~= "" or prev.k == "o") and after ~= "" and not after:match("^%s")
+        k = opens and "o" or "c"
       else
-        left = left:gsub("%s+$", "")
-        if right == "" or right:match("^[,%.;:!%?%)]") or left:match("[%(%[]$") then
-          line = left .. right
-        else
-          line = left .. " " .. right
-        end
+        k = OPENERS[ch] and "o" or CLOSERS[ch] and "c" or "x"
       end
-      from = 1
+      toks[#toks + 1] = { t = line:sub(i, j - 1), k = k, sp = sp }
+      sp = ""
+    end
+    i = j
+  end
+  return toks, sp
+end
+
+local function spaced(t) return t.sp ~= "" or t.cutsp == true end
+local function is_comma(t) return t ~= nil and t.k == "p" and t.t:match("^,+$") ~= nil end
+
+-- Remove toks[i]; the token after it remembers a cut (and its space).
+local function drop(toks, i)
+  local t = table.remove(toks, i)
+  local n = toks[i]
+  if n then n.cut, n.cutsp = true, n.cutsp or spaced(t) end
+end
+
+-- toks[j] ends a clause: . ! ? ; : or …, then maybe closers.
+local function clause_end(toks, j)
+  while toks[j] and toks[j].k == "c" do j = j - 1 end
+  local t = toks[j]
+  return t ~= nil and t.k == "p" and t.t:sub(-1) ~= ","
+end
+
+-- Opener o and closer c make a pair: ( ), [ ], or any two quotes.
+local function pair(o, c)
+  if o.t == "(" then return c.t == ")" end
+  if o.t == "[" then return c.t == "]" end
+  return c.t ~= ")" and c.t ~= "]"
+end
+
+-- After a filler was cut just before toks[i], drop what it leaves with
+-- nothing to do, until nothing changes:
+--   "so, um, we" -> "so we"          a comma pair (or one comma) goes
+--   "we ship, um." -> "we ship."     a comma before end punctuation goes
+--   "Uh." -> "", "done. um. so"      end punctuation with nothing before
+--     -> "done. so"                  it to end goes
+--   "ok — um — sure" -> "ok — sure"  of a spaced dash pair one stays: a
+--                                    dash may mark a real break, which we
+--                                    cannot tell from an aside
+--   "it works, you know" -> "it works"  a comma or dash left at the line
+--                                    end (or before a closer) goes
+--   "(um) yes", “um”, "\"um.\""      an opener and closer around nothing
+--                                    go; a line left empty is ""
+local function settle(toks, i)
+  while true do
+    local p, n = toks[i - 1], toks[i]
+    if is_comma(n) then
+      drop(toks, i)
+      if is_comma(p) then drop(toks, i - 1); i = i - 1 end
+    elseif n and n.k == "p" and is_comma(p) then
+      drop(toks, i - 1); i = i - 1
+    elseif n and n.k == "p" and (not p or p.k == "o" or clause_end(toks, i - 1)) then
+      drop(toks, i)
+    elseif n and n.k == "d" and (not p or p.k == "o" or p.k == "p" or p.k == "d") then
+      drop(toks, i)
+    elseif (not n or n.k == "c") and (is_comma(p) or (p and p.k == "d")) then
+      drop(toks, i - 1); i = i - 1
+    elseif p and n and p.k == "o" and n.k == "c" and pair(p, n) then
+      drop(toks, i); drop(toks, i - 1); i = i - 1
+    else
+      return
     end
   end
+end
+
+-- A filler (list of normalized words) starts at toks[i]: its words with
+-- space between. One word must not be glued to a dash or symbol ("—um");
+-- a phrase must be set off by punctuation, a dash, a quote or bracket, or
+-- the line edge ("do you know the time" stays).
+local function filler_at(toks, i, words)
+  for k, w in ipairs(words) do
+    local t = toks[i + k - 1]
+    if not t or t.k ~= "w" or norm(t.t) ~= w or (k > 1 and not spaced(t)) then return false end
+  end
+  local p, n = toks[i - 1], toks[i + #words]
+  if #words == 1 then
+    local glued_l = p and (p.k == "d" or p.k == "x") and not spaced(toks[i])
+    local glued_r = n and (n.k == "d" or n.k == "x") and not spaced(n)
+    return not (glued_l or glued_r)
+  end
+  return (not p or p.k == "p" or p.k == "o" or p.k == "d")
+    and (not n or n.k == "p" or n.k == "c" or n.k == "d")
+end
+
+local function strip_line(line, fillers)
+  local toks, tail = tokenize(line)
+  if #toks == 0 then return line end
+  local indent, last, changed = toks[1].sp, toks[#toks], false
+  for _, words in ipairs(fillers) do
+    local i = 1
+    while i <= #toks do
+      if filler_at(toks, i, words) then
+        for _ = 1, #words do drop(toks, i) end
+        settle(toks, i)
+        changed, i = true, 1
+      else
+        i = i + 1
+      end
+    end
+  end
+  if not changed then return line end
+  if #toks == 0 then return "" end
+  -- Rejoin: kept spacing where nothing was cut; where something was, one
+  -- space, none before punctuation or a closer or after an opener.
+  local out = {}
+  for k, t in ipairs(toks) do
+    local sp = t.sp
+    if k == 1 then
+      sp = indent
+    elseif t.cut then
+      if t.k == "p" or t.k == "c" or toks[k - 1].k == "o" then
+        sp = ""
+      elseif sp == "" and t.cutsp then
+        sp = " "
+      end
+    end
+    out[#out + 1] = sp .. t.t
+  end
+  if toks[#toks] == last then out[#out + 1] = tail end
+  return table.concat(out)
 end
 
 function M.strip_fillers(lines, list)
-  list = list or M.DEFAULT_FILLERS
+  local fillers = {}
+  for _, f in ipairs(list or M.DEFAULT_FILLERS) do
+    local words = {}
+    for w in f:gmatch("%S+") do words[#words + 1] = norm(w) end
+    if #words > 0 then fillers[#fillers + 1] = words end
+  end
   local out, mask = copy(lines), fenced(lines)
-  for _, f in ipairs(list) do
-    local pat, phrase = filler_pattern(f)
-    if pat ~= "" then
-      for i, line in ipairs(out) do
-        if not mask[i] then out[i] = strip_one(line, pat, phrase) end
-      end
-    end
+  for i, line in ipairs(out) do
+    if not mask[i] then out[i] = strip_line(line, fillers) end
   end
   return out
 end
 
-local function norm(w) return (w:lower():gsub(RSQUO, "'")) end
 
 -- w in src's case (UPPER, Capitalized or as is), with src's curly
 -- apostrophes.

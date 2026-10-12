@@ -47,6 +47,11 @@ check("Latin-1 lowercase start joins", "we went élan. (1)",
   j(F.join_breaks({ "we went", "élan." })))
 check("curly closing quote after . not joined", "he said “go.”|then (2)",
   j(F.join_breaks({ "he said “go.”", "then" })))
+check("heading not joined to the next line", "## next steps|deploy it. (2)",
+  j(F.join_breaks({ "## next steps", "deploy it." })))
+check("line not joined into a heading", "we should|# heading (2)",
+  j(F.join_breaks({ "we should", "# heading" })))
+check("#hashtag line still joins", "see #ops now (1)", j(F.join_breaks({ "see #ops", "now" })))
 local input = { "x", "y" }
 F.join_breaks(input)
 check("input not changed", "x|y (2)", j(input))
@@ -107,6 +112,33 @@ check("filler inside a word stays", "umbrella and drum (1)",
   j(F.strip_fillers({ "umbrella and drum" }, fl)))
 check("indent kept", "  so (1)", j(F.strip_fillers({ "  um so" }, fl)))
 check("several lines", "a|b (2)", j(F.strip_fillers({ "a uh", "uh b" }, fl)))
+-- Quotes are treated like brackets.
+check('she said "um, yes" -> she said "yes"', 'she said "yes" (1)',
+  j(F.strip_fillers({ 'she said "um, yes"' }, fl)))
+check("he said “um” twice -> he said twice", "he said twice (1)",
+  j(F.strip_fillers({ "he said “um” twice" }, fl)))
+check('"um." -> empty line', " (1)", j(F.strip_fillers({ '"um."' }, fl)))
+check("so 'um' yes -> so yes", "so yes (1)", j(F.strip_fillers({ "so 'um' yes" }, fl)))
+check("«uh» and ‘um’ go", "a b c (1)", j(F.strip_fillers({ "a «uh» b ‘um’ c" }, fl)))
+check('he said, "um." -> he said', "he said (1)", j(F.strip_fillers({ 'he said, "um."' }, fl)))
+check('"yes, um" -> "yes"', '"yes" (1)', j(F.strip_fillers({ '"yes, um"' }, fl)))
+check("(you know) phrase in brackets goes", "we ship (1)",
+  j(F.strip_fillers({ "we (you know) ship" }, fl)))
+check("they're and don't stay whole", "they're here don't (1)",
+  j(F.strip_fillers({ "they're here um don't" }, fl)))
+-- Commas and dashes at a line end; a spaced dash pair keeps one dash.
+check("it works, you know -> it works", "it works (1)",
+  j(F.strip_fillers({ "it works, you know" }, fl)))
+check("ok — um — sure -> ok — sure", "ok — sure (1)",
+  j(F.strip_fillers({ "ok — um — sure" }, fl)))
+check("ok -- uh -- sure -> ok -- sure", "ok -- sure (1)",
+  j(F.strip_fillers({ "ok -- uh -- sure" }, fl)))
+check("ok — um -> ok", "ok (1)", j(F.strip_fillers({ "ok — um" }, fl)))
+check("um — sure -> sure", "sure (1)", j(F.strip_fillers({ "um — sure" }, fl)))
+check("so, um — we -> so, we", "so, we (1)", j(F.strip_fillers({ "so, um — we" }, fl)))
+check("um— glued stays", "we um— ship (1)", j(F.strip_fillers({ "we um— ship" }, fl)))
+check("—um glued stays", "we —um ship (1)", j(F.strip_fillers({ "we —um ship" }, fl)))
+check("unchanged line kept byte for byte", "a  b,c   (1)", j(F.strip_fillers({ "a  b,c  " }, fl)))
 check("custom list", "we ship (1)", j(F.strip_fillers({ "we like ship" }, { "like" })))
 check("default list when nil", "so (1)", j(F.strip_fillers({ "um so" })))
 
