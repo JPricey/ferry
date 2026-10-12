@@ -154,6 +154,23 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-11: A4 done and verified. Server-down → async ensure + one retry; `uis=0` → `host.launch` once, with a 5 s `launchGrace` so a quick second press does not open a second window; submit/cancel files in `<notes dir>/outbox/`; after Submit/Cancel the window gets a blank note. Minor: a second press during recovery can start one extra ensure (cannot loop).
   - 2026-10-11: Group A done. Group B waits on Joe's host pick; status → needs-joe.
 
+## Voice keys in the buffer
+
+- **Status:** breaking-down
+- **Needs:** nothing
+- **Deliverable:** dictate, stop and cancel without leaving insert mode, in both today's session buffer and the new one-instance note.
+- **Scope:**
+  - **Ctrl-Q** cancels without pasting, like `ZQ`, from insert and normal mode.
+  - **Ctrl-S** toggles Wispr Flow hands-free (`wispr-flow://start-hands-free` / `stop-hands-free` via `open -g`), from insert and normal mode, without leaving insert mode. The toggle must not get stuck when Joe stops Flow with Flow's own shortcut.
+  - Submit while Flow is recording (started with Ctrl-S or `:Dictate`): stop Flow first, wait for its paste (with a timeout), then submit, so the last words are not lost.
+  - Apply to both `vim/voice-vim.vim` (V0 session) and `lua/voice-vim/note.lua` (one-instance note). Update `guide.md`.
+  - Pulled forward from "Dictation polish" (stop hands-free on submit), at Joe's request.
+- **Agent checks:** headless nvim tests with a recording fake `open` on PATH: Ctrl-Q cancels in both buffers; Ctrl-S sends start then stop; submit while recording sends stop, waits for a simulated paste, then submits the full text; all existing tests pass.
+- **Joe checks:** in a real session, Ctrl-S starts Flow, Ctrl-S again stops it and the text lands; Ctrl-X while recording keeps the last words; Ctrl-Q cancels from insert mode.
+- **Tasks:** not broken down yet.
+- **Log:**
+  - 2026-10-11: created at Joe's request (Ctrl-Q cancel, Ctrl-S Flow toggle). Conflicts checked: Ctrl-Q duplicates built-in Ctrl-V and Joe's config uses it only in ToggleTerm terminal mode and Telescope; Ctrl-S is nvim 0.11's insert-mode LSP signature help, irrelevant in a markdown note; Ghostty binds neither. Mappings are buffer-local.
+
 ## Notes and history browser
 
 - **Status:** todo
@@ -241,3 +258,4 @@ Record each change here, dated, with the reason.
 
 - 2026-10-11: created from `planning.md` → "Next steps", for orchestrator-driven work. Split the single-instance step into a host spike and the build.
 - 2026-10-11: Joe asked the orchestrator to start "One instance toggled by a hotkey" before the host pick. Its hard need now covers only the host tasks (show/hide wiring, removing the new-window-per-press path). Host-independent tasks (server, note/draft/submit/cancel commands against a stubbed host) go first and must leave V0 working.
+- 2026-10-11: added "Voice keys in the buffer" (Ctrl-Q cancel, Ctrl-S Flow toggle, stop Flow before submit) at Joe's request, with no needs, so it can run before the host pick. "Stop hands-free on submit" moves there from "Dictation polish".
