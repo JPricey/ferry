@@ -549,6 +549,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-12: V2 done and verified on the 2nd attempt (f41be98, 612c78d, 364d0b6): reads only a private clone of Flow's db + `-wal`; tests show Flow's files byte-identical with no new siblings in every case. Joe check 1 is ready.
   - 2026-10-12: V1 verify FAILED (2nd: Markdown headings joined, fillers in quotes) and, after a third attempt the orchestrator allowed, FAILED (3rd) narrowly: `sentence_case` turns a lone `i` after any non-letter into `I` (`git rebase -i` → `-I`, even in backticks; `src/i/x.lua`); notes: `iPhone` → `IPhone` at a sentence start, phrase fillers stripped after single words leave `you know`, comma-pair drop also removes real commas (`Yes, uh, I agree`). Work is on branch `worktree-agent-a097b9a92154101d0` (c066a10). V1 marked [!]; V4 waits.
   - 2026-10-12: V1 merged without sentence-case (Joe's call): `lua/ferry/fixup.lua` with join_breaks, strip_fillers, cycle_word (`:FixJoin`, `:FixFillers`, `<leader>fj/ff/fw`); not loaded by the note until V4. V4 starts after H9 merges.
+  - 2026-10-12: V4 verify FAILED (1st): autosave resets `'[,']`, so fix-ups acted from line 1; fix running (record the paste range, `lockmarks`). Joe: `<leader>ff` may shadow his Telescope find_files inside ferry buffers — keep it.
 
 ## Changes to this plan
 
