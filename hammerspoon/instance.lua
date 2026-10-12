@@ -43,6 +43,12 @@
 --   show: host focused after N ms     hide: target focused after N ms
 -- Each press also logs `toggle: focused=<bool> (<why>) -> show|hide`.
 --
+-- browse() (the browse hotkey, hammerspoon://ferry-browse): toggle, but the
+--   show runs `ferry-host browse <bundle> <window>` (the note with the
+--   notes sidebar focused on the newest note, normal mode; no seed). Host
+--   focused: hides like toggle (`draft`). Logs `browse: focused=... ->
+--   show|hide`.
+--
 -- showEdit() (hammerspoon://ferry-edit, after bin/ferry-edit opened its file
 --   in the server): the show path without `ferry-host show`, so the note is
 --   untouched. Host focused: the old target is kept. Logs `edit: ...`.
@@ -115,7 +121,7 @@
 -- disable(): stop for good (a new start() replaced it, or its setup failed):
 -- drops a show waiting for the pre-warm, stops the poll, unbinds the URL
 -- handlers bindURLs() made, and makes toggle/show/hide/talkDown/talkUp
--- no-ops.
+-- no-ops (browse and showEdit too).
 --
 -- captureSelection (default off): Cmd+C and a wait of up to 0.4 s for the
 -- clipboard before every show, which breaks the ~150 ms show target.
@@ -524,16 +530,16 @@ function I.new(cfg)
     pollShow(press)
   end
 
-  -- press: { t0 = key press, alerted }. again: { seed = path } on the one
-  -- retry after the server was down.
+  -- press: { t0 = key press, alerted, talk, browse }. again: { seed = path }
+  -- on the one retry after the server was down.
   local function showRest(press, again)
     if c._disabled then return end
-    local args = { "show" }
+    local args = { press.browse and "browse" or "show" }
     if press.talk then args[#args + 1] = "--talk" end
     args[#args + 1] = c.target.bundle or ""
     args[#args + 1] = c.target.winId and tostring(c.target.winId) or ""
     local seed
-    if again then seed = again.seed else seed = seedFile() end
+    if again then seed = again.seed elseif not press.browse then seed = seedFile() end
     if seed then args[#args + 1] = seed end
     local ok, out = runSync("show", args)
     if not ok and not again and out:find("no server on", 1, true) then
@@ -558,10 +564,12 @@ function I.new(cfg)
   end
 
   -- Show the host with the note. t0: the key press (default now). opts.talk:
-  -- hold to talk (`show --talk`). Returns the press.
+  -- hold to talk (`show --talk`); opts.browse: the notes browser
+  -- (`browse`). Returns the press.
   function c.show(t0, opts)
     if c._disabled then return end
-    local press = { t0 = t0 or nowMs(), alerted = false, talk = opts ~= nil and opts.talk == true }
+    local press = { t0 = t0 or nowMs(), alerted = false, talk = opts ~= nil and opts.talk == true,
+      browse = opts ~= nil and opts.browse == true }
     stopPoll()
     captureTarget()
     if c._warming then
@@ -649,15 +657,21 @@ function I.new(cfg)
     poll("hide", "target", t0, targetFocused)
   end
 
-  function c.toggle()
-    if c._disabled then log.w("toggle: instance controller is disabled"); return end
+  -- Host focused: hide; otherwise show with opts. label starts the log line.
+  local function toggleAs(label, opts)
+    if c._disabled then log.w(label .. ": instance controller is disabled"); return end
     local t0 = nowMs()  -- the press: every ms line is measured from here
     local focused, why = try(h.isFocused)
     focused = focused == true
-    log.i(string.format("toggle: focused=%s (%s) -> %s; shown=%s %s", tostring(focused),
+    log.i(string.format("%s: focused=%s (%s) -> %s; shown=%s %s", label, tostring(focused),
       tostring(why), focused and "hide" or "show", tostring(c.shown), describeFocus()))
-    if focused then c.hide(t0) else c.show(t0) end
+    if focused then c.hide(t0) else c.show(t0, opts) end
   end
+
+  function c.toggle() toggleAs("toggle") end
+
+  -- The browse hotkey: toggle, but shows the notes browser.
+  function c.browse() toggleAs("browse", { browse = true }) end
 
   -- -------------------------------------------------------------------------
   -- Hold to talk (see the header)

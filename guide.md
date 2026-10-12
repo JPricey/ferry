@@ -20,6 +20,14 @@ lands in another app; if the note does not come up within 5 seconds, or Flow
 was slow to start, an alert says Flow may still be recording. `talkHotkey =
 false` turns it off, and one equal to `hotkey` is not bound.
 
+## Open the notes browser
+
+Press **Ctrl+Option+N** (`browseHotkey`) in any app: the note appears as with
+Ctrl+Option+V (same paste target), with the history sidebar open and focused
+on the newest note in normal mode. Pressed from ferry it hides, like the
+hotkey. `browseHotkey = false` turns it off, and one equal to `hotkey` or
+`talkHotkey` is not bound.
+
 ## Copy and hide
 
 `Ctrl-Y` (insert or normal mode, also from the history sidebar) or `:Copy`
@@ -83,10 +91,12 @@ Opening `hammerspoon://ferry-start` does what the hotkey does, for
 example `open -g hammerspoon://ferry-start` from a shell, Karabiner or a
 launcher. `hammerspoon://ferry-talk?state=down` and `?state=up` are hold
 to talk's key down and key up, for a Karabiner rule (`to` and
-`to_after_key_up`). `hammerspoon://ferry-edit` shows ferry over the front
+`to_after_key_up`). `hammerspoon://ferry-browse` does what the browse
+hotkey does. `hammerspoon://ferry-edit` shows ferry over the front
 window without touching the note, for a file a tool has already opened in
 the ferry server. If a hotkey fails to bind, Hammerspoon shows an alert
-and logs `failed to bind` in its console (`… (talk)` for the talk hotkey);
+and logs `failed to bind` in its console (`… (talk)` for the talk hotkey,
+`… (browse)` for the browse hotkey);
 an Option-only hotkey logs a warning.
 
 ## Move off Option+V
@@ -235,6 +245,8 @@ Hammerspoon menu bar icon:
 require("ferry").start({
   hotkey = { { "ctrl", "alt" }, "v" },  -- the trigger (default)
   talkHotkey = { { "ctrl", "alt" }, "b" },  -- hold to talk (default); false turns it off
+  browseHotkey = { { "ctrl", "alt" }, "n" },  -- notes browser (default); false turns it off
+  notesDir = nil,               -- notes folder (default ~/notes/scratchpads)
   captureSelection = false,     -- start a new note with the selection
   confirmTimeout = 1.0,         -- seconds to wait for the target before giving up
   rememberFrame = true,         -- reopen the window where you last left it

@@ -21,10 +21,15 @@
 -- talkDown when pressed (start Flow, show the note) and talkUp when
 -- released (stop Flow once the note is focused). See instance.lua.
 --
+-- Browse: a third hotkey (browseHotkey, default Ctrl+Option+N, or
+-- hammerspoon://ferry-browse) toggles like the hotkey but shows the notes
+-- browser (`ferry-host browse`): the sidebar focused on the newest note.
+--
 -- Usage in ~/.hammerspoon/init.lua:
 --   local ferry = require("ferry")
 --   ferry.start()  -- Ctrl+Option+V; pass { hotkey = { mods, key } } to change
---                     -- (talkHotkey likewise; talkHotkey = false turns it off)
+--                     -- (talkHotkey and browseHotkey likewise; false turns
+--                     -- either off)
 
 local M = {}
 
@@ -37,6 +42,9 @@ M.config = {
   -- Ctrl+Option+B: same hand shape as the hotkey; Ctrl+Option+Space is the
   -- macOS input-source switch.
   talkHotkey = { { "ctrl", "alt" }, "b" },
+  -- The notes browser: like the hotkey, but shows the sidebar focused on the
+  -- newest note. false: off. Joe's pick (2026-10-12).
+  browseHotkey = { { "ctrl", "alt" }, "n" },
   -- Repo root; set by install.sh via the symlinked module path, or override.
   root = nil,
   -- Copy the current selection into a new note before showing it. Off by
@@ -53,6 +61,9 @@ M.config = {
   -- The nvim server socket (default $FERRY_SOCK, else
   -- ${TMPDIR}/ferry.sock, as bin/ferry-host).
   sock = nil,
+  -- The notes folder (FERRY_NOTES_DIR for bin/ferry-host). nil: its own
+  -- default (~/notes/scratchpads, or $FERRY_NOTES_DIR).
+  notesDir = nil,
   -- The ferry.app wrapper Neovide runs as (built by install.sh). nil:
   -- ~/Applications/ferry.app, used when it is there; false: plain Neovide.
   appPath = nil,
@@ -305,7 +316,7 @@ local function startInstance()
     return appName == neovide.NAME and appName or "the ferry window"
   end
   local c = dofile(root .. "/hammerspoon/instance.lua").new({
-    host = host, root = root, sock = sock,
+    host = host, root = root, sock = sock, notesDir = M.config.notesDir,
     captureSelection = M.config.captureSelection == true,
     deliver = function(p) M.submit(p) end,
     hostName = hostName,
@@ -342,6 +353,10 @@ end
 -- The hotkey (and hammerspoon://ferry-start): show or hide the one
 -- instance.
 function M.toggle() callInstance("toggle", "press") end
+
+-- The browse hotkey (and hammerspoon://ferry-browse): show the notes
+-- browser, or hide the instance when it is focused.
+function M.browse() callInstance("browse", "browse") end
 
 -- hammerspoon://ferry-edit (bin/ferry-edit, which has already opened its
 -- file in the server): show ferry over the terminal without touching the
@@ -425,19 +440,38 @@ function M.start(cfg)
   hs.urlevent.bind("ferry-start", function() M.toggle() end)
   hs.urlevent.bind("ferry-talk", onTalkURL)
   hs.urlevent.bind("ferry-edit", function() M.showEdit() end)
+  hs.urlevent.bind("ferry-browse", function() M.browse() end)
   if M.hotkeyObj then M.hotkeyObj:delete(); M.hotkeyObj = nil end
   if M.talkHotkeyObj then M.talkHotkeyObj:delete(); M.talkHotkeyObj = nil end
+  if M.browseHotkeyObj then M.browseHotkeyObj:delete(); M.browseHotkeyObj = nil end
   M.hotkeyObj = bindHotkey(M.config.hotkey, "", "ferry-start", M.toggle)
+  local hk = M.config.hotkey
+  -- The same keys as an earlier configured hotkey: an error, not bound.
+  -- others: { {name, spec}, ... }. Returns true when it clashes.
+  local function clashes(label, key, spec, others)
+    for _, o in ipairs(others) do
+      local name, other = o[1], o[2]
+      if other and comboKey(spec[1], spec[2]) == comboKey(other[1], other[2]) then
+        local combo = comboName(spec[1], spec[2])
+        log.e(label .. " hotkey " .. combo .. " is the same as the " .. name .. "; not bound")
+        hs.alert.show("ferry: " .. key .. " " .. combo .. " is the same as the " .. name .. "; not bound")
+        return true
+      end
+    end
+    return false
+  end
   local talk = M.config.talkHotkey
   if not talk then
     log.i("talk hotkey off")
-  elseif comboKey(talk[1], talk[2]) == comboKey(M.config.hotkey[1], M.config.hotkey[2]) then
-    local combo = comboName(talk[1], talk[2])
-    log.e("talk hotkey " .. combo .. " is the same as the hotkey; not bound")
-    hs.alert.show("ferry: talkHotkey " .. combo .. " is the same as the hotkey; not bound")
-  else
+  elseif not clashes("talk", "talkHotkey", talk, { { "hotkey", hk } }) then
     -- Pressed and released; no repeat function, so holding does nothing more.
     M.talkHotkeyObj = bindHotkey(talk, " (talk)", "ferry-talk?state=down|up", M.talkDown, M.talkUp)
+  end
+  local browse = M.config.browseHotkey
+  if not browse then
+    log.i("browse hotkey off")
+  elseif not clashes("browse", "browseHotkey", browse, { { "hotkey", hk }, { "talkHotkey", talk } }) then
+    M.browseHotkeyObj = bindHotkey(browse, " (browse)", "ferry-browse", M.browse)
   end
   return M
 end

@@ -566,6 +566,73 @@ do
   stop(sock)
 end
 
+-- browse (the browse hotkey): a stub ferry-host (H7's `browse` lives in
+-- bin/ferry-host) records each call with its FERRY_NOTES_DIR; status says
+-- a UI is attached.
+local fakeRoot = work .. "/fakeroot"
+sh("mkdir -p '" .. fakeRoot .. "/bin'")
+do
+  local f = assert(io.open(fakeRoot .. "/bin/ferry-host", "w"))
+  f:write("#!/bin/sh\n"
+    .. "echo \"$* notes=$FERRY_NOTES_DIR\" >> '" .. fakeRoot .. "/calls'\n"
+    .. "case \"$1\" in\n"
+    .. "  status) echo 'up uis=1' ;;\n"
+    .. "  browse) echo \"browse $2 $3\" ;;\n"
+    .. "  draft) echo 'draft kept' ;;\n"
+    .. "esac\n")
+  f:close()
+  sh("chmod +x '" .. fakeRoot .. "/bin/ferry-host'")
+end
+local function fakeCalls()
+  local f = io.open(fakeRoot .. "/calls", "r")
+  if not f then return "" end
+  local s = f:read("a")
+  f:close()
+  return (s:gsub("%s+$", ""))
+end
+
+-- browse from window 4242: `browse com.example.target 4242` (no show, no
+-- seed even with captureSelection), then host.show; browse again while
+-- focused: draft, host.hide, 4242 refocused.
+do
+  local t = setup({ root = fakeRoot, warm = false, captureSelection = true })
+  local rec, c = t.rec, t.c
+  rec:finishTask(#rec.tasks, 0, "", "")  -- the pre-warm
+  sh(": > '" .. fakeRoot .. "/calls'")
+  c.browse()
+  check("browse from 4242: browse then status, with notesDir", "browse com.example.target 4242 notes="
+    .. work .. "/notes\nstatus notes=" .. work .. "/notes", fakeCalls())
+  check("browse: no show argv, no Cmd+C", "0 0", #execs(rec, "'show'") .. " " .. #rec.keyStrokes)
+  check("browse: host.show after the browse call", "host.show", table.concat(t.order, ","))
+  check("browse: logs browse: focused=false and show: browse took", true,
+    rec:hasLog("i", "show: browse took") and rec:hasLog("i", "browse: focused=false"))
+  rec:runTimers()
+  check("browse: host focused, logged", "true true",
+    tostring(rec.focusedWindow == t.hostWin) .. " " .. tostring(rec:hasLog("i", "show: host focused after")))
+  sh(": > '" .. fakeRoot .. "/calls'")
+  c.browse()
+  check("browse while focused: runs draft only", "draft notes=" .. work .. "/notes", fakeCalls())
+  check("browse while focused: hides and refocuses 4242", "host.show,host.hide 4242",
+    table.concat(t.order, ",") .. " " .. tostring(lastFocusId(rec)))
+  check("browse while focused: logged -> hide", true, rec:hasLog("i", "browse: focused=true") and rec:hasLog("i", "-> hide;"))
+  c.disable()
+  sh(": > '" .. fakeRoot .. "/calls'")
+  c.browse()
+  check("browse disabled: nothing runs", "", fakeCalls())
+end
+
+-- browse during the pre-warm waits for it, then runs browse.
+do
+  local t = setup({ root = fakeRoot, warm = false })
+  local rec, c = t.rec, t.c
+  sh(": > '" .. fakeRoot .. "/calls'")
+  c.browse()
+  check("browse during pre-warm: waits, nothing run yet", "", fakeCalls())
+  rec:finishTask(#rec.tasks, 0, "", "")
+  check("browse after pre-warm: browse com.example.target 4242, host.show", "true host.show",
+    tostring(has(fakeCalls(), "browse com.example.target 4242")) .. " " .. table.concat(t.order, ","))
+end
+
 -- --- hold to talk: talkDown / talkUp -----------------------------------------
 
 -- Run a Lua file in the server; its return value comes back as a string.

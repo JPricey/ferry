@@ -241,6 +241,15 @@ stop ended the adopted recording and the paste arrived; a stray paste never
 sets it, `adopt_start` clears it): no stop, no alert. Without an instance, talkDown alerts like a press and
 never starts Flow.
 
+**Browse.** `browseHotkey` (default Ctrl+Option+N, `false` = off, never
+the same combo as `hotkey` or `talkHotkey`; a failed bind logs and alerts
+with ` (browse)`) and `ferry-browse` call `M.browse` → `c.browse`: like
+`toggle`, but the show runs `ferry-host browse <bundle> <window>` (no
+seed; the note with the sidebar focused on the newest note, normal mode)
+and from the note it runs `draft` and hides. Config `notesDir` reaches
+the controller as `FERRY_NOTES_DIR` for every `ferry-host` call (nil:
+ferry-host's default).
+
 **Delivery.** `ferry-submit?file=&target=&window=` hides Neovide, then
 `M.submit` reads and deletes the file and runs `lua/ferry/delivery.lua`
 (loaded with `dofile`, effects passed in as an `env` built from `hs.*`):

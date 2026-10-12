@@ -112,6 +112,7 @@ All of these work in insert mode, so you never have to leave it.
 | `Ctrl-Q` | Throw the note away without sending. `ZQ` and `:Cancel` do the same. |
 | `Ctrl-Y` | Copy the text to the clipboard and hide. `:Copy` does the same. |
 | `Ctrl+Option+V` | Hide the note and keep it as a draft. `:q` does the same. |
+| `Ctrl+Option+N` | Open the notes browser: from any app it shows the note with the history sidebar focused on your newest note. Pressed in ferry, it hides (like Ctrl+Option+V). |
 | `Ctrl+Option+B` (hold) | Wispr Flow listens while held and its text is added at the cursor; the note stays up. From any other app it shows the note first. |
 | `Ctrl-S` | Start Wispr Flow listening; press again to stop. |
 | `<leader>d` | Start Wispr Flow from normal mode (`:Dictate`). |
@@ -210,6 +211,13 @@ row shows a mark (`★` pinned, `●` draft, `~` cancelled, nothing for sent),
 the time, the app it went to and its first line. `<Tab>` jumps back to your
 text.
 
+To go straight to your notes from any app, press **Ctrl+Option+N**. The
+ferry window appears aimed at the window you were in (as with
+Ctrl+Option+V), with the sidebar open and the cursor on your newest note,
+in normal mode. Press it again to hide ferry. Change it with
+`browseHotkey` in Settings (`browseHotkey = false` turns it off); it
+cannot be the same keys as `hotkey` or `talkHotkey`.
+
 On a note in the sidebar:
 
 | Key | What it does |
@@ -297,6 +305,7 @@ moves onto your main screen.
   keyboard tool does what the hotkey does.
 - `hammerspoon://ferry-talk?state=down` and `?state=up` do what pressing
   and letting go of the hold to talk key do (see "Hold to talk").
+- `open -g hammerspoon://ferry-browse` does what Ctrl+Option+N does.
 - `karabiner/ferry-hyper.json` is an optional Karabiner-Elements rule.
   It turns a held Right Command into a Hyper key, and Hyper+V acts like
   the hotkey. Copy it to `~/.config/karabiner/assets/complex_modifications/`,
@@ -311,6 +320,8 @@ from the Hammerspoon menu bar icon. Leave out any line to keep its default.
 require("ferry").start({
   hotkey = { { "ctrl", "alt" }, "v" },  -- the hotkey ("alt" is Option)
   talkHotkey = { { "ctrl", "alt" }, "b" },  -- hold to talk; false turns it off
+  browseHotkey = { { "ctrl", "alt" }, "n" },  -- notes browser; false turns it off
+  notesDir = nil,           -- notes folder (default ~/notes/scratchpads)
   captureSelection = false, -- start a new note with the selected text
   confirmTimeout = 1.0,     -- seconds to wait for the target window
   rememberFrame = true,     -- reopen the window where you left it
@@ -376,7 +387,8 @@ ends in `…`; type `:messages` to read it in full.
 - **The hotkey does nothing.** Reload Config and look for `bound ctrl+alt+v`
   in the console. A `failed to bind` line means another app holds the key;
   pick a different `hotkey`, or use the start URL. For the hold to talk
-  key, look for `bound ctrl+alt+b (talk)` (or `talk hotkey off`).
+  key, look for `bound ctrl+alt+b (talk)` (or `talk hotkey off`); for the
+  notes browser, `bound ctrl+alt+n (browse)` (or `browse hotkey off`).
 - **Flow kept recording after hold to talk.** An alert says so when the
   note did not come up in time. Open the note (Ctrl+Option+V) and press
   Ctrl-S to stop Flow. The console's `talk:` lines show each step with

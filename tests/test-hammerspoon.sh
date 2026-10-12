@@ -86,7 +86,8 @@ do
   M._instance.showEdit = function() edits = edits + 1 end
   rec:openURL("ferry-edit", {})
   check("ferry-edit reaches the controller's showEdit", 1, edits)
-  check("defaults: two hotkey binds", 2, #rec.hotkeyBinds)
+  check("ferry-browse bound", "function", type(rec.urlBinds["ferry-browse"]))
+  check("defaults: three hotkey binds", 3, #rec.hotkeyBinds)
   local b = rec.hotkeyBinds[1]
   check("hotkey mods are configured mods", table.concat(M.config.hotkey[1], "+"), table.concat(b.mods, "+"))
   check("hotkey key is configured key", M.config.hotkey[2], b.key)
@@ -106,15 +107,85 @@ do
   check("talk: no repeat fn", nil, tb.rep)
   check("talk: object kept", tb.obj, M.talkHotkeyObj)
   check("talk: bound ctrl+alt+b (talk) logged", true, rec:hasLog("i", "bound ctrl+alt+b (talk)"))
+  local bb = rec.hotkeyBinds[3] or {}
+  check("browse: default ctrl+alt+n", "ctrl+alt+n", table.concat(bb.mods or {}, "+") .. "+" .. tostring(bb.key))
+  check("browse: pressed is M.browse, no released or repeat", "true nil nil",
+    tostring(bb.fn == M.browse) .. " " .. tostring(bb.released) .. " " .. tostring(bb.rep))
+  check("browse: object kept", bb.obj, M.browseHotkeyObj)
+  check("browse: bound ctrl+alt+n (browse) logged", true, rec:hasLog("i", "bound ctrl+alt+n (browse)"))
+  check("defaults: notesDir nil reaches the controller as nil", nil, M._instance.config.notesDir)
   check("defaults: no alert", 0, #rec.alerts)
+end
+
+-- The browse hotkey and hammerspoon://ferry-browse reach the controller's
+-- browse; notesDir reaches the controller.
+do
+  local rec, M = fresh()
+  M.start(opts({ notesDir = swork .. "/mynotes" }))
+  check("notesDir passed to the controller", swork .. "/mynotes", M._instance.config.notesDir)
+  local calls = 0
+  M._instance.browse = function() calls = calls + 1 end
+  local execsBefore = #rec.executes
+  rec:openURL("ferry-browse", {})
+  rec.hotkeyBinds[3].fn()
+  check("ferry-browse URL and browse hotkey reach browse", 2, calls)
+  M._instance.browse = function() error("browse boom") end
+  M.browse()
+  check("browse error: logged, one alert", "true 1",
+    tostring(rec:hasLog("e", "browse boom")) .. " " .. #rec.alerts)
+end
+
+-- browseHotkey = false: no browse bind, logged off; the URL is still bound.
+do
+  local rec, M = fresh()
+  M.start(opts({ browseHotkey = false }))
+  local browseBinds = 0
+  for _, b in ipairs(rec.hotkeyBinds) do if b.fn == M.browse then browseBinds = browseBinds + 1 end end
+  check("browseHotkey=false: two binds, none for browse", "2 0", #rec.hotkeyBinds .. " " .. browseBinds)
+  check("browseHotkey=false: browse hotkey off logged", true, rec:hasLog("i", "browse hotkey off"))
+  check("browseHotkey=false: no object, no alert", "nil 0", tostring(M.browseHotkeyObj) .. " " .. #rec.alerts)
+  check("browseHotkey=false: ferry-browse still bound", "function", type(rec.urlBinds["ferry-browse"]))
+end
+
+-- The browse bind fails: error log and one alert marked (browse) naming
+-- ferry-browse; the other hotkeys still bind.
+do
+  local rec, M = fresh()
+  rec.hotkeyBind = function(_, key)
+    if key == "n" then return nil end
+    return { delete = function() end }
+  end
+  M.start(opts())
+  check("failing browse bind: logged with (browse)", true, rec:hasLog("e", "failed to bind ctrl+alt+n (browse)"))
+  check("failing browse bind: one alert naming (browse) and ferry-browse", true,
+    #rec.alerts == 1 and rec.alerts[1]:find("(browse)", 1, true) ~= nil
+      and rec.alerts[1]:find("ferry-browse", 1, true) ~= nil)
+  check("failing browse bind: hotkey and talk still bound", "true true",
+    tostring(rec:hasLog("i", "bound ctrl+alt+v")) .. " " .. tostring(rec:hasLog("i", "bound ctrl+alt+b (talk)")))
+  check("failing browse bind: no object", nil, M.browseHotkeyObj)
+end
+
+-- browseHotkey the same combo as the hotkey or the talk hotkey (other
+-- spelling): error, one alert, not bound.
+for _, c in ipairs({ { "hotkey", { { "control", "option" }, "V" } }, { "talkHotkey", { { "⌥", "ctrl" }, "b" } } }) do
+  local rec, M = fresh()
+  M.start(opts({ browseHotkey = c[2] }))
+  local browseBinds = 0
+  for _, b in ipairs(rec.hotkeyBinds) do if b.fn == M.browse then browseBinds = browseBinds + 1 end end
+  check("browse same as " .. c[1] .. ": not bound, two binds", "0 2", browseBinds .. " " .. #rec.hotkeyBinds)
+  check("browse same as " .. c[1] .. ": error logged", true,
+    rec:hasLog("e", "is the same as the " .. c[1] .. "; not bound"))
+  check("browse same as " .. c[1] .. ": one alert naming browseHotkey", true,
+    #rec.alerts == 1 and rec.alerts[1]:find("browseHotkey", 1, true) ~= nil)
 end
 
 -- talkHotkey = false: only the main hotkey, logged off.
 do
   local rec, M = fresh()
   M.start(opts({ talkHotkey = false }))
-  check("talkHotkey=false: one bind, the hotkey", "1 true",
-    #rec.hotkeyBinds .. " " .. tostring(rec.hotkeyBinds[1].fn == M.toggle))
+  check("talkHotkey=false: two binds, the hotkey and browse", "2 true true",
+    #rec.hotkeyBinds .. " " .. tostring(rec.hotkeyBinds[1].fn == M.toggle)
+    .. " " .. tostring(rec.hotkeyBinds[2].fn == M.browse))
   check("talkHotkey=false: talk hotkey off logged", true, rec:hasLog("i", "talk hotkey off"))
   check("talkHotkey=false: no object, no alert", "nil 0", tostring(M.talkHotkeyObj) .. " " .. #rec.alerts)
 end
@@ -138,8 +209,9 @@ end
 do
   local rec, M = fresh()
   M.start(opts({ talkHotkey = { { "option", "control" }, "V" } }))
-  check("same combo: one bind (the hotkey)", "1 true",
-    #rec.hotkeyBinds .. " " .. tostring(rec.hotkeyBinds[1].fn == M.toggle))
+  check("same combo: two binds (the hotkey, browse)", "2 true true",
+    #rec.hotkeyBinds .. " " .. tostring(rec.hotkeyBinds[1].fn == M.toggle)
+    .. " " .. tostring(rec.hotkeyBinds[2].fn == M.browse))
   check("same combo: error logged", true, rec:hasLog("e", "is the same as the hotkey; not bound"))
   check("same combo: one alert", 1, #rec.alerts)
 end
@@ -181,14 +253,14 @@ do
   local rec, M = fresh()
   M.start(opts({ hotkey = { { "alt" }, "v" } }))
   check("Option-only warning logged", true, rec:hasLog("w", "Option-only"))
-  check("Option-only still binds (and the talk hotkey)", 2, #rec.hotkeyBinds)
+  check("Option-only still binds (and the talk and browse hotkeys)", 3, #rec.hotkeyBinds)
 end
 
 -- hs.hotkey.bind returns nil: error log and alert.
 do
   local rec, M = fresh()
   rec.hotkeyBind = function() return nil end
-  M.start(opts({ hotkey = { { "ctrl", "alt" }, "v" }, talkHotkey = false }))
+  M.start(opts({ hotkey = { { "ctrl", "alt" }, "v" }, talkHotkey = false, browseHotkey = false }))
   check("nil bind logs error", true, rec:hasLog("e", "failed to bind ctrl+alt+v"))
   check("nil bind alerts", 1, #rec.alerts)
   check("nil bind keeps no hotkey object", nil, M.hotkeyObj)
@@ -199,7 +271,7 @@ end
 do
   local rec, M = fresh()
   rec.hotkeyBind = function() error("refused by macOS") end
-  local ok = pcall(M.start, opts({ hotkey = { { "ctrl", "alt" }, "v" }, talkHotkey = false }))
+  local ok = pcall(M.start, opts({ hotkey = { { "ctrl", "alt" }, "v" }, talkHotkey = false, browseHotkey = false }))
   check("erroring bind does not raise", true, ok)
   check("erroring bind logs error", true, rec:hasLog("e", "refused by macOS"))
   check("erroring bind alerts", 1, #rec.alerts)
@@ -209,11 +281,11 @@ end
 do
   local rec, M = fresh()
   M.start(opts({ hotkey = { { "ctrl", "alt" }, "v" } }))
-  local first, firstTalk = M.hotkeyObj, M.talkHotkeyObj
+  local first, firstTalk, firstBrowse = M.hotkeyObj, M.talkHotkeyObj, M.browseHotkeyObj
   M.start(opts())
-  check("restart deletes old hotkey and talk hotkey", "true true",
-    tostring(first.deleted) .. " " .. tostring(firstTalk.deleted))
-  check("restart binds both again", 4, #rec.hotkeyBinds)
+  check("restart deletes old hotkey, talk and browse hotkeys", "true true true",
+    tostring(first.deleted) .. " " .. tostring(firstTalk.deleted) .. " " .. tostring(firstBrowse.deleted))
+  check("restart binds all three again", 6, #rec.hotkeyBinds)
 end
 
 -- Write a submit file the way the note leaves it.
@@ -450,6 +522,12 @@ do
   for _, e in ipairs(rec.executes) do if has(e.cmd, "wispr-flow") then flowRuns = flowRuns + 1 end end
   check("Neovide missing: talk never starts Flow (no task or command with wispr-flow)", "0 0",
     flowRuns .. " " .. #rec.tasks)
+  local execsBefore = #rec.executes
+  rec:openURL("ferry-browse", {})
+  rec.hotkeyBinds[3].fn()
+  check("Neovide missing: browse URL and hotkey alert like a press", "7 " .. NO,
+    #rec.alerts .. " " .. tostring(rec.alerts[7]))
+  check("Neovide missing: browse runs nothing", "0 0", (#rec.executes - execsBefore) .. " " .. #rec.tasks)
 end
 
 -- The ferry.app wrapper: config appPath reaches the host, which finds it
