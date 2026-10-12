@@ -23,8 +23,9 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   3. Optional: `cp ~/Code/voice-vim/karabiner/voice-vim-hyper.json ~/.config/karabiner/assets/complex_modifications/`, then Karabiner-Elements → Complex Modifications → Add rule → enable both voice-vim rules. Hold right Command and press V and confirm a session opens. Tap right Command alone and confirm it still acts as Command.
   4. Ten submits in a row, spread across Slack, the Claude app and a Claude Code pane in Ghostty/tmux (use two Ghostty windows, so the wrong-window case is tested). Each should either land in the window you started from, or show "copied — paste manually" with the text on the clipboard. For any miss, copy the `voice-vim` lines from the console here (they log target, window, focus, each frontmost check, settle and the keystroke).
   - When 1–4 pass, set the milestone to `done`. The next milestone, "One instance toggled by a hotkey", has a hard need on the host spike, not on this one.
+- **One installer: Joe checks.** `./install.sh --check` (changes nothing; lists what is missing), then `./install.sh` (installs Neovide, reloads Hammerspoon), then `./install.sh` again: the second run should install nothing and change no files.
 - **One instance toggled by a hotkey: Joe checks** (B1–B2 done, agent checks pass; B3 waits for these). Steps:
-  1. `brew install --cask neovide`. Open Neovide once from Applications so macOS stops asking about it, then quit it.
+  1. Run `./install.sh` (it installs Neovide with `brew install --cask neovide-app`). Open Neovide once from Applications so macOS stops asking about it, then quit it.
   2. Hammerspoon console → Reload Config. Look for the mode line and no alert. (Without Neovide you get one alert and the old per-press windows.)
   3. From Slack, Ctrl+Option+V: a Neovide window appears with a note in insert mode. Copy the `show: host focused after N ms` line (target under 150 ms; the very first show may be slower).
   4. Dictate with Flow (hold-to-talk and Ctrl-S): the text lands in Neovide. **This is the key check for the Neovide pick.**
@@ -262,7 +263,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 
 ## One installer
 
-- **Status:** in-progress
+- **Status:** needs-joe
 - **Needs:** nothing
 - **Deliverable:** `./install.sh` sets up everything voice-vim needs on a Mac, safely re-runnable, and is the home for any future setup step.
 - **Scope:**
@@ -276,9 +277,10 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 - **Agent checks:** `tests/test-install.sh` runs `install.sh` with a temp `HOME`, fake `brew`/`open`/`hs` first on PATH, and a fake Applications dir; never the real system.
 - **Joe checks:** run `./install.sh --check`, then `./install.sh`; read the summary; run it again and confirm it changes nothing the second time.
 - **Tasks:**
-  - [ ] **I1. Make install.sh the one setup script.** As in Scope. Make every system path overridable for tests (`VOICE_VIM_APPS_DIR` default `/Applications`, `HOME`, PATH lookups), and add `VOICE_VIM_INSTALL_DRY_RUN=1` that prints each command instead of running it. Each step prints one line: `ok`, `installed`, `skipped`, or `missing: <what to do>`. Idempotent: a second run installs nothing, adds no second `init.lua` block, and leaves an existing symlink alone. Files: `install.sh`, `tests/test-install.sh`, `USER_GUIDE.md`, `guide.md`, `README.md`, `AGENTS.md` (test list). Depends: none. Verify: `bash tests/test-install.sh` exits 0 with ok lines for: missing brew → exits non-zero with the brew install command; fresh temp HOME → fake brew asked for `hammerspoon`, `neovide` and `neovim` once each, symlink and `init.lua` block created, migration run; second run → no brew installs, one `init.lua` block, unchanged files; `--check` → no fake calls, no files changed, lists missing items; Ghostty or Wispr Flow missing → `missing:` line, not installed; an `init.lua` with the old Option+V line → line removed with `.bak`; Hammerspoon already running with a working fake `hs` → `hs -c` reload called. `bash -n install.sh` passes.
+  - [x] **I1. Make install.sh the one setup script.** As in Scope. Make every system path overridable for tests (`VOICE_VIM_APPS_DIR` default `/Applications`, `HOME`, PATH lookups), and add `VOICE_VIM_INSTALL_DRY_RUN=1` that prints each command instead of running it. Each step prints one line: `ok`, `installed`, `skipped`, or `missing: <what to do>`. Idempotent: a second run installs nothing, adds no second `init.lua` block, and leaves an existing symlink alone. Files: `install.sh`, `tests/test-install.sh`, `USER_GUIDE.md`, `guide.md`, `README.md`, `AGENTS.md` (test list). Depends: none. Verify: `bash tests/test-install.sh` exits 0 with ok lines for: missing brew → exits non-zero with the brew install command; fresh temp HOME → fake brew asked for `hammerspoon`, `neovide` and `neovim` once each, symlink and `init.lua` block created, migration run; second run → no brew installs, one `init.lua` block, unchanged files; `--check` → no fake calls, no files changed, lists missing items; Ghostty or Wispr Flow missing → `missing:` line, not installed; an `init.lua` with the old Option+V line → line removed with `.bak`; Hammerspoon already running with a working fake `hs` → `hs -c` reload called. `bash -n install.sh` passes.
 - **Log:**
   - 2026-10-11: created at Joe's request ("an installer which installs Neovide / home for any other setup"). Extends the existing `install.sh` instead of adding a second script. Single task written by the orchestrator.
+  - 2026-10-11: I1 done and verified (dry run against a copy of Joe's real `init.lua`: only `brew install --cask neovide` and a reload, no file changes). Orchestrator follow-ups: cask renamed to `neovide-app` (Homebrew's current name), `hs` calls read `/dev/null`, `/opt/homebrew/bin/brew` found when not on PATH. Agent checks pass (all 16 test scripts); status → needs-joe.
 
 ## Notes and history browser
 

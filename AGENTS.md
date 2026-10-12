@@ -45,6 +45,7 @@ the session script, the database helper, or the sidebar,
 `bash tests/test-delivery.sh` and `bash tests/test-hammerspoon.sh` after
 touching `lua/voice-vim/delivery.lua` or the Hammerspoon module,
 `bash tests/test-migrate.sh` after touching `bin/voice-vim-migrate-init`,
+`bash tests/test-install.sh` after touching `install.sh`,
 `bash tests/test-frame.sh` after touching `lua/voice-vim/frame.lua`,
 `bash tests/test-flow.sh` after touching `lua/voice-vim/flow.lua`,
 `bash tests/test-window-frame.sh` after touching `hammerspoon/window-frame.lua`,

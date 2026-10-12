@@ -9,30 +9,35 @@ setting, see `guide.md`.
 
 ## What you need
 
-- macOS, with [Wispr Flow](https://wisprflow.ai) installed and working.
-- Neovim, and [Neovide](https://neovide.dev) (`brew install --cask
-  neovide`), which shows voice-vim's one always-running window.
-- Hammerspoon, which `install.sh` installs for you. It owns the hotkey and
-  does the pasting.
-- Without Neovide, voice-vim falls back to opening a new Ghostty window per
-  press (see "Session windows" below).
+- macOS with [Homebrew](https://brew.sh).
+- [Wispr Flow](https://wisprflow.ai) installed and working, and
+  [Ghostty](https://ghostty.org) for session windows. `install.sh` checks
+  for both but does not install them.
+- Everything else (Hammerspoon, Neovide, Neovim) `install.sh` installs for
+  you. Hammerspoon owns the hotkey and does the pasting; Neovide shows
+  voice-vim's one always-running window.
 
 ## Set it up once
 
-1. From the repo, run `./install.sh`. It installs Hammerspoon if needed,
-   links voice-vim into `~/.hammerspoon/`, and starts Hammerspoon.
-2. When macOS asks, allow Hammerspoon to open, and give it Accessibility
-   (System Settings → Privacy & Security → Accessibility).
-3. Install Neovide: `brew install --cask neovide`.
-4. Quit Hammerspoon and start it again. It only checks Accessibility at
-   launch. The console (menu bar icon → Console) shows
+1. From the repo, run `./install.sh`. It installs whatever is missing of
+   Hammerspoon, Neovide and Neovim, links voice-vim into `~/.hammerspoon/`,
+   adds the voice-vim block to `~/.hammerspoon/init.lua`, removes an old
+   Option+V hotkey line (keeping `init.lua.bak`), and starts or reloads
+   Hammerspoon. Each step prints `ok`, `installed`, `skipped` or
+   `missing:` with what to do. Running it again changes nothing.
+2. Do the manual steps it lists at the end: give Hammerspoon Accessibility
+   (System Settings → Privacy & Security → Accessibility), then quit and
+   start Hammerspoon again, since it only checks Accessibility at launch.
+   Open Neovide once and click Open if macOS asks. The first session
+   window asks whether Hammerspoon may control Ghostty; allow it.
+3. The Hammerspoon console (menu bar icon → Console) shows
    `mode: one instance in Neovide`; if Neovide is missing, an alert says
    "install Neovide for the one-instance mode" and voice-vim uses session
    windows until you install it and Reload Config.
 
-If you installed an older version that used Option+V, run
-`bin/voice-vim-migrate-init` once, then Reload Config from the Hammerspoon
-menu bar icon. It removes the old hotkey line and keeps a backup.
+`./install.sh --check` reports what is installed and what is missing, and
+changes nothing. Re-run `./install.sh` any time; it is also where any new
+setup step lands.
 
 ## Your first dictation
 

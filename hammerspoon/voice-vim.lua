@@ -552,7 +552,7 @@ function M.start(cfg)
       log.i("mode: one instance in Neovide (" .. tostring(why) .. ")")
     elseif ok then
       log.w("mode: Neovide not found (" .. tostring(why) .. "); using a new window per press."
-        .. " Install it with: brew install --cask neovide")
+        .. " Install it with: brew install --cask neovide-app")
       hs.alert.show(alertMsg or NO_NEOVIDE)
     else
       -- Half-built controller: drop its pending show and URL handlers.

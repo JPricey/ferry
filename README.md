@@ -26,23 +26,25 @@ submit or cancel.
 ## Install
 
 ```sh
-./install.sh
+./install.sh --check   # what is installed and what is missing; changes nothing
+./install.sh           # install what is missing; safe to re-run
 ```
 
-This installs Hammerspoon via Homebrew if needed, symlinks the module into
-`~/.hammerspoon/`, appends a `require("voice-vim")` block to
-`~/.hammerspoon/init.lua`, and launches Hammerspoon.
+`install.sh` is the one setup script. It needs Homebrew (and stops with the
+command to install it if missing), installs Hammerspoon, Neovide and Neovim
+if missing, checks for Ghostty, Wispr Flow, `python3` and `sqlite3`, symlinks
+the module into `~/.hammerspoon/`, appends a `require("voice-vim")` block to
+`~/.hammerspoon/init.lua` once, runs `bin/voice-vim-migrate-init`, and starts
+Hammerspoon or reloads it with `hs -c 'hs.reload()'`. Each step prints `ok`,
+`installed`, `skipped` or `missing: <what to do>`. New setup steps go here.
 
-First launch needs two manual clicks that no script can do for you:
+It ends with the manual steps no script can do:
 
-1. Gatekeeper asks whether to open Hammerspoon (downloaded from the
-   internet). Click Open.
-2. Hammerspoon asks for Accessibility. Enable it under System Settings >
-   Privacy & Security > Accessibility, then choose Reload Config from the
-   Hammerspoon menu bar icon.
-
-Hammerspoon also needs Automation permission to control Ghostty; macOS asks
-the first time the hotkey fires. Click OK.
+1. Accessibility for Hammerspoon: System Settings > Privacy & Security >
+   Accessibility. Then quit and relaunch Hammerspoon.
+2. Automation for Ghostty: macOS asks the first time a session window
+   opens. Click OK.
+3. Open Neovide once, and click Open if Gatekeeper asks.
 
 The config also loads `hs.ipc`, so once Hammerspoon is up you can reload and
 poke at it from a shell:
@@ -90,6 +92,8 @@ to change it. Buffer-local settings live in `vim/voice-vim.vim`.
 - `tests/test-history.sh` — database helper, recording, and sidebar tests.
 - `tests/test-delivery.sh` — delivery core tests with a fake clock.
 - `tests/test-migrate.sh` — migration script tests on temp init.lua copies.
+- `tests/test-install.sh` — `install.sh` against a temp `HOME`, a fake
+  Applications dir and recording fakes for `brew`, `open`, `hs`, `pgrep`.
 - `tests/test-hammerspoon.sh` — loads the Hammerspoon module against a
   stubbed `hs` (`tests/hs_stub.lua`) under `nvim -l`.
 - `tests/test-spike-host.sh` — spike server helper and Ghostty-window and

@@ -20,7 +20,7 @@ instead, still after the text lands.
 
 ## Needs Neovide
 
-The one instance runs in Neovide (`brew install --cask neovide`) and its
+The one instance runs in Neovide (`brew install --cask neovide-app`) and its
 Neovim server starts when Hammerspoon loads. Without Neovide, or if setting
 up the instance fails when Hammerspoon loads, an alert says so and each
 press opens a new Ghostty window instead (`mode = "session"` always does).
@@ -52,9 +52,9 @@ launcher. If the hotkey fails to bind, Hammerspoon shows an alert and logs
 ## Move off Option+V
 
 Older installs set `hotkey = { { "alt" }, "v" }` in `~/.hammerspoon/init.lua`.
-`bin/voice-vim-migrate-init` removes that one line (after copying the file to
-`init.lua.bak`) so the Ctrl+Option+V default applies; a custom hotkey line is
-left alone. Reload Hammerspoon afterwards.
+`./install.sh` (or `bin/voice-vim-migrate-init` alone) removes that one line
+after copying the file to `init.lua.bak`, so the Ctrl+Option+V default
+applies; a custom hotkey line is left alone.
 
 ## Optional Hyper key
 
@@ -158,12 +158,15 @@ settings and mappings live in `vim/voice-vim.vim`.
 
 ## Install and permissions
 
-Run `./install.sh` once, and `brew install --cask neovide` for the one
-instance. Hammerspoon needs Accessibility (System Settings > Privacy &
-Security) and, for session windows, Automation permission to control
-Ghostty. Hammerspoon only checks Accessibility at launch, so quit and relaunch
-it after granting. Without it, submit shows an alert, pastes nothing and
-leaves the text on the clipboard.
+`./install.sh` installs what is missing (Hammerspoon, Neovide, Neovim via
+Homebrew), checks for Ghostty, Wispr Flow, `python3` and `sqlite3`, links the
+module, adds the `init.lua` block once, removes an old Option+V line and
+starts or reloads Hammerspoon; a second run changes nothing, and `--check`
+only reports. Then give Hammerspoon Accessibility (System Settings > Privacy
+& Security) and relaunch it, since it only checks at launch; without it,
+submit pastes nothing and leaves the text on the clipboard. Session windows
+also need Automation permission to control Ghostty, and Neovide should be
+opened once by hand.
 
 ## Troubleshoot
 

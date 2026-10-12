@@ -619,7 +619,7 @@ do
   check("Neovide missing: falls back to the old path", "session", M.mode)
   check("Neovide missing: one alert", 1, #rec.alerts)
   check("Neovide missing: alert says install Neovide", "voice-vim: install Neovide for the one-instance mode", rec.alerts[1])
-  check("Neovide missing: logs the brew command", true, rec:hasLog("w", "brew install --cask neovide"))
+  check("Neovide missing: logs the brew command", true, rec:hasLog("w", "brew install --cask neovide-app"))
   check("Neovide missing: hotkey runs begin", M.begin, rec.hotkeyBinds[1] and rec.hotkeyBinds[1].fn)
   check("Neovide missing: no server pre-warm", 0, #rec.tasks)
   rec.hotkeyBinds[1].fn()
