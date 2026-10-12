@@ -249,16 +249,21 @@ delivery.lua fails to load or errors, nothing is pasted and it alerts
 "copied — paste manually". The clipboard is not restored. Each step is
 logged to the `ferry` logger.
 
-**$EDITOR mode.** `bin/ferry-edit <file>` runs `ferry-host ensure`, calls
+**$EDITOR mode.** `bin/ferry-edit <file>` runs `ferry-host ensure` (cut
+off after `FERRY_EDIT_ENSURE_TIMEOUT`, 10 s, with its process group), calls
 `lua/ferry/edit.lua` `start{file, done}` over the socket (reloading an
 older loaded module by `api`), opens `-g hammerspoon://ferry-edit`
 (`c.showEdit()`), waits up to `FERRY_EDIT_SHOW_TIMEOUT` (5 s) for
 `status` `shown` (FocusGained in nvim, or `front = 1` when `lsappinfo`
 sees ferry.app's bundle frontmost), then polls the done file and exits
-with its code (0 saved, 1 Ctrl-Q). INT/TERM/HUP call `abort` (which
-first stops a Flow recording in the edit and waits for its paste) and
-exit 130; a server gone after shown exits 1. Every failure before shown
-runs `${FERRY_EDIT_FALLBACK:-nvim}` in the terminal.
+with its code (0 saved, 1 Ctrl-Q). INT/TERM/HUP (trapped before any
+blocking step; every blocking step runs in the background under `wait`,
+so the trap runs at once) call `abort` (which first stops a Flow
+recording in the edit and waits for its paste) and exit 130. Each remote
+call is cut off after 3 s; two unanswered status calls in a row count as
+the server gone: it tries `abort`, then exits 1 (falls back before
+shown). Every failure before shown runs `${FERRY_EDIT_FALLBACK:-nvim}` in
+the terminal.
 
 **History.** The note calls `bin/ferry-db start` when a note gets
 going and `finish` on submit or cancel, recording target, seed, final

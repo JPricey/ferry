@@ -7,32 +7,41 @@
 #   Ctrl-Q, ZQ            the file is left as it was, exit 1
 #   :q, the hotkey        ferry hides, the edit stays pending
 # Ctrl-C, TERM or HUP here abort the edit in ferry (file unchanged; a Flow
-# recording in it is stopped first) and exit 130. A server that dies while
-# the edit is shown exits 1.
+# recording in it is stopped first) and exit 130. A server that does not
+# answer two status checks in a row while the edit is shown exits 1 (after
+# trying to abort the edit, in case the server was only stalled).
 #
 # Usage: ferry-edit <file>
 #
 # It runs ${FERRY_EDIT_FALLBACK:-nvim} with the same arguments in this
 # terminal instead when: there is not exactly one file argument,
 # FERRY_EDIT_TERMINAL=1, an SSH session, Hammerspoon is not running, no
-# ferry.app or Neovide.app, `ferry-host ensure` fails, ferry is busy (an
-# edit pending, or Flow recording in the note), or ferry is not shown
-# within FERRY_EDIT_SHOW_TIMEOUT seconds.
+# ferry.app or Neovide.app, `ferry-host ensure` fails or takes longer than
+# FERRY_EDIT_ENSURE_TIMEOUT seconds, ferry is busy (an edit pending, or
+# Flow recording in the note), or ferry is not shown within
+# FERRY_EDIT_SHOW_TIMEOUT seconds.
 #
 # Environment:
-#   FERRY_SOCK               server socket (default ${TMPDIR}/ferry.sock)
-#   FERRY_EDIT_FALLBACK      terminal editor command, split on spaces
-#                            (default nvim)
-#   FERRY_EDIT_TERMINAL      1: always use the fallback
-#   FERRY_EDIT_SHOW_TIMEOUT  seconds to wait for ferry to show (default 5)
-#   FERRY_EDIT_DIR           done files (default ${TMPDIR}/ferry-edit)
-#   FERRY_APP                the ferry.app wrapper (default
-#                            ~/Applications/ferry.app); its bundle id
-#                            local.ferry is what "ferry is frontmost" means,
-#                            else com.neovide.neovide
+#   FERRY_SOCK                 server socket (default ${TMPDIR}/ferry.sock)
+#   FERRY_EDIT_FALLBACK        terminal editor command, split on spaces
+#                              (default nvim)
+#   FERRY_EDIT_TERMINAL        1: always use the fallback
+#   FERRY_EDIT_SHOW_TIMEOUT    seconds to wait for ferry to show (default 5)
+#   FERRY_EDIT_ENSURE_TIMEOUT  seconds `ferry-host ensure` may take, a cold
+#                              server start included (default 10)
+#   FERRY_EDIT_DIR             done files (default ${TMPDIR}/ferry-edit)
+#   FERRY_APP                  the ferry.app wrapper (default
+#                              ~/Applications/ferry.app); its bundle id
+#                              local.ferry is what "ferry is frontmost"
+#                              means, else com.neovide.neovide
 #
 # "Shown": nvim saw FocusGained in the edit, or ferry's app is frontmost
 # (lsappinfo), which covers ferry already in front when the edit started.
+#
+# Signals: every step that can block (ensure, each remote call, each sleep)
+# runs in the background and is waited for with `wait`, which returns as
+# soon as a trapped signal arrives; bash would otherwise run the trap only
+# after a foreground command ends.
 set -u
 
 export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$HOME/.local/bin:/usr/local/bin:$PATH"
@@ -44,15 +53,57 @@ tmp=${TMPDIR:-/tmp}; tmp=${tmp%/}
 sock=${FERRY_SOCK:-$tmp/ferry.sock}
 app=${FERRY_APP:-$HOME/Applications/ferry.app}
 show_timeout=${FERRY_EDIT_SHOW_TIMEOUT:-5}
+ensure_timeout=${FERRY_EDIT_ENSURE_TIMEOUT:-10}
 edit_dir=${FERRY_EDIT_DIR:-$tmp/ferry-edit}
+
+started=   # set while the server may hold our edit
+child=     # pid of the background step being waited for
+out=       # remote call output file
+done_file=
 
 say() { printf 'ferry-edit: %s\n' "$*" >&2; }
 
 fallback() { # why
+  [ -n "$out" ] && rm -f "$out"
   say "$1; using ${FERRY_EDIT_FALLBACK:-nvim}"
   # shellcheck disable=SC2086 # the fallback command is split on purpose
-  exec ${FERRY_EDIT_FALLBACK:-nvim} "${args[@]}"
+  exec ${FERRY_EDIT_FALLBACK:-nvim} ${args[@]+"${args[@]}"}
 }
+
+# perl: run ARGV[1..] in a process group of its own, cut off after ARGV[0]
+# seconds (exit 124) or on TERM/INT/HUP; either way the whole group gets
+# KILL, so nothing it started (a hung nvim client) is left behind.
+bounded_pl='my $t = shift; my $p = fork; defined $p or exit 125;
+if (!$p) { setpgrp(0, 0); exec @ARGV; exit 127 }
+setpgrp($p, $p);
+my $end = sub { kill "KILL", -$p; kill "KILL", $p; exit 124 };
+$SIG{ALRM} = $SIG{TERM} = $SIG{INT} = $SIG{HUP} = $end;
+alarm $t; waitpid $p, 0;
+exit($? & 127 ? 128 + ($? & 127) : $? >> 8)'
+
+# Run a blocking step in the background and wait for it (see Signals).
+waitbg() { child=$!; wait "$child"; local rc=$?; child=; return $rc; }
+nap() { sleep "$1" & waitbg; }
+
+abort() { # end the server edit; wait for it when Flow's paste is due
+  [ -n "$started" ] || return 0
+  started=
+  call abort "{'done': $(vimstr "$done_file")}"
+  if [ "$reply" = aborting ]; then
+    for _ in $(seq 60); do [ -s "$done_file" ] && break; nap 0.1; done
+  fi
+  rm -f "$done_file" "$done_file.tmp"
+}
+on_signal() {
+  trap '' INT TERM HUP  # one abort, even if more signals follow
+  [ -n "$child" ] && kill "$child" 2>/dev/null
+  abort
+  exit 130
+}
+# Armed before any step that can block. Until the edit is started, abort is
+# a no-op.
+trap on_signal INT TERM HUP
+trap '[ -n "$out" ] && rm -f "$out"' EXIT
 
 args=("$@")
 [ $# -eq 1 ] || fallback "not exactly one file argument"
@@ -73,45 +124,48 @@ nvim_bin=$(command -v nvim) || fallback "nvim not found"
 file=$1
 case $file in /*) ;; *) file=$PWD/$file ;; esac
 
-"$host" ensure >/dev/null 2>&1 || fallback "ferry-host ensure failed"
+# A socket that accepts but never answers would hang ensure forever. On
+# timeout its process group is ended, a server it was starting included.
+perl -e "$bounded_pl" "$ensure_timeout" "$host" ensure </dev/null >/dev/null 2>&1 & waitbg
+case $? in
+  0) ;;
+  124) fallback "ferry-host ensure took over ${ensure_timeout} s" ;;
+  *) fallback "ferry-host ensure failed" ;;
+esac
 
 # --- the server's edit module ----------------------------------------------
 vimstr() { local s=${1//\'/\'\'}; printf "'%s'" "$s"; }
 luastr() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; s=${s//\'/\'\'}; printf '"%s"' "$s"; }
 # Each remote call is cut off after 3 s, so a hung server cannot hang us.
-rexpr() { perl -e 'alarm 3; exec @ARGV' "$nvim_bin" --server "$sock" --remote-expr "$1" 2>/dev/null; }
+# The answer is in $reply (empty: no answer).
+reply=
+rexpr() {
+  : >"$out"
+  perl -e "$bounded_pl" 3 "$nvim_bin" --server "$sock" --remote-expr "$1" \
+    </dev/null >"$out" 2>/dev/null & waitbg
+  reply=$(cat "$out" 2>/dev/null)
+}
 # require("ferry.edit"), repo on the runtimepath (as in ferry-host); a
 # server holding an older module (api below edit_api) reloads it, keeping
 # its state.
 edit_api=2
 edit_mod="(function(want) local r = $(luastr "$root"); if not vim.tbl_contains(vim.opt.rtp:get(), r) then vim.opt.rtp:prepend(r) end; local e = require(\"ferry.edit\"); if (e.api or 0) >= want then return e end; package.loaded[\"ferry.edit\"] = nil; local ok, m = pcall(require, \"ferry.edit\"); if not ok then package.loaded[\"ferry.edit\"] = e; return e end; m.state = e.state; return m end)($edit_api)"
-call() { rexpr "luaeval('$edit_mod.$1(_A)', $2)"; } # fn dict
+call() { rexpr "luaeval('$edit_mod.$1(_A)', $2)"; } # fn dict -> $reply
 
 mkdir -p "$edit_dir" || fallback "cannot create $edit_dir"
 done_file=$edit_dir/$$-$RANDOM$RANDOM
+out=$done_file.out
 rm -f "$done_file"
 dict="{'file': $(vimstr "$file"), 'done': $(vimstr "$done_file")}"
 
-abort() { # end the server edit; wait for it when Flow's paste is due
-  [ -n "$started" ] || return 0
-  started=
-  local a; a=$(call abort "{'done': $(vimstr "$done_file")}")
-  if [ "$a" = aborting ]; then
-    for _ in $(seq 60); do [ -s "$done_file" ] && break; sleep 0.1; done
-  fi
-  rm -f "$done_file" "$done_file.tmp"
-}
-on_signal() { abort; exit 130; }
-# Armed before start: a signal while start is in flight still aborts it
-# (abort of an edit that never started is a no-op).
+# From here a signal aborts the edit, even while start is in flight (abort
+# of an edit that never started is a no-op).
 started=1
-trap on_signal INT TERM HUP
-
-r=$(call start "$dict")
-case $r in
+call start "$dict"
+case $reply in
   ok) ;;
   busy) started=; fallback "ferry is busy" ;;
-  *) started=; fallback "ferry could not open the file (${r:-no answer})" ;;
+  *) r=$reply; abort; fallback "ferry could not open the file (${r:-no answer})" ;;
 esac
 
 front() { # 1 when ferry's app is frontmost
@@ -122,36 +176,54 @@ front() { # 1 when ferry's app is frontmost
     *) echo 0 ;;
   esac
 }
-status() { call status "{'done': $(vimstr "$done_file"), 'front': $(front)}"; }
 
 open -g "hammerspoon://ferry-edit" >/dev/null 2>&1 || { abort; fallback "could not open hammerspoon://ferry-edit"; }
+
+# A remote call can stall for 3 s on a busy server, so the server counts as
+# gone only after two unanswered checks in a row. Even then the edit may
+# still be pending in a stalled server, so abort is tried first.
+misses=0
+missed() { # status reply -> 0 when that makes two misses in a row
+  if [ -n "$1" ]; then misses=0; return 1; fi
+  misses=$((misses + 1))
+  [ "$misses" -ge 2 ]
+}
 
 # --- wait for ferry to show the edit ----------------------------------------
 SECONDS=0
 while :; do
-  s=$(status); [ -n "$s" ] || s=gone
-  case $s in
+  call status "{'done': $(vimstr "$done_file"), 'front': $(front)}"
+  case $reply in
     shown|done) break ;;  # done: it ended before we saw it shown
-    gone) started=; fallback "ferry's server went away" ;;
   esac
+  if missed "$reply"; then abort; fallback "ferry's server did not answer"; fi
   if [ "$SECONDS" -ge "$show_timeout" ]; then
     abort; fallback "ferry was not shown within ${show_timeout} s"
   fi
-  sleep 0.1
+  nap 0.1
 done
 
 # --- wait for the edit to end -----------------------------------------------
 n=0
+misses=0
 while [ ! -s "$done_file" ]; do
-  sleep 0.1
+  nap 0.1
   n=$((n + 1))
   [ $((n % 10)) -eq 0 ] || continue
   # Once a second: is the server, and our edit in it, still there?
-  s=$(call status "{'done': $(vimstr "$done_file")}"); [ -n "$s" ] || s=gone
-  if [ "$s" = gone ] || { [ "$s" = done ] && sleep 0.2 && [ ! -s "$done_file" ]; }; then
-    started=
-    say "ferry's server went away; the file was not changed by it"
+  call status "{'done': $(vimstr "$done_file")}"
+  if missed "$reply"; then
+    abort
+    say "ferry's server stopped answering; the file was not changed by it"
     exit 1
+  fi
+  if [ "$reply" = done ]; then
+    nap 0.2
+    if [ ! -s "$done_file" ]; then
+      started=
+      say "ferry's server lost the edit; the file was not changed by it"
+      exit 1
+    fi
   fi
 done
 started=

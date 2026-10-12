@@ -200,7 +200,8 @@ Set `EDITOR`, `VISUAL` and `GIT_EDITOR` to the full path of
 `bin/ferry-edit`, and Claude Code's Ctrl-G or `git commit` opens the file
 in ferry, in its own tab with no sidebar; the note's draft is left as it
 was. Ctrl-X (ZZ, `:wq`) saves and exits 0, Ctrl-Q (ZQ) leaves the file
-unchanged and exits 1, `:q` or the hotkey hides with the edit still open,
+unchanged and exits 1, `:q` or the hotkey hides ferry and the edit stays
+open until Ctrl-X or Ctrl-Q (the next hotkey press shows the note),
 Ctrl-S dictates, and Ctrl-C in the terminal ends it unsaved (exit 130).
 Over SSH, with `FERRY_EDIT_TERMINAL=1`, without Hammerspoon or ferry.app,
 while ferry is busy, or with no window shown within 5 s, it runs

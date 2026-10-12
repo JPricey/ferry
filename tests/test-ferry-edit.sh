@@ -67,22 +67,36 @@ run() {
   for _ in $(seq 200); do [ -s "$work/pid" ] && break; sleep 0.01; done
   fpid=$(cat "$work/pid"); pids="$pids $fpid"
 }
-# Wait (up to 10 s) for ferry-edit to exit, then print its exit code.
+# Wait (up to $1 s, default 10) for ferry-edit to exit, then print its
+# exit code.
 code() {
-  for _ in $(seq 200); do [ -s "$work/rc" ] && break; sleep 0.05; done
+  local end=$((SECONDS + ${1:-10}))
+  while [ ! -s "$work/rc" ] && [ "$SECONDS" -lt "$end" ]; do sleep 0.05; done
   cat "$work/rc" 2>/dev/null || echo running
 }
 # Wait for the edit to be open in the server (start answered ok).
 started() { for _ in $(seq 100); do [ "$(pending)" = true ] && break; sleep 0.05; done; }
 running() { kill -0 "$fpid" 2>/dev/null && echo running || echo exited; }
 fallback_log() { cat "$work/fallback.log" 2>/dev/null; rm -f "$work/fallback.log"; }
+# After a check: a ferry-edit still running is killed and an edit left
+# pending in the server is aborted, so one failure does not cascade into
+# the next checks.
+settle() {
+  if [ "$(running)" = running ]; then kill -KILL "$fpid" 2>/dev/null; code 2 >/dev/null; fi
+  ask "luaeval('(function() local m = require\"ferry.edit\"; local e = m.state.edit; if e then m.abort({done = e.done}) end; return 1 end)()')" >/dev/null
+}
+# Block the server's main loop for $1 ms (a busy Lua loop: no events run).
+stall() { ask "luaeval('(function() local t = vim.uv.hrtime() + $1 * 1e6; while vim.uv.hrtime() < t do end; return 1 end)()')" >/dev/null; }
 
 # --- shown by FocusGained, then Ctrl-X ---------------------------------------
 f=$work/a.txt
 printf 'hello\n' >"$f"
 run "$f"
+# The first run starts the server (cold), so wait for open before the 1 s.
+started
+for _ in $(seq 100); do [ -s "$work/open.log" ] && break; sleep 0.05; done
 sleep 1
-check "still blocking after 1 s; open logged -g hammerspoon://ferry-edit" \
+check "still blocking 1 s after open; open logged -g hammerspoon://ferry-edit" \
   "running -g hammerspoon://ferry-edit" "$(running) $(cat "$work/open.log" 2>/dev/null)"
 check "the server edit holds the file, in insert mode" "hello i" "$(ask 'getline(1)." ".mode()')"
 focus
@@ -131,6 +145,11 @@ check "no Hammerspoon: no open, no edit pending" "none false" \
 
 run "$f" "$work/other.txt"
 check "two file arguments: fallback with both" "7 $f $work/other.txt" "$(code) $(fallback_log)"
+# /bin/bash is 3.2 on macOS: "${args[@]}" of an empty array fails there
+# under set -u.
+/bin/bash "$fe" 2>>"$work/err"; rc=$?
+check "zero arguments (under /bin/bash $(/bin/bash -c 'echo $BASH_VERSION' | cut -d. -f1-2)): the fallback ran with none" \
+  "7 ran ''" "$rc $([ -e "$work/fallback.log" ] && echo ran || echo not-run) '$(fallback_log)'"
 FERRY_EDIT_TERMINAL=1 run "$f"
 check "FERRY_EDIT_TERMINAL=1: fallback" "7 $f" "$(code) $(fallback_log)"
 SSH_CONNECTION="1.2.3.4 5 6.7.8.9 22" run "$f"
@@ -143,6 +162,29 @@ else
 fi
 FERRY_SOCK=$work/nodir/x.sock run "$f"
 check "ensure fails: fallback" "7 $f" "$(code) $(fallback_log)"
+
+# A socket that accepts but never answers: ensure hangs on it, so it is cut
+# off (FERRY_EDIT_ENSURE_TIMEOUT) and its hung nvim client killed.
+fake=$work/fake.sock
+perl -MIO::Socket::UNIX -e 'my $s = IO::Socket::UNIX->new(Type => SOCK_STREAM(), Local => $ARGV[0], Listen => 5) or die; my @c; while (my $c = $s->accept) { push @c, $c }' "$fake" &
+pids="$pids $!"
+for _ in $(seq 100); do [ -S "$fake" ] && break; sleep 0.05; done
+t0=$SECONDS
+FERRY_SOCK=$fake FERRY_EDIT_ENSURE_TIMEOUT=2 run "$f"
+r=$(code 8); t=$((SECONDS - t0))
+check "non-answering socket: fallback within the 2 s ensure bound (+1 s)" "7 $f yes" \
+  "$r $(fallback_log) $([ "$t" -le 3 ] && echo yes || echo "no: ${t} s")"
+check "  and no nvim client is left hanging on it" "none" \
+  "$(/usr/bin/pgrep -f -- "--server $fake" >/dev/null && echo left || echo none)"
+# A signal during that ensure: the trap runs at once (armed before ensure).
+FERRY_SOCK=$fake FERRY_EDIT_ENSURE_TIMEOUT=10 run "$f"
+sleep 0.5
+t0=$SECONDS
+kill -TERM "$fpid"
+r=$(code 8); t=$((SECONDS - t0))
+check "kill -TERM during a hung ensure: exit 130 within 1 s, no fallback, no client left" "130 yes '' none" \
+  "$r $([ "$t" -le 1 ] && echo yes || echo "no: ${t} s") '$(fallback_log)' $(/usr/bin/pgrep -f -- "--server $fake" >/dev/null && echo left || echo none)"
+settle
 
 # busy: an edit already pending in the server.
 ask "luaeval('require\"ferry.edit\".start(_A)', {'file': '$work/e1.txt', 'done': '$work/e1.done'})" >/dev/null
@@ -165,9 +207,12 @@ for sig in TERM HUP; do
   started; focus; sleep 0.3
   send 'dropped '
   sleep 0.2
+  t0=$SECONDS
   kill -"$sig" "$fpid"
-  check "kill -$sig: exit 130, edit aborted, file unchanged" "130 false sig" \
-    "$(code) $(pending) $(cat "$f")"
+  r=$(code); t=$((SECONDS - t0))
+  check "kill -$sig: exit 130 within 2 s, edit aborted, file unchanged" "130 yes false sig" \
+    "$r $([ "$t" -le 2 ] && echo yes || echo "no: ${t} s") $(pending) $(cat "$f")"
+  settle
 done
 
 # Flow recording in the edit at TERM: Flow is stopped, the edit ends after
@@ -187,12 +232,42 @@ check "kill -TERM while Flow records: exit 130, Flow stopped, file unchanged" \
   "$(code) $(grep -o 'stop-hands-free' "$work/open.log" | head -1) $(cat "$f")"
 check "after that, Flow idle and no edit pending" "false false" \
   "$(ask "luaeval('require\"ferry.flow\".recording()')") $(pending)"
+settle
 run "$f"
 started
 check "the next ferry-edit starts (not busy)" "running" "$(running)"
 focus; sleep 0.3
 send '<C-q>'
 code >/dev/null
+settle
+
+# --- a stalled server ----------------------------------------------------------------
+# One status call cut off (3 s) is not "gone": two in a row are needed.
+f=$work/stall.txt
+printf 'stall\n' >"$f"
+run "$f"
+started; focus; sleep 0.3
+stall 3500
+sleep 1.5
+check "server stalls 3.5 s while shown: ferry-edit still waiting, edit pending" "running true" \
+  "$(running) $(pending)"
+send 'ok<C-x>'
+check "  then Ctrl-X: exit 0, file edited" "0 okstall" "$(code) $(cat "$f")"
+settle
+
+# Two misses in a row: ferry-edit tries an abort before it exits 1, so a
+# server that was only stalled does not keep the edit pending.
+f=$work/stall2.txt
+printf 'stall2\n' >"$f"
+run "$f"
+started; focus; sleep 0.3
+stall 9000 &
+sp=$!
+r=$(code 16)
+wait "$sp"
+check "server stalls 9 s while shown: exit 1, then the queued abort ended the edit, file unchanged" \
+  "1 false stall2" "$r $(pending) $(cat "$f")"
+settle
 
 # --- server death after shown ------------------------------------------------------
 f=$work/death.txt
