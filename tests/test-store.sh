@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Note files: lua/voice-vim/store.lua against tests/fixtures/notes/*.md.
+# Note files: lua/ferry/store.lua against tests/fixtures/notes/*.md.
 # Runs the spec under LuaJIT and under nvim -l; also Lua 5.4 when installed.
 # Each run writes into its own mktemp dir.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 spec="$root/tests/store_spec.lua"
-work=$(mktemp -d "${TMPDIR:-/tmp}/vvstore.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/ferrystore.XXXXXX")
 [ -n "$work" ] && [ -d "$work" ] || { echo "mktemp failed" >&2; exit 1; }
 trap 'rm -rf "$work"' EXIT
 fail=0

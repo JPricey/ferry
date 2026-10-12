@@ -2,7 +2,7 @@
 -- (GROUND_TRUTHS decision 11). SQLite is only an index rebuilt from these.
 --
 -- Pure Lua: no hs or vim globals. Parses under LuaJIT and Lua 5.4, so it can
--- be required from nvim (require("voice-vim.store")) or loaded with dofile.
+-- be required from nvim (require("ferry.store")) or loaded with dofile.
 --
 -- File format:
 --

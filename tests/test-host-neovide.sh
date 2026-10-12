@@ -3,13 +3,13 @@
 # `nvim -l`. hs.task is recorded; the launch command is then run by hand
 # with fake neovide/open first on PATH (they record their arguments and
 # fail), so no real Neovide starts. The controller cycle drives
-# hammerspoon/instance.lua with this adapter and a real bin/voice-vim-host
+# hammerspoon/instance.lua with this adapter and a real bin/ferry-host
 # on a temp socket (--clean, temp DB and notes dir). Never touches the real
 # Hammerspoon, Neovide or Joe's nvim server.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # macOS socket paths max out at 104 bytes, so keep the folder short.
-work=$(mktemp -d /tmp/vvn.XXXX)
+work=$(mktemp -d /tmp/ferryn.XXXX)
 [ -n "$work" ] && [ -d "$work" ] || { echo "mktemp failed" >&2; exit 1; }
 ps_ours= ps_other=
 cleanup() {
@@ -25,7 +25,7 @@ for f in osascript open neovide; do
   printf '#!/bin/sh\n{ echo "CALL %s"; echo "$*"; } >> "%s/calls"\nexit 1\n' "$f" "$work" > "$work/fakes/$f"
   chmod +x "$work/fakes/$f"
 done
-# A failing ghostty: voice-vim-host ensure finds no GUI settings.
+# A failing ghostty: ferry-host ensure finds no GUI settings.
 printf '#!/bin/sh\nexit 1\n' > "$work/fakes/ghostty"; chmod +x "$work/fakes/ghostty"
 : > "$work/apps/Neovide.app/Contents/Info.plist"
 cp "$work/fakes/neovide" "$work/apps/Neovide.app/Contents/MacOS/neovide"
@@ -36,18 +36,18 @@ perl -e 'sleep 60' neovide --server "$work/r.sock" </dev/null >/dev/null 2>&1 &
 ps_ours=$!
 perl -e 'sleep 60' neovide --server "$work/other.sock" </dev/null >/dev/null 2>&1 &
 ps_other=$!
-export VV_PS_OURS=$ps_ours VV_PS_OTHER=$ps_other
-export PATH="$work/fakes:$PATH" VOICE_VIM_DB="$work/history.sqlite"
-unset VOICE_VIM_SOCK VOICE_VIM_NOTES_DIR VOICE_VIM_HOST_NVIM_FLAGS
+export FERRY_PS_OURS=$ps_ours FERRY_PS_OTHER=$ps_other
+export PATH="$work/fakes:$PATH" FERRY_DB="$work/history.sqlite"
+unset FERRY_SOCK FERRY_NOTES_DIR FERRY_HOST_NVIM_FLAGS
 
 cat > "$work/spec.lua" <<'LUA'
-local root = assert(os.getenv("VV_ROOT"))
-local work = assert(os.getenv("VV_WORK"))
+local root = assert(os.getenv("FERRY_ROOT"))
+local work = assert(os.getenv("FERRY_WORK"))
 local stub = dofile(root .. "/tests/hs_stub.lua")
 local modpath = root .. "/hammerspoon/hosts/neovide.lua"
-local hostbin = root .. "/bin/voice-vim-host"
+local hostbin = root .. "/bin/ferry-host"
 local NEOVIDE = "com.neovide.neovide"
-local KEY = "voice-vim.windowFrame"
+local KEY = "ferry.windowFrame"
 local fail = 0
 
 local function check(name, want, got)
@@ -396,9 +396,9 @@ do
   local rec = stub.install()
   local h = stub.load(modpath).new({ root = root, sock = work .. "/r.sock",
     searchPath = { work .. "/empty" }, appPaths = {} })
-  local ours = rec:app({ bundleID = NEOVIDE, name = "Neovide", pid = tonumber(os.getenv("VV_PS_OURS")) })
+  local ours = rec:app({ bundleID = NEOVIDE, name = "Neovide", pid = tonumber(os.getenv("FERRY_PS_OURS")) })
   ours._window = rec:window({ id = 91, app = ours })
-  local theirs = rec:app({ bundleID = NEOVIDE, name = "Neovide", pid = tonumber(os.getenv("VV_PS_OTHER")) })
+  local theirs = rec:app({ bundleID = NEOVIDE, name = "Neovide", pid = tonumber(os.getenv("FERRY_PS_OTHER")) })
   rec.frontmost = theirs
   check("ps: a Neovide on another --server socket is not ours", false, (h.isFocused()))
   rec.frontmost = ours
@@ -408,14 +408,14 @@ do
   check("ps: read through /bin/ps once per pid", 2, n)
 end
 
--- Full controller cycle: instance.lua + this adapter, real voice-vim-host.
+-- Full controller cycle: instance.lua + this adapter, real ferry-host.
 do
   local rec = stub.install()
   rec.execStatus = true
   local sock = work .. "/i.sock"
   local _, tw = other(rec)
-  local env = "VOICE_VIM_SOCK='" .. sock .. "' VOICE_VIM_NOTES_DIR='" .. work .. "/notes' "
-    .. "VOICE_VIM_HOST_NVIM_FLAGS=--clean '" .. hostbin .. "' "
+  local env = "FERRY_SOCK='" .. sock .. "' FERRY_NOTES_DIR='" .. work .. "/notes' "
+    .. "FERRY_HOST_NVIM_FLAGS=--clean '" .. hostbin .. "' "
   local host = new(rec, { sock = sock, searchPath = { work .. "/fakes" } })
   local c = stub.load(root .. "/hammerspoon/instance.lua").new({
     host = host, root = root, sock = sock, notesDir = work .. "/notes", nvimFlags = "--clean",
@@ -435,7 +435,7 @@ do
   check("cycle: logs show: host focused after", true, rec:hasLog("i", "show: host focused after"))
   check("cycle: first window framed", win, rec.setFrames[1] and rec.setFrames[1].win)
   check("cycle: note in insert mode with target 4242", "i com.example.target 4242",
-    sh("nvim --server '" .. sock .. "' --remote-expr 'mode().\" \".b:voicevim.target.\" \".b:voicevim.window'"))
+    sh("nvim --server '" .. sock .. "' --remote-expr 'mode().\" \".b:ferry.target.\" \".b:ferry.window'"))
   c.toggle()
   check("cycle: toggle while focused runs draft", true,
     has(rec.executes[#rec.executes].cmd, "'draft'"))
@@ -454,14 +454,14 @@ end
 os.exit(fail)
 LUA
 
-VV_ROOT="$root" VV_WORK="$work" perl -e 'alarm 60; exec @ARGV' nvim -l "$work/spec.lua" 2>&1
+FERRY_ROOT="$root" FERRY_WORK="$work" perl -e 'alarm 60; exec @ARGV' nvim -l "$work/spec.lua" 2>&1
 status=$?
 echo  # nvim -l leaves the last line unterminated
 
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: want '$2' got '$3'"; status=1; fi; }
 check "fake osascript never called" 0 "$(grep -c '^CALL osascript' "$work/calls")"
 check "fakes called only by the launch commands run above" 2 "$(grep -c '^CALL ' "$work/calls")"
-check "voice-vim.lua loads hosts/neovide.lua" 1 "$(grep -c 'dofile(root .. "/hammerspoon/hosts/neovide.lua")' "$root/hammerspoon/voice-vim.lua")"
+check "ferry.lua loads hosts/neovide.lua" 1 "$(grep -c 'dofile(root .. "/hammerspoon/hosts/neovide.lua")' "$root/hammerspoon/ferry.lua")"
 lj=$(command -v luajit || echo /opt/homebrew/bin/luajit)
 if [ -x "$lj" ]; then
   check "hosts/neovide.lua parses under LuaJIT" ok "$("$lj" -e "assert(loadfile('$root/hammerspoon/hosts/neovide.lua')) print('ok')" 2>&1)"

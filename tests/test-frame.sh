@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Frame logic: lua/voice-vim/frame.lua (default, restore, clamping).
+# Frame logic: lua/ferry/frame.lua (default, restore, clamping).
 # Runs the spec under LuaJIT and under nvim -l; also Lua 5.4 when installed.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

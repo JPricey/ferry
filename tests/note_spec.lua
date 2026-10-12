@@ -1,22 +1,22 @@
--- Submit, Cancel and Hide in lua/voice-vim/note.lua, with a recording stub
+-- Submit, Cancel and Hide in lua/ferry/note.lua, with a recording stub
 -- host and a temp history database.
 -- Key-driven cases (:q, :wq, <C-x>, ZQ) run against a real server in
 -- tests/test-note.sh, where typed input goes through the main loop.
 -- Run by tests/test-note.sh: nvim --headless --clean -l tests/note_spec.lua <root> <work>
--- The shell sets VOICE_VIM_DB, VOICE_VIM_NOTES_DIR and puts a recording
+-- The shell sets FERRY_DB, FERRY_NOTES_DIR and puts a recording
 -- fake `open` first on PATH (it fails while <work>/open.fail exists).
 local root, work = arg[1], arg[2]
 vim.opt.rtp:prepend(root)
-local note = require("voice-vim.note")
-local flow = require("voice-vim.flow")
-local db = root .. "/bin/voice-vim-db"
+local note = require("ferry.note")
+local flow = require("ferry.flow")
+local db = root .. "/bin/ferry-db"
 
 -- Never touch the system clipboard: a fake + and * provider.
 -- clip_mode "throw" makes the + copy raise, "drop" makes it silently keep
 -- nothing (nil: a working copy).
 local clip, clip_mode = {}, nil
 vim.g.clipboard = {
-  name = "voice-vim-test",
+  name = "ferry-test",
   copy = {
     ["+"] = function(lines)
       if clip_mode == "throw" then error("fake clipboard copy failed") end
@@ -84,7 +84,7 @@ local function show(seedtext)
     vim.fn.writefile(vim.split(seedtext, "\n", { plain = true }), seed)
   end
   local path = note.show({ target = "com.example.app", window = "4242", seed = seed })
-  return path, vim.b.voicevim.id, vim.api.nvim_get_current_buf()
+  return path, vim.b.ferry.id, vim.api.nvim_get_current_buf()
 end
 local function set(lines) vim.api.nvim_buf_set_lines(0, 0, -1, false, lines) end
 local function kinds() local k = {}; for _, c in ipairs(calls) do k[#k + 1] = c[1] end; return table.concat(k, ",") end
@@ -100,7 +100,7 @@ check("note has Submit/Cancel/Hide commands and ZZ, <C-x>, ZQ maps",
 check("note has <C-q> maps (n, i) to Cancel", "<Cmd>Cancel<CR> <Cmd>Cancel<CR>",
   vim.fn.maparg("<C-q>", "n") .. " " .. vim.fn.maparg("<C-q>", "i"))
 check("note has <C-s> maps (n, i) to the Flow toggle", true,
-  vim.fn.maparg("<C-s>", "n"):find("voice-vim.flow'.toggle()", 1, true) ~= nil
+  vim.fn.maparg("<C-s>", "n"):find("ferry.flow'.toggle()", 1, true) ~= nil
   and vim.fn.maparg("<C-s>", "i") == vim.fn.maparg("<C-s>", "n"))
 set({ "hello world", "second line" })
 vim.cmd("Submit")
@@ -112,8 +112,8 @@ check("Submit records a submitted row with the text", "submitted hello world",
   outcome(id1) .. " " .. ((row(id1) or {}).preview or ""))
 check("Submit drops the note file", 0, vim.fn.filereadable(p1))
 check("Submit leaves the server running", vim.NIL, vim.v.exiting)
-check("submit file is <notes>/outbox/<id>.md", vim.env.VOICE_VIM_NOTES_DIR .. "/outbox/" .. id1 .. ".md", c[2].file)
-local blank_id = (vim.b.voicevim or {}).id
+check("submit file is <notes>/outbox/<id>.md", vim.env.FERRY_NOTES_DIR .. "/outbox/" .. id1 .. ".md", c[2].file)
+local blank_id = (vim.b.ferry or {}).id
 check("after Submit the window shows a new empty note with :Hide and the :q abbreviation",
   "markdown 2 true ",
   table.concat({ vim.bo.filetype, vim.fn.exists(":Hide"),
@@ -146,11 +146,11 @@ check("blank Submit drops the row", "none", outcome(id3))
 
 -- --- unchanged-seed Submit -----------------------------------------------
 reset()
-local blank4 = vim.b.voicevim.id
+local blank4 = vim.b.ferry.id
 local _, id4 = show("selected text\nline two")
 local function has_buf(id)
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_valid(b) and (vim.b[b].voicevim or {}).id == id then return true end
+    if vim.api.nvim_buf_is_valid(b) and (vim.b[b].ferry or {}).id == id then return true end
   end
   return false
 end
@@ -168,7 +168,7 @@ set({ "keep me" })
 vim.cmd("Hide")
 check("Hide calls host.hide only", "hide", kinds())
 check("Hide writes the draft", "keep me\n", readfile(p5))
-check("Hide sets g:voicevim_draft", p5, vim.g.voicevim_draft)
+check("Hide sets g:ferry_draft", p5, vim.g.ferry_draft)
 -- history start runs in the background.
 vim.wait(3000, function() return outcome(id5) == "open" end, 20)
 check("Hide leaves the row open", "open", outcome(id5))
@@ -181,12 +181,12 @@ local _, id9 = show()
 local fin = work .. "/fin.txt"
 vim.fn.writefile({ "listed elsewhere" }, fin)
 vim.fn.system({ db, "finish", id9, "submitted", fin })
-local hist = require("voice-vim.history")
+local hist = require("ferry.history")
 local function listed(id)
   for _, r in ipairs(hist.load()) do if r.id == id then return true end end
   return false
 end
-check("history excludes b:voicevim.id of the note", false, listed(id9))
+check("history excludes b:ferry.id of the note", false, listed(id9))
 check("history lists other notes", true, listed(id1))
 show()
 vim.cmd("Cancel")
@@ -203,7 +203,7 @@ reset()
 local _, idh = show()
 check("show: line 1 is the captured target, cursor on row 2", "to: app:com.example.app#4242 2",
   vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] .. " " .. vim.api.nvim_win_get_cursor(0)[1])
-check("show: b:voicevim.auto_spec is the header's spec", "app:com.example.app#4242", vim.b.voicevim.auto_spec)
+check("show: b:ferry.auto_spec is the header's spec", "app:com.example.app#4242", vim.b.ferry.auto_spec)
 body({ "only the body", "two" })
 vim.cmd("Submit")
 check("Submit: host.submit gets the header's target and window, the file only the body",
@@ -249,7 +249,7 @@ for _, case in ipairs({
   check("to: " .. case[1] .. ": no host call, + holds the body", " keep this\nsafe",
     kinds() .. " " .. table.concat(clip["+"] or {}, "\n"))
   check("to: " .. case[1] .. ": notifies copied — target", true,
-    (notices[#notices] or ""):find('voice-vim: copied — target "' .. case[1] .. '" ' .. case[2], 1, true) ~= nil)
+    (notices[#notices] or ""):find('ferry: copied — target "' .. case[1] .. '" ' .. case[2], 1, true) ~= nil)
   vim.wait(3000, function() return outcome(idb) == "open" end, 20)
   check("to: " .. case[1] .. ": note still current and shown, row open",
     idb .. " to: " .. case[1] .. "|keep this|safe open",
@@ -272,7 +272,7 @@ vim.cmd("Cancel")
 note.show({ target = "", window = "" })
 check("nothing captured: the header is to: clipboard", "to: clipboard|", lines())
 local lb = vim.api.nvim_get_current_buf()
-local lm = vim.b[lb].voicevim; lm.auto_spec = nil; vim.b[lb].voicevim = lm
+local lm = vim.b[lb].ferry; lm.auto_spec = nil; vim.b[lb].ferry = lm
 set({ "old draft" })
 show()
 check("a draft from before headers gets one above its text", "to: app:com.example.app#4242|old draft", lines())
@@ -282,7 +282,7 @@ vim.cmd("Cancel")
 -- module without auto_spec) is never stacked under a second one.
 local function drop_auto()
   local b = vim.api.nvim_get_current_buf()
-  local m = vim.b[b].voicevim; m.auto_spec = nil; vim.b[b].voicevim = m
+  local m = vim.b[b].ferry; m.auto_spec = nil; vim.b[b].ferry = m
 end
 reset()
 note.show({ target = "com.a", window = "1" })
@@ -369,7 +369,7 @@ check(":Copy of a blank body cancels: hide, + untouched, row dropped", "hide  no
 
 -- A clipboard copy that throws or silently drops the text: the note is
 -- never finished on a copy that did not take (GT 2).
-local CLIP_FAIL = "voice-vim: could not copy to the clipboard — note kept"
+local CLIP_FAIL = "ferry: could not copy to the clipboard — note kept"
 for _, mode in ipairs({ "throw", "drop" }) do
   for _, case in ipairs({
     { ":Copy", nil, "Copy" },
@@ -501,9 +501,9 @@ local function wait_for(pat) vim.wait(3000, function() return opened():find(pat,
 show()
 set({ "via hammerspoon" })
 vim.cmd("Submit")
-wait_for("voicevim-submit")
-local line = opened():match("[^\n]*voicevim%-submit[^\n]*") or ""
-check("default host runs open -g with the submit URL", true, line:find("^%-g hammerspoon://voicevim%-submit%?file=") ~= nil)
+wait_for("ferry-submit")
+local line = opened():match("[^\n]*ferry%-submit[^\n]*") or ""
+check("default host runs open -g with the submit URL", true, line:find("^%-g hammerspoon://ferry%-submit%?file=") ~= nil)
 check("submit URL contains target=com.example.app&window=4242", true,
   line:find("target=com.example.app&window=4242", 1, true) ~= nil)
 local file = vim.uri_decode(line:match("file=([^&]*)") or "")
@@ -514,8 +514,8 @@ os.remove(log)
 show()
 set({ "cancel via hammerspoon" })
 vim.cmd("Cancel")
-wait_for("voicevim-hide")
-check("default host hides via hammerspoon://voicevim-hide", "-g hammerspoon://voicevim-hide\n", opened())
+wait_for("ferry-hide")
+check("default host hides via hammerspoon://ferry-hide", "-g hammerspoon://ferry-hide\n", opened())
 
 -- open fails: text goes on the clipboard with a notice.
 vim.fn.writefile({}, work .. "/open.fail")
@@ -525,7 +525,7 @@ set({ "clipboard fallback" })
 vim.cmd("Submit")
 vim.wait(3000, function() return #notices > 0 end, 20)
 check("failed open copies the text to +", "clipboard fallback", table.concat(clip["+"] or {}, "\n"))
-check("failed open notifies copied — paste manually", "voice-vim: copied — paste manually", notices[1])
+check("failed open notifies copied — paste manually", "ferry: copied — paste manually", notices[1])
 for _, mode in ipairs({ "throw", "drop" }) do
   notices = {}; clip["+"] = nil; clip_mode = mode
   show()

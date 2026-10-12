@@ -1,7 +1,7 @@
--- Tests for lua/voice-vim/store.lua against tests/fixtures/notes/*.md.
+-- Tests for lua/ferry/store.lua against tests/fixtures/notes/*.md.
 -- Run through tests/test-store.sh, which sets STORE_TMP to a fresh temp dir.
 local here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or "."
-local S = dofile(here .. "/../lua/voice-vim/store.lua")
+local S = dofile(here .. "/../lua/ferry/store.lua")
 local fixtures = here .. "/fixtures/notes"
 local tmp = os.getenv("STORE_TMP")
 if not tmp or tmp == "" then print("FAIL STORE_TMP not set"); os.exit(1) end

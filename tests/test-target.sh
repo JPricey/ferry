@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Target specs: lua/voice-vim/target.lua (parse, render, split, join, label).
+# Target specs: lua/ferry/target.lua (parse, render, split, join, label).
 # Runs the spec under LuaJIT and under nvim -l; also Lua 5.4 when installed.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Delivery core: lua/voice-vim/delivery.lua with a fake env and clock.
+# Delivery core: lua/ferry/delivery.lua with a fake env and clock.
 # Runs the spec under LuaJIT and under nvim -l; also Lua 5.4 when installed.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

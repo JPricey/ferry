@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
-"""voice-vim-notes: the search index over the notes folder.
+"""ferry-notes: the search index over the notes folder.
 
-  voice-vim-notes index <file>...      (re)index these note files; a missing
+  ferry-notes index <file>...      (re)index these note files; a missing
                                        file drops its row
-  voice-vim-notes sync                 reindex files whose mtime or size
+  ferry-notes sync                 reindex files whose mtime or size
                                        changed, drop rows of gone files
-  voice-vim-notes rebuild              drop the index and index every file
-  voice-vim-notes list [--limit N] [--exclude ID] [--query Q]
+  ferry-notes rebuild              drop the index and index every file
+  ferry-notes list [--limit N] [--exclude ID] [--query Q]
                                        JSON array: pinned first, then
                                        updated newest first; --query
                                        searches note bodies (FTS5)
-  voice-vim-notes get <id>             JSON object, with the body as "text"
-  voice-vim-notes pin <id> on|off      set or remove `pinned: true`
-  voice-vim-notes state <id> <state>   draft | sent | cancelled
-  voice-vim-notes delete <id>          move the file to <notes>/.trash/
-  voice-vim-notes path [<id>]          print the index path, or a note's path
+  ferry-notes get <id>             JSON object, with the body as "text"
+  ferry-notes pin <id> on|off      set or remove `pinned: true`
+  ferry-notes state <id> <state>   draft | sent | cancelled
+  ferry-notes delete <id>          move the file to <notes>/.trash/
+  ferry-notes path [<id>]          print the index path, or a note's path
 
-Notes: $VOICE_VIM_NOTES_DIR or ~/notes/scratchpads (top-level *.md files;
+Notes: $FERRY_NOTES_DIR or ~/notes/scratchpads (top-level *.md files;
 dot files and .trash are skipped). The files are the source of truth
 (GROUND_TRUTHS decision 11); this index can always be rebuilt from them.
-Index: $VOICE_VIM_INDEX or ~/Library/Application Support/voice-vim/index.sqlite
+Index: $FERRY_INDEX or ~/Library/Application Support/ferry/index.sqlite
 
-Frontmatter is parsed exactly as lua/voice-vim/store.lua parses it
+Frontmatter is parsed exactly as lua/ferry/store.lua parses it
 (tests/test-notes-index.sh compares the two on every fixture). pin and
 state edit only the frontmatter lines; the body bytes are never rewritten.
 """
@@ -57,16 +57,16 @@ STATES = ("draft", "sent", "cancelled")
 
 def notes_dir():
     return os.path.abspath(os.path.expanduser(
-        os.environ.get("VOICE_VIM_NOTES_DIR") or "~/notes/scratchpads"))
+        os.environ.get("FERRY_NOTES_DIR") or "~/notes/scratchpads"))
 
 
 def index_path():
-    return os.environ.get("VOICE_VIM_INDEX") or os.path.expanduser(
-        "~/Library/Application Support/voice-vim/index.sqlite")
+    return os.environ.get("FERRY_INDEX") or os.path.expanduser(
+        "~/Library/Application Support/ferry/index.sqlite")
 
 
 # ---------------------------------------------------------------------------
-# Frontmatter: a port of lua/voice-vim/store.lua's parse. Text is decoded
+# Frontmatter: a port of lua/ferry/store.lua's parse. Text is decoded
 # with surrogateescape so bytes that are not UTF-8 survive like in Lua.
 
 def split_lines(s):
@@ -237,7 +237,7 @@ def meta_str(meta, key, default=""):
 # Fields shown in the browser
 
 def short_app(target):
-    """Short app name for a target spec (grammar in lua/voice-vim/target.lua)."""
+    """Short app name for a target spec (grammar in lua/ferry/target.lua)."""
     t = (target or "").strip()
     if not t:
         return ""

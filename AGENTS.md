@@ -1,4 +1,4 @@
-# voice-vim
+# ferry
 
 Dictate with Wispr Flow into a Vim buffer, edit, then send the result where
 it needs to go. Today that is the text field that was focused when you
@@ -42,21 +42,21 @@ defines the loop that moves the milestones forward with subagents.
 Layout is in `README.md`. User-facing usage is in `USER_GUIDE.md` (walkthrough)
 and `guide.md` (terse feature reference). Run
 `bash tests/test-history.sh` after touching the database helper or the
-sidebar (`lua/voice-vim/history.lua`),
+sidebar (`lua/ferry/history.lua`),
 `bash tests/test-delivery.sh` and `bash tests/test-hammerspoon.sh` after
-touching `lua/voice-vim/delivery.lua` or the Hammerspoon module,
-`bash tests/test-migrate.sh` after touching `bin/voice-vim-migrate-init`,
+touching `lua/ferry/delivery.lua` or the Hammerspoon module,
+`bash tests/test-migrate.sh` after touching `bin/ferry-migrate-init`,
 `bash tests/test-install.sh` after touching `install.sh`,
-`bash tests/test-frame.sh` after touching `lua/voice-vim/frame.lua`,
-`bash tests/test-flow.sh` after touching `lua/voice-vim/flow.lua`,
+`bash tests/test-frame.sh` after touching `lua/ferry/frame.lua`,
+`bash tests/test-flow.sh` after touching `lua/ferry/flow.lua`,
 `bash tests/test-window-frame.sh` after touching `hammerspoon/window-frame.lua`,
-`bash tests/test-target.sh` after touching `lua/voice-vim/target.lua`,
-`bash tests/test-store.sh` after touching `lua/voice-vim/store.lua`,
-`bash tests/test-notes-index.sh` after touching `bin/voice-vim-notes`,
-`bash tests/test-tmux.sh` after touching `lua/voice-vim/tmux.lua` (its own `tmux -L voicevim-test` server only),
+`bash tests/test-target.sh` after touching `lua/ferry/target.lua`,
+`bash tests/test-store.sh` after touching `lua/ferry/store.lua`,
+`bash tests/test-notes-index.sh` after touching `bin/ferry-notes`,
+`bash tests/test-tmux.sh` after touching `lua/ferry/tmux.lua` (its own `tmux -L ferry-test` server only),
 and `bash tests/test-host.sh`, `bash tests/test-note.sh` and
-`bash tests/test-instance.sh` after touching `bin/voice-vim-host`,
-`lua/voice-vim/note.lua`, `lua/voice-vim/gui.lua` or `hammerspoon/instance.lua`, and
+`bash tests/test-instance.sh` after touching `bin/ferry-host`,
+`lua/ferry/note.lua`, `lua/ferry/gui.lua` or `hammerspoon/instance.lua`, and
 `bash tests/test-host-neovide.sh` after touching `hammerspoon/hosts/neovide.lua`.
 Hammerspoon is installed and the module is linked into `~/.hammerspoon/`;
 Accessibility permission must be granted manually, and Hammerspoon must be
@@ -80,27 +80,27 @@ relaunched after granting it.
 
 ## Do not touch the live system
 
-Joe's installed voice-vim is this repo: `~/.hammerspoon/voice-vim.lua` is a
+Joe's installed ferry is this repo: `~/.hammerspoon/ferry.lua` is a
 symlink into it. Edits here go live the next time Hammerspoon reloads.
-Joe's running nvim server also reloads `lua/voice-vim/note.lua` on its next
+Joe's running nvim server also reloads `lua/ferry/note.lua` on its next
 show when the note API version changes. So uncommitted edits in the main
-checkout go live too: work that touches `lua/voice-vim/`, `hammerspoon/` or
-`bin/voice-vim-host` happens in a git worktree, and only verified commits
+checkout go live too: work that touches `lua/ferry/`, `hammerspoon/` or
+`bin/ferry-host` happens in a git worktree, and only verified commits
 land in the main checkout.
 
 - Do not reload or relaunch Hammerspoon (`hs -c`, `hs.reload()`), run
   `install.sh`, or edit `~/.hammerspoon/` or `~/.config/karabiner/`. Joe
   does these as Joe checks.
-- Do not trigger the real hotkey, open voice-vim windows, or send
+- Do not trigger the real hotkey, open ferry windows, or send
   keystrokes or pastes to other apps.
-- Tests use a temp `VOICE_VIM_DB`, never the real history database at
-  `~/Library/Application Support/voice-vim/history.sqlite`.
+- Tests use a temp `FERRY_DB`, never the real history database at
+  `~/Library/Application Support/ferry/history.sqlite`.
 - Tests use their own nvim servers (`nvim --headless --listen <temp sock>`)
-  and their own tmux server (`tmux -L voicevim-test`), never Joe's.
+  and their own tmux server (`tmux -L ferry-test`), never Joe's.
 - Never write to Wispr Flow's database or config.
-- Fleet (`~/Code/fleet`) will use voice-vim as its composer, through the
+- Fleet (`~/Code/fleet`) will use ferry as its composer, through the
   contract in `planning.md` → "Fleet integration". Do not edit the fleet
-  repo from here. voice-vim must keep working with fleet absent.
+  repo from here. ferry must keep working with fleet absent.
 
 ## Owner and environment
 
@@ -170,15 +170,15 @@ the personal dictionary, or by mirroring edits into Flow's `History` rows.
 **One instance.** `start()` loads `hammerspoon/hosts/neovide.lua` and, when
 Neovide is installed, builds the `hammerspoon/instance.lua` controller with
 it (deliver = `M.submit`, see Delivery below), binds
-`voicevim-submit`/`voicevim-hide`, and pre-warms the nvim server
-(`bin/voice-vim-host ensure` as an hs.task). The hotkey and `voicevim-start`
+`ferry-submit`/`ferry-hide`, and pre-warms the nvim server
+(`bin/ferry-host ensure` as an hs.task). The hotkey and `ferry-start`
 call `M.toggle`: from another app it captures app + window and runs
-`voice-vim-host show` (Neovide is launched with `--server <sock>` when no UI
+`ferry-host show` (Neovide is launched with `--server <sock>` when no UI
 is attached), then unhides our Neovide; from the note it runs `draft`, hides
 Neovide and refocuses that window (while Flow is recording, `draft` answers
 `waiting for flow` and the note hides itself after Flow's paste). The note
-(`lua/voice-vim/note.lua`) sends `voicevim-submit` (hide, then Delivery) or
-`voicevim-hide`. The adapter only touches the Neovide process started with
+(`lua/ferry/note.lua`) sends `ferry-submit` (hide, then Delivery) or
+`ferry-hide`. The adapter only touches the Neovide process started with
 our `--server <sock>`. No selection grab unless `captureSelection = true`.
 Setup happens once, synchronously, in `start()`: if Neovide is missing, or
 setting up the controller raises, it logs a `mode:` line and alerts once
@@ -200,13 +200,13 @@ saves moves.
 
 **Hold to talk.** `talkHotkey` (default Ctrl+Option+B, `false` = off, never
 the same combo as `hotkey`) binds pressed `M.talkDown` and released
-`M.talkUp`, no repeat; `voicevim-talk?state=down|up` does the same (for
+`M.talkUp`, no repeat; `ferry-talk?state=down|up` does the same (for
 Karabiner). `c.talkDown` first starts Flow itself (`open -g
 wispr-flow://start-hands-free` as an hs.task), then runs `show --talk`
 (nvim's `flow.adopt_start`: recording, no URL) or, with the note focused,
 `talk` (insert at the cursor, never hides). `c.talkUp` polls until the start
 task exited, our Neovide is focused, nvim took the recording and no
-modifier is down, then runs `voice-vim-host release --force` once (a stop
+modifier is down, then runs `ferry-host release --force` once (a stop
 even when nvim says idle: Ctrl-S already stopped Flow, or nvim never took
 it; a stop to an idle Flow is harmless): every stop goes through nvim's
 Flow queue, so Ctrl-X/Ctrl-Q right after take over its wait. A paste with
@@ -216,8 +216,8 @@ land elsewhere), one alert by cause. A Submit/Cancel/Hide wait already
 running in nvim (`flow-state` waiting): no stop, no alert. Without an instance, talkDown alerts like a press and
 never starts Flow.
 
-**Delivery.** `voicevim-submit?file=&target=&window=` hides Neovide, then
-`M.submit` reads and deletes the file and runs `lua/voice-vim/delivery.lua`
+**Delivery.** `ferry-submit?file=&target=&window=` hides Neovide, then
+`M.submit` reads and deletes the file and runs `lua/ferry/delivery.lua`
 (loaded with `dofile`, effects passed in as an `env` built from `hs.*`):
 put the text on the clipboard, focus the target window (or activate the
 app if the window is gone), poll every 0.05 s up to `confirmTimeout`
@@ -226,15 +226,15 @@ post one global Cmd+V (`hs.eventtap.keyStroke` with no app). The target
 window is looked up once per submit. If it never comes to front, or
 delivery.lua fails to load or errors, nothing is pasted and it alerts
 "copied — paste manually". The clipboard is not restored. Each step is
-logged to the `voice-vim` logger.
+logged to the `ferry` logger.
 
-**History.** The note calls `bin/voice-vim-db start` when a note gets
+**History.** The note calls `bin/ferry-db start` when a note gets
 going and `finish` on submit or cancel, recording target, seed, final
 text, and outcome in
-`~/Library/Application Support/voice-vim/history.sqlite`. Empty cancels
+`~/Library/Application Support/ferry/history.sqlite`. Empty cancels
 are dropped and drafts stay `open` rows the sidebar hides.
-`lua/voice-vim/history.lua` renders the sidebar by shelling out to
-`voice-vim-db list` (JSON); the note layout opens it on the left.
+`lua/ferry/history.lua` renders the sidebar by shelling out to
+`ferry-db list` (JSON); the note layout opens it on the left.
 
 ## Conventions
 

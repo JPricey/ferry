@@ -1,7 +1,7 @@
--- Tests for lua/voice-vim/delivery.lua with a fake env and a manual clock.
+-- Tests for lua/ferry/delivery.lua with a fake env and a manual clock.
 -- Run: luajit tests/delivery_spec.lua  (or nvim -l tests/delivery_spec.lua)
 local here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or "."
-local D = dofile(here .. "/../lua/voice-vim/delivery.lua")
+local D = dofile(here .. "/../lua/ferry/delivery.lua")
 
 local fail = 0
 local function check(name, want, got)

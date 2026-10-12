@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""voice-vim-db: owns the session history database.
+"""ferry-db: owns the session history database.
 
-  voice-vim-db start  <id> <target> <seed-file>      record a new session
-  voice-vim-db finish <id> <outcome> <final-file> [<target>]
+  ferry-db start  <id> <target> <seed-file>      record a new session
+  ferry-db finish <id> <outcome> <final-file> [<target>]
                                                       record how it ended (and
                                                       where it went: a target spec)
-  voice-vim-db list   [--limit N] [--exclude ID]      JSON array, newest first
-  voice-vim-db get    <id>                            JSON object
-  voice-vim-db delete <id>
-  voice-vim-db path                                   print the database path
+  ferry-db list   [--limit N] [--exclude ID]      JSON array, newest first
+  ferry-db get    <id>                            JSON object
+  ferry-db delete <id>
+  ferry-db path                                   print the database path
 
-Database: $VOICE_VIM_DB or ~/Library/Application Support/voice-vim/history.sqlite
-Set VOICE_VIM_HISTORY=0 to make start/finish no-ops.
+Database: $FERRY_DB or ~/Library/Application Support/ferry/history.sqlite
+Set FERRY_HISTORY=0 to make start/finish no-ops.
 """
 import json
 import os
@@ -49,8 +49,8 @@ APP_NAMES = {
 
 
 def db_path():
-    return os.environ.get("VOICE_VIM_DB") or os.path.expanduser(
-        "~/Library/Application Support/voice-vim/history.sqlite")
+    return os.environ.get("FERRY_DB") or os.path.expanduser(
+        "~/Library/Application Support/ferry/history.sqlite")
 
 
 def connect():
@@ -74,7 +74,7 @@ def read(path):
 
 
 def short_app(target):
-    """Short label for a target spec (lua/voice-vim/target.lua) or, in older
+    """Short label for a target spec (lua/ferry/target.lua) or, in older
     rows, a bare bundle id."""
     if not target:
         return "?"
@@ -127,7 +127,7 @@ def main(argv):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     cmd, args = argv[0], argv[1:]
-    enabled = os.environ.get("VOICE_VIM_HISTORY", "1") != "0"
+    enabled = os.environ.get("FERRY_HISTORY", "1") != "0"
 
     if cmd == "path":
         print(db_path())

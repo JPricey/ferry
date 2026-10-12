@@ -1,8 +1,8 @@
--- hosts/neovide.lua: Neovide as the host window of the one voice-vim
+-- hosts/neovide.lua: Neovide as the host window of the one ferry
 -- instance (GROUND_TRUTHS decision 10). Implements the host interface
 -- documented at the top of hammerspoon/instance.lua.
 --
--- Loaded by hammerspoon/voice-vim.lua.
+-- Loaded by hammerspoon/ferry.lua.
 --
 --   local neovide = dofile(root .. "/hammerspoon/hosts/neovide.lua")
 --   if neovide.available() then
@@ -11,8 +11,8 @@
 --       host = host, sock = sock, deliver = M.submit, root = root })
 --   end
 --
--- Pass the same sock to both (default: ${TMPDIR}/voice-vim.sock, as
--- bin/voice-vim-host).
+-- Pass the same sock to both (default: ${TMPDIR}/ferry.sock, as
+-- bin/ferry-host).
 --
 --   launch(cb)   start Neovide attached to the server, off the main thread
 --                (hs.task running /bin/sh): `neovide --server <sock>` under
@@ -22,7 +22,7 @@
 --                once the task started. Then the first new Neovide window
 --                is adopted by hammerspoon/window-frame.lua: it gets the
 --                saved frame (or the default) and moves are saved
---                (hs.settings key voice-vim.windowFrame). If window-frame.lua cannot load,
+--                (hs.settings key ferry.windowFrame). If window-frame.lua cannot load,
 --                a plain poll finds the launched window instead, so a held
 --                show still happens (the frame is then left to Neovide).
 --   show(cb)     app:unhide(), unminimize its window (after Cmd+M),
@@ -43,7 +43,7 @@
 -- reading each Neovide process's command line (`ps -o args= -p <pid>`,
 -- once per pid) for `--server <sock>`.
 --
--- Logs to logger `voice-vim` with prefix `neovide:`. Every hs call is
+-- Logs to logger `ferry` with prefix `neovide:`. Every hs call is
 -- nil-guarded and pcall'd. Launching runs in hs.task; the only blocking
 -- call is one short `ps` per Neovide pid (cached) to find our instance.
 -- Valid for Lua 5.4 and LuaJIT.
@@ -67,12 +67,12 @@ local function defaultRoot()
   return path:match("^(.*)/hammerspoon/hosts/[^/]+$") or path:match("^(.*)/[^/]+$")
 end
 
--- Same default as bin/voice-vim-host.
+-- Same default as bin/ferry-host.
 local function defaultSock()
   local tmp = os.getenv("TMPDIR")
   if not tmp or tmp == "" then tmp = "/tmp" end
   tmp = tmp:gsub("/$", "")
-  return tmp .. "/voice-vim.sock"
+  return tmp .. "/ferry.sock"
 end
 
 local function isFile(p)
@@ -112,8 +112,8 @@ local function defaultAppPaths()
 end
 
 -- cfg:
---   log            hs.logger (default: a "voice-vim" logger)
---   sock           server socket (default ${TMPDIR}/voice-vim.sock)
+--   log            hs.logger (default: a "ferry" logger)
+--   sock           server socket (default ${TMPDIR}/ferry.sock)
 --   root           repo root (default: from this file's path)
 --   windowFrame    a hammerspoon/window-frame.lua object to share (default:
 --                  one is loaded on first use)
@@ -128,7 +128,7 @@ end
 --                  (default: /bin/ps through hs.execute)
 function N.new(cfg)
   cfg = cfg or {}
-  local log = cfg.log or hs.logger.new("voice-vim", "info")
+  local log = cfg.log or hs.logger.new("ferry", "info")
   local o = {
     config = {
       sock = cfg.sock or defaultSock(),

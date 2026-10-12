@@ -1,7 +1,7 @@
--- Tests for lua/voice-vim/target.lua (pure Lua, no vim or hs globals).
+-- Tests for lua/ferry/target.lua (pure Lua, no vim or hs globals).
 -- Run: luajit tests/target_spec.lua  (or nvim -l tests/target_spec.lua)
 local here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or "."
-local T = dofile(here .. "/../lua/voice-vim/target.lua")
+local T = dofile(here .. "/../lua/ferry/target.lua")
 
 local fail = 0
 local function check(name, want, got)
@@ -31,7 +31,7 @@ roundTrip("app:com.tinyspeck.slackmacgap#4242",
 roundTrip("app:com.x", { kind = "app", bundle = "com.x" })
 roundTrip("clipboard", { kind = "clipboard" })
 roundTrip("tmux:default:%12", { kind = "tmux", server = "default", pane = "%12" })
-roundTrip("tmux:voicevim-test:%3", { kind = "tmux", server = "voicevim-test", pane = "%3" })
+roundTrip("tmux:ferry-test:%3", { kind = "tmux", server = "ferry-test", pane = "%3" })
 roundTrip("fleet:task:jpX", { kind = "fleet", id = "task:jpX" })
 
 -- Legacy history rows: a bare bundle id is an app target.
@@ -60,7 +60,7 @@ check("label app+window", "com.x (window 7)", T.label(T.parse("app:com.x#7")))
 check("label app", "com.x", T.label(T.parse("app:com.x")))
 check("label clipboard", "clipboard", T.label(T.parse("clipboard")))
 check("label tmux default", "tmux %12", T.label(T.parse("tmux:default:%12")))
-check("label tmux server", "tmux voicevim-test %3", T.label(T.parse("tmux:voicevim-test:%3")))
+check("label tmux server", "tmux ferry-test %3", T.label(T.parse("tmux:ferry-test:%3")))
 check("label fleet", "fleet task:jpX", T.label(T.parse("fleet:task:jpX")))
 
 -- split / join between buffer lines and (spec, body).

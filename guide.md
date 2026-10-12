@@ -1,11 +1,11 @@
-# voice-vim guide
+# ferry guide
 
-Short reference for what voice-vim does today and how to use it. Updated as
+Short reference for what ferry does today and how to use it. Updated as
 features land; anything not listed here does not exist yet.
 
 ## Show and hide the note
 
-Press **Ctrl+Option+V** in any app. voice-vim's one Neovide window appears
+Press **Ctrl+Option+V** in any app. ferry's one Neovide window appears
 with your note in insert mode, ready for dictation; the window you were in
 (not just its app) becomes the paste target. Press it again from the note to
 hide it and go back to that window.
@@ -64,8 +64,8 @@ also comes back on the next press.
 
 Neovide takes Ghostty's font and size and, when your colorscheme leaves the
 background transparent, Ghostty's background colour (read by
-`voice-vim-host ensure`; `VOICE_VIM_GUI_FONT`, e.g. `Menlo:h14`, and
-`VOICE_VIM_GUI_BG`, e.g. `#001e27`, override them). Ghostty is optional:
+`ferry-host ensure`; `FERRY_GUI_FONT`, e.g. `Menlo:h14`, and
+`FERRY_GUI_BG`, e.g. `#001e27`, override them). Ghostty is optional:
 without it Neovide keeps its own defaults. Terminal Neovim is never changed. Each show leaves only the note and the history sidebar in the
 window, closing other splits such as a file tree.
 
@@ -78,9 +78,9 @@ screen. `rememberFrame = false` leaves the window to Neovide.
 
 ## Start without the hotkey
 
-Opening `hammerspoon://voicevim-start` does what the hotkey does, for
-example `open -g hammerspoon://voicevim-start` from a shell, Karabiner or a
-launcher. `hammerspoon://voicevim-talk?state=down` and `?state=up` are hold
+Opening `hammerspoon://ferry-start` does what the hotkey does, for
+example `open -g hammerspoon://ferry-start` from a shell, Karabiner or a
+launcher. `hammerspoon://ferry-talk?state=down` and `?state=up` are hold
 to talk's key down and key up, for a Karabiner rule (`to` and
 `to_after_key_up`). If a hotkey fails to bind, Hammerspoon shows an alert
 and logs `failed to bind` in its console (`… (talk)` for the talk hotkey);
@@ -89,15 +89,15 @@ an Option-only hotkey logs a warning.
 ## Move off Option+V
 
 Older installs set `hotkey = { { "alt" }, "v" }` in `~/.hammerspoon/init.lua`.
-`./install.sh` (or `bin/voice-vim-migrate-init` alone) removes that one line
+`./install.sh` (or `bin/ferry-migrate-init` alone) removes that one line
 after copying the file to `init.lua.bak`, so the Ctrl+Option+V default
 applies; a custom hotkey line is left alone.
 
 ## Optional Hyper key
 
-`karabiner/voice-vim-hyper.json` turns a held Right Command into Hyper
+`karabiner/ferry-hyper.json` turns a held Right Command into Hyper
 (Cmd+Ctrl+Opt+Shift), still Right Command when tapped alone, and makes
-Hyper+V open `hammerspoon://voicevim-start`. To use it, copy the file to
+Hyper+V open `hammerspoon://ferry-start`. To use it, copy the file to
 `~/.config/karabiner/assets/complex_modifications/`, then enable both rules
 in Karabiner-Elements → Complex Modifications → Add rule.
 
@@ -162,7 +162,7 @@ full text, and `d` deletes it. Cancelled notes with text show a `~`.
 
 It is a normal Neovim buffer with your config, plus markdown filetype, soft
 wrap, spell check on, and no swap or undo files. A note's file lives in
-`$TMPDIR/voice-vim-notes` until it is sent or cancelled; only the history
+`$TMPDIR/ferry-notes` until it is sent or cancelled; only the history
 database keeps the text.
 
 ## Configure
@@ -171,7 +171,7 @@ Edit the block in `~/.hammerspoon/init.lua`, then Reload Config from the
 Hammerspoon menu bar icon:
 
 ```lua
-require("voice-vim").start({
+require("ferry").start({
   hotkey = { { "ctrl", "alt" }, "v" },  -- the trigger (default)
   talkHotkey = { { "ctrl", "alt" }, "b" },  -- hold to talk (default); false turns it off
   captureSelection = false,     -- start a new note with the selection
@@ -183,12 +183,12 @@ require("voice-vim").start({
 
 `mode`, `terminal`, `autoStartFlow`, `windowTitle` and `activateDelay` are
 no longer used: each logs a warning and is ignored. The server socket
-defaults to `$TMPDIR/voice-vim.sock` (`sock` or `VOICE_VIM_SOCK` move it).
+defaults to `$TMPDIR/ferry.sock` (`sock` or `FERRY_SOCK` move it).
 
-`VOICE_VIM_HISTORY=0` stops recording, `VOICE_VIM_SIDEBAR=0` stops the
-sidebar opening automatically, and `VOICE_VIM_DB` moves the database from
-`~/Library/Application Support/voice-vim/history.sqlite`. Note settings and
-mappings live in `lua/voice-vim/note.lua`.
+`FERRY_HISTORY=0` stops recording, `FERRY_SIDEBAR=0` stops the
+sidebar opening automatically, and `FERRY_DB` moves the database from
+`~/Library/Application Support/ferry/history.sqlite`. Note settings and
+mappings live in `lua/ferry/note.lua`.
 
 ## Install and permissions
 
@@ -196,14 +196,16 @@ mappings live in `lua/voice-vim/note.lua`.
 Homebrew), checks for Wispr Flow, `python3` and `sqlite3` (Ghostty is
 optional: Neovide copies its font and colour), links the module, adds the `init.lua` block once, removes an old Option+V line and
 starts or reloads Hammerspoon; a second run changes nothing, and `--check`
-only reports. Then give Hammerspoon Accessibility (System Settings > Privacy
+only reports. An install from before the rename to ferry is moved over once
+(draft saved, old server and window stopped, history, window frame and
+`init.lua` block moved, with a backup). Then give Hammerspoon Accessibility (System Settings > Privacy
 & Security) and relaunch it, since it only checks at launch; without it,
 submit pastes nothing and leaves the text on the clipboard. Neovide should
 be opened once by hand.
 
 ## Troubleshoot
 
-`hs -c 'hs.reload()'` reloads Hammerspoon from a shell. The `voice-vim`
+`hs -c 'hs.reload()'` reloads Hammerspoon from a shell. The `ferry`
 logger in the Hammerspoon console shows the mode at load (`mode: …`), each
 press (`show:`/`hide:` with timings) and each submit's steps (target, focus,
 frontmost checks, keystroke, clipboard). Run

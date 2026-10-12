@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# voice-vim-host: manages the one long-lived voice-vim nvim server and the
+# ferry-host: manages the one long-lived ferry nvim server and the
 # note in it. Every call goes through `nvim --server <sock> --remote-expr`;
-# the server side is lua/voice-vim/note.lua.
+# the server side is lua/ferry/note.lua.
 #
-# Usage: voice-vim-host ensure|show|talk|release|flow-state|draft|attach-cmd|status|stop
+# Usage: ferry-host ensure|show|talk|release|flow-state|draft|attach-cmd|status|stop
 #   ensure                          start the server unless one answers, and
 #                                   load the note module into it
 #   show [--talk] <target> <window> [seed]
@@ -21,25 +21,25 @@
 #                                   (--force: stop even when nvim knows of no
 #                                   recording, prints `forced`)
 #   flow-state                      print `recording`, `waiting` or `idle`
-#   draft                          write the note and set g:voicevim_draft;
+#   draft                          write the note and set g:ferry_draft;
 #                                   prints its path
 #   attach-cmd                      print the command a UI runs to attach
 #   status                          print `up uis=N` or `down`
 #   stop                            quit the server and remove the socket
 #
 # Environment:
-#   VOICE_VIM_SOCK              socket (default ${TMPDIR}/voice-vim.sock)
-#   VOICE_VIM_NOTES_DIR         note folder (default ${TMPDIR}/voice-vim-notes)
-#   VOICE_VIM_HOST_NVIM_FLAGS   extra flags for the server nvim (tests: --clean)
-#   VOICE_VIM_SIDEBAR           0: show opens the note without the history sidebar
-#   VOICE_VIM_GUI_FONT          Neovide font (e.g. "Menlo:h14"); default: Ghostty's
-#   VOICE_VIM_GUI_BG            Neovide background when the colorscheme has none
+#   FERRY_SOCK              socket (default ${TMPDIR}/ferry.sock)
+#   FERRY_NOTES_DIR         note folder (default ${TMPDIR}/ferry-notes)
+#   FERRY_HOST_NVIM_FLAGS   extra flags for the server nvim (tests: --clean)
+#   FERRY_SIDEBAR           0: show opens the note without the history sidebar
+#   FERRY_GUI_FONT          Neovide font (e.g. "Menlo:h14"); default: Ghostty's
+#   FERRY_GUI_BG            Neovide background when the colorscheme has none
 #                               (e.g. "#001e27"); default: Ghostty's
 #
 # GUI settings (font, background) are read from `ghostty +show-config` by
 # ensure, and by show when the server has none yet (a server started before
 # they existed). They only take effect while Neovide is attached
-# (lua/voice-vim/gui.lua). No Ghostty: no GUI settings, nothing else changes.
+# (lua/ferry/gui.lua). No Ghostty: no GUI settings, nothing else changes.
 set -u
 
 # Called from Hammerspoon we inherit a bare launchd PATH, so make sure
@@ -49,9 +49,9 @@ export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$HOME/.local/bin:/usr/local/bi
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(dirname "$here")
 tmp=${TMPDIR:-/tmp}; tmp=${tmp%/}
-sock=${VOICE_VIM_SOCK:-$tmp/voice-vim.sock}
-notes=${VOICE_VIM_NOTES_DIR:-$tmp/voice-vim-notes}
-nvim_bin=$(command -v nvim) || { echo "voice-vim-host: nvim not found" >&2; exit 1; }
+sock=${FERRY_SOCK:-$tmp/ferry.sock}
+notes=${FERRY_NOTES_DIR:-$tmp/ferry-notes}
+nvim_bin=$(command -v nvim) || { echo "ferry-host: nvim not found" >&2; exit 1; }
 
 # Quote a string as a Vim script literal.
 vimstr() { local s=${1//\'/\'\'}; printf "'%s'" "$s"; }
@@ -63,15 +63,15 @@ luastr() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; s=${s//\'/\'\'}; printf '"%s"
 
 # Lua statement: prepend the repo to the runtimepath when it is missing.
 # Plugin managers (lazy.nvim) reset rtp during startup, dropping the
-# `--cmd 'set rtp^=<repo>'` entry, so every call that requires a voice-vim
+# `--cmd 'set rtp^=<repo>'` entry, so every call that requires a ferry
 # module runs this first, in the same round trip.
-rtp_fix="local vvr = $(luastr "$root"); if not vim.tbl_contains(vim.opt.rtp:get(), vvr) then vim.opt.rtp:prepend(vvr) end"
+rtp_fix="local ferryr = $(luastr "$root"); if not vim.tbl_contains(vim.opt.rtp:get(), ferryr) then vim.opt.rtp:prepend(ferryr) end"
 
 # The note module, as a Lua expression (repo put on rtp first). A server
 # started before the module last changed (note.api differs) reloads it,
 # keeping its state and host.
 note_api=8
-note_mod="(function(want) $rtp_fix; local n = require(\"voice-vim.note\"); if n.api == want then return n end; package.loaded[\"voice-vim.note\"] = nil; local ok, m = pcall(require, \"voice-vim.note\"); if not ok then package.loaded[\"voice-vim.note\"] = n; return n end; m.state = n.state; if n.host ~= n.default_host then m.host = n.host end; return m end)($note_api)"
+note_mod="(function(want) $rtp_fix; local n = require(\"ferry.note\"); if n.api == want then return n end; package.loaded[\"ferry.note\"] = nil; local ok, m = pcall(require, \"ferry.note\"); if not ok then package.loaded[\"ferry.note\"] = n; return n end; m.state = n.state; if n.host ~= n.default_host then m.host = n.host end; return m end)($note_api)"
 
 ghostty_bin() {
   command -v ghostty 2>/dev/null && return
@@ -86,7 +86,7 @@ cfg_val() { printf '%s\n' "$2" | sed -n "s/^$1 = //p" | sed '/^[[:space:]]*$/d' 
 # Overrides first, then Ghostty's own settings, then its defaults. Each
 # ghostty call is cut off after 1 s; any failure just leaves a value empty.
 gui_dict() {
-  local font=${VOICE_VIM_GUI_FONT:-} bg=${VOICE_VIM_GUI_BG:-} g user="" def="" fam size
+  local font=${FERRY_GUI_FONT:-} bg=${FERRY_GUI_BG:-} g user="" def="" fam size
   if { [ -z "$font" ] || [ -z "$bg" ]; } && g=$(ghostty_bin); then
     user=$(perl -e 'alarm 1; exec @ARGV' "$g" +show-config </dev/null 2>/dev/null)
     fam=$(cfg_val font-family "$user"); size=$(cfg_val font-size "$user")
@@ -107,39 +107,39 @@ gui_dict() {
 alive() { [ -S "$sock" ] && [ "$(rexpr 1 2>/dev/null)" = 1 ]; }
 
 need_server() {
-  alive || { echo "voice-vim-host: no server on $sock (run ensure)" >&2; exit 1; }
+  alive || { echo "ferry-host: no server on $sock (run ensure)" >&2; exit 1; }
 }
 
-# Call require("voice-vim.note").<fn>(dict) on the server and print the
+# Call require("ferry.note").<fn>(dict) on the server and print the
 # result. Fails if the server is down or the call raised an error.
 call() { # fn dict
   local out
   out=$(rexpr "luaeval('$note_mod.$1(_A)', $2)" 2>&1) \
-    || { echo "voice-vim-host: $1 failed: $out" >&2; return 1; }
+    || { echo "ferry-host: $1 failed: $out" >&2; return 1; }
   printf '%s\n' "$out"
 }
 
 ensure() {
   if alive; then
-    echo "voice-vim-host: running on $sock"
+    echo "ferry-host: running on $sock"
   else
     rm -f "$sock"
-    # shellcheck disable=SC2086 # VOICE_VIM_HOST_NVIM_FLAGS is split on purpose.
-    nohup "$nvim_bin" --headless --listen "$sock" ${VOICE_VIM_HOST_NVIM_FLAGS:-} \
+    # shellcheck disable=SC2086 # FERRY_HOST_NVIM_FLAGS is split on purpose.
+    nohup "$nvim_bin" --headless --listen "$sock" ${FERRY_HOST_NVIM_FLAGS:-} \
       --cmd "set rtp^=${root// /\\ }" </dev/null >/dev/null 2>&1 &
     local i
     for i in $(seq 100); do alive && break; sleep 0.05; done
-    alive || { echo "voice-vim-host: server did not start on $sock" >&2; return 1; }
+    alive || { echo "ferry-host: server did not start on $sock" >&2; return 1; }
     # The server answers before its init has finished; a plugin manager
     # there may still reset rtp. Wait for VimEnter (up to 5 s) so the rtp
     # fix below sticks.
     for i in $(seq 100); do [ "$(rexpr v:vim_did_enter 2>/dev/null)" = 1 ] && break; sleep 0.05; done
-    echo "voice-vim-host: started on $sock"
+    echo "ferry-host: started on $sock"
   fi
   # Put the repo on the runtimepath (note_mod does it; a reused server may
   # lack it) and load the note module now, so the first show is not slowed
   # by it. Also hand it the GUI settings (re-read on every ensure).
-  rexpr "luaeval('(function(a) local n = $note_mod; return require(\"voice-vim.gui\").setup(a) end)(_A)', $(gui_dict))" >/dev/null
+  rexpr "luaeval('(function(a) local n = $note_mod; return require(\"ferry.gui\").setup(a) end)(_A)', $(gui_dict))" >/dev/null
 }
 
 show() { # [--talk] target window [seedfile]
@@ -151,11 +151,11 @@ show() { # [--talk] target window [seedfile]
   # The reply is the note's path, plus a "?gui" line when the server has no
   # GUI settings yet (started before they existed): those are loaded after.
   local out
-  out=$(rexpr "luaeval('(function(a) local p = $note_mod.show(a); if vim.g.voicevim_gui == nil then p = p .. \"\\n?gui\" end; return p end)(_A)', {'target': $(vimstr "${1:-}"), 'window': $(vimstr "${2:-}"), 'seed': $(vimstr "$seed"), 'dir': $(vimstr "$notes"), 'sidebar': $(vimstr "${VOICE_VIM_SIDEBAR:-}"), 'talk': $(vimstr "$talk")})" 2>&1) \
-    || { echo "voice-vim-host: show failed: $out" >&2; return 1; }
+  out=$(rexpr "luaeval('(function(a) local p = $note_mod.show(a); if vim.g.ferry_gui == nil then p = p .. \"\\n?gui\" end; return p end)(_A)', {'target': $(vimstr "${1:-}"), 'window': $(vimstr "${2:-}"), 'seed': $(vimstr "$seed"), 'dir': $(vimstr "$notes"), 'sidebar': $(vimstr "${FERRY_SIDEBAR:-}"), 'talk': $(vimstr "$talk")})" 2>&1) \
+    || { echo "ferry-host: show failed: $out" >&2; return 1; }
   printf '%s\n' "${out%%$'\n'*}"
   case $out in
-    *$'\n?gui') rexpr "luaeval('(function(a) $rtp_fix; return require\"voice-vim.gui\".setup(a) end)(_A)', $(gui_dict))" >/dev/null 2>&1 ;;
+    *$'\n?gui') rexpr "luaeval('(function(a) $rtp_fix; return require\"ferry.gui\".setup(a) end)(_A)', $(gui_dict))" >/dev/null 2>&1 ;;
   esac
   return 0
 }

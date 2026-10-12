@@ -1,6 +1,6 @@
 -- tmux delivery and pane listing. Runs inside nvim (uses vim.system); no
 -- Hammerspoon involved. Targets are parsed target tables from
--- lua/voice-vim/target.lua: { kind = "tmux", server, pane }, where server
+-- lua/ferry/target.lua: { kind = "tmux", server, pane }, where server
 -- `default` means tmux's default socket (no `-L`).
 --
 --   send(t, text, { enter = bool }) -> true | false, err
@@ -12,9 +12,9 @@
 --     every pane on the given servers (default: servers()), Claude Code
 --     panes (current command `claude`) first. Label:
 --     `session:win.pane · title · cwd basename`.
---   servers() -> list from VOICE_VIM_TMUX_SERVERS (comma-separated),
+--   servers() -> list from FERRY_TMUX_SERVERS (comma-separated),
 --     default { "default" }.
-local target = require("voice-vim.target")
+local target = require("ferry.target")
 
 local M = {}
 
@@ -33,7 +33,7 @@ function M.find()
 end
 
 function M.servers()
-  local env = vim.env.VOICE_VIM_TMUX_SERVERS
+  local env = vim.env.FERRY_TMUX_SERVERS
   local out = {}
   for s in (env or ""):gmatch("[^,]+") do
     s = vim.trim(s)
@@ -85,7 +85,7 @@ local function buffer_name()
     math.randomseed(vim.uv.hrtime() % 2147483647 + vim.uv.os_getpid())
     seeded = true
   end
-  return string.format("voicevim-%d-%06d", vim.uv.os_getpid(), math.random(0, 999999))
+  return string.format("ferry-%d-%06d", vim.uv.os_getpid(), math.random(0, 999999))
 end
 
 function M.send(t, text, opts)

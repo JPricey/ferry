@@ -1,4 +1,4 @@
--- voice-vim history sidebar.
+-- ferry history sidebar.
 --
 -- A left split listing past sessions from the history database. Keys:
 --   <CR>  insert the session's text into the dictation buffer
@@ -25,23 +25,23 @@ local function root()
 end
 
 local function db_cmd(args)
-  local cmd = { root() .. "/bin/voice-vim-db" }
+  local cmd = { root() .. "/bin/ferry-db" }
   vim.list_extend(cmd, args)
   local out = vim.fn.system(cmd)
   if vim.v.shell_error ~= 0 then
-    vim.notify("voice-vim: history command failed: " .. table.concat(args, " "), vim.log.levels.WARN)
+    vim.notify("ferry: history command failed: " .. table.concat(args, " "), vim.log.levels.WARN)
     return nil
   end
   return out
 end
 
--- The entry to leave out of the list: the note being written (b:voicevim.id
+-- The entry to leave out of the list: the note being written (b:ferry.id
 -- in the dictation window).
 local function exclude_id()
   local st = M.state
   local win = st.main_win
   if not (win and vim.api.nvim_win_is_valid(win)) then win = vim.api.nvim_get_current_win() end
-  local meta = vim.b[vim.api.nvim_win_get_buf(win)].voicevim
+  local meta = vim.b[vim.api.nvim_win_get_buf(win)].ferry
   if type(meta) == "table" and meta.id and meta.id ~= "" then return meta.id end
   return nil
 end
@@ -121,7 +121,7 @@ end
 -- First line of the note's body: 1, or 2 below a `to:` target header,
 -- which insert and paste_to_target leave alone.
 local function body_start(buf)
-  local spec = require("voice-vim.target").split(vim.api.nvim_buf_get_lines(buf, 0, 1, false))
+  local spec = require("ferry.target").split(vim.api.nvim_buf_get_lines(buf, 0, 1, false))
   return spec and 2 or 1
 end
 
@@ -154,7 +154,7 @@ function M.yank()
   local r = current_row(); if not r then return end
   vim.fn.setreg("+", r.text)
   vim.fn.setreg('"', r.text)
-  vim.notify(string.format("voice-vim: yanked %d words", r.words))
+  vim.notify(string.format("ferry: yanked %d words", r.words))
 end
 
 function M.delete()
@@ -208,7 +208,7 @@ function M.refresh()
   vim.bo[st.buf].modifiable = true
   vim.api.nvim_buf_set_lines(st.buf, 0, -1, false, lines)
   vim.bo[st.buf].modifiable = false
-  local ns = vim.api.nvim_create_namespace("voice-vim-history")
+  local ns = vim.api.nvim_create_namespace("ferry-history")
   vim.api.nvim_buf_clear_namespace(st.buf, ns, 0, -1)
   for _, h in ipairs(hl) do
     vim.api.nvim_buf_add_highlight(st.buf, ns, h[2], h[1], h[3], h[4])
@@ -249,10 +249,10 @@ function M.open()
   vim.cmd("topleft vertical " .. M.width .. " new")
   st.win = vim.api.nvim_get_current_win()
   st.buf = vim.api.nvim_get_current_buf()
-  vim.api.nvim_buf_set_name(st.buf, "voice-vim://history")
+  vim.api.nvim_buf_set_name(st.buf, "ferry://history")
   local bo = vim.bo[st.buf]
   bo.buftype, bo.bufhidden, bo.swapfile, bo.buflisted = "nofile", "wipe", false, false
-  bo.filetype = "voicevim-history"
+  bo.filetype = "ferry-history"
   local wo = vim.wo[st.win]
   wo.number, wo.relativenumber, wo.signcolumn, wo.foldcolumn = false, false, "no", "0"
   wo.wrap, wo.cursorline, wo.winfixwidth, wo.spell, wo.list = false, true, true, false, false
@@ -271,7 +271,7 @@ function M.open()
   map("q", M.close, "close sidebar")
   map("<Esc>", M.close_preview, "close preview")
   -- Send, cancel, hide and Flow keys act on the note, not on this buffer.
-  pcall(function() require("voice-vim.note").bind_note_keys(st.buf) end)
+  pcall(function() require("ferry.note").bind_note_keys(st.buf) end)
 
   vim.api.nvim_create_autocmd("CursorMoved", { buffer = st.buf, callback = M.close_preview })
   vim.api.nvim_create_autocmd("BufWipeout", { buffer = st.buf, callback = function()

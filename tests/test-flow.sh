@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Flow toggle core in lua/voice-vim/flow.lua: tests/flow_spec.lua under
+# Flow toggle core in lua/ferry/flow.lua: tests/flow_spec.lua under
 # headless nvim (--clean). A recording fake `open` is first on PATH, so
 # nothing reaches Wispr Flow. A URL containing "hang" makes it hang.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-work=$(mktemp -d /tmp/vvf.XXXX)
+work=$(mktemp -d /tmp/ferryf.XXXX)
 [ -n "$work" ] && [ -d "$work" ] || { echo "mktemp failed" >&2; exit 1; }
 trap 'rm -rf "$work"' EXIT
 

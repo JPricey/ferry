@@ -1,4 +1,4 @@
--- Stub of the parts of the Hammerspoon `hs` API that voice-vim uses.
+-- Stub of the parts of the Hammerspoon `hs` API that ferry uses.
 --
 -- Runs under `nvim -l` (LuaJIT) or plain Lua. It records every call that has
 -- an effect and lets a test control what the API returns.
@@ -6,7 +6,7 @@
 --   local stub = dofile(root .. "/tests/hs_stub.lua")
 --   local rec = stub.install()          -- sets _G.hs, returns the recorder
 --   rec.hotkeyBind = function() return nil end   -- make hs.hotkey.bind fail
---   local M = stub.load(root .. "/hammerspoon/voice-vim.lua")
+--   local M = stub.load(root .. "/hammerspoon/ferry.lua")
 --   M.start({ hotkey = { { "ctrl", "alt" }, "v" } })
 --   rec:hasLog("e", "failed to bind")
 --

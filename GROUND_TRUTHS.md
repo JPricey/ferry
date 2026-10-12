@@ -1,6 +1,6 @@
 # Ground truths
 
-Single source of truth for what voice-vim must do and the decisions that
+Single source of truth for what ferry must do and the decisions that
 shape it. If code, tests, `planning.md`, `milestones.md`, `guide.md` or any
 other note conflicts with this file, this file is right and the other thing
 is wrong: fix it, or raise the conflict with Joe.
@@ -12,7 +12,7 @@ Joe has not confirmed are not ground truths; they live in `milestones.md`.
 
 Sections:
 
-- **Requirements**: what voice-vim must do.
+- **Requirements**: what ferry must do.
 - **Decisions**: choices that guide the overall design.
 - **Implementation details**: non-obvious or contested implementations,
   with what was done and why.
@@ -27,7 +27,7 @@ Sections:
    text on the clipboard, with an alert.
 3. **Paste into the right window.** The target is the window Joe was in when
    he pressed the hotkey, not just its app.
-4. **One instance, shown and hidden by a hotkey.** Never a second voice-vim
+4. **One instance, shown and hidden by a hotkey.** Never a second ferry
    window. It appears instantly because nvim is already running.
 5. **Write first, choose where it goes after.** Targets: the app and window
    you came from, the clipboard, a tmux pane (Claude Code sessions), and
@@ -35,7 +35,7 @@ Sections:
 6. **A notes app for prompts.** Every note persists, including drafts.
    Browse the history, search it, reopen a note, keep editing, send again.
 7. **One composer for all text.** The same composer serves as `$EDITOR`
-   (Claude Code's Ctrl-G, `git commit`) and as fleet's composer. voice-vim
+   (Claude Code's Ctrl-G, `git commit`) and as fleet's composer. ferry
    keeps working when fleet is absent.
 8. **Low friction for voice.** Keys work from insert mode, so Joe never has
    to leave insert mode to dictate, send or cancel:
@@ -69,16 +69,16 @@ Sections:
 5. **Wispr Flow is read-only to us.** Never write Flow's database or config.
    Integration is the deep links (`wispr-flow://start-hands-free`,
    `stop-hands-free`) and reading its history. No reverse-engineered SDKs.
-6. **This repo is Joe's live install.** `~/.hammerspoon/voice-vim.lua`
+6. **This repo is Joe's live install.** `~/.hammerspoon/ferry.lua`
    links into it. Agents never reload Hammerspoon, run `install.sh`, edit
    `~/.hammerspoon` or `~/.config/karabiner`, trigger the hotkey, open
-   voice-vim windows, or send keys to other apps. Tests use a temp
-   `VOICE_VIM_DB`, their own nvim servers and `tmux -L voicevim-test`.
-   Every commit leaves voice-vim working.
+   ferry windows, or send keys to other apps. Tests use a temp
+   `FERRY_DB`, their own nvim servers and `tmux -L ferry-test`.
+   Every commit leaves ferry working.
 7. **Ghostty sessions open through AppleScript** (`new window with
    configuration`), never `open -na Ghostty.app --args -e`, which starts a
    second Ghostty per session that never quits.
-8. **Fleet integrates through a contract, not code.** voice-vim does not
+8. **Fleet integrates through a contract, not code.** ferry does not
    edit the fleet repo.
 9. **No secrets in the repo.** Wispr's `config.json` holds tokens and is
    never copied here.
@@ -104,7 +104,7 @@ Sections:
    and print absolute paths (for example the full `nvim` path) for anything
    Ghostty runs.
 3. **Detecting Flow's paste.** Flow pastes with Cmd+V, which reaches
-   terminal nvim as a bracketed paste. voice-vim wraps `vim.paste` to know
+   terminal nvim as a bracketed paste. ferry wraps `vim.paste` to know
    that Flow pasted; Neovide's `<D-v>` mapping signals the same. Counting
    inserted bytes was rejected: typing `é`, Enter with autoindent, `o` or
    `u` looked like pastes.
@@ -121,7 +121,7 @@ Sections:
    window.
 7. **Remembering the window frame.** Cancel never calls Hammerspoon, so the
    frame is saved on every move or resize (per-window watcher, debounced)
-   in `hs.settings` key `voice-vim.windowFrame`. Ghostty's opening frame is
+   in `hs.settings` key `ferry.windowFrame`. Ghostty's opening frame is
    never saved. A saved frame whose screen is gone moves onto the main
    screen. `rememberFrame = false` leaves the window to Ghostty.
 8. **Ghostty does not always close the window.** Ghostty 1.3.1 shows

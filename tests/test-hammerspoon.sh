@@ -1,36 +1,36 @@
 #!/usr/bin/env bash
-# Hammerspoon module smoke test: loads hammerspoon/voice-vim.lua against the
+# Hammerspoon module smoke test: loads hammerspoon/ferry.lua against the
 # stub in tests/hs_stub.lua under `nvim -l`. Never touches the real
 # Hammerspoon, opens no windows, sends no keystrokes.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-tmp=$(mktemp -d -t vv-hs)
-# The one-instance cases run a real voice-vim-host server; macOS socket
+tmp=$(mktemp -d -t ferry-hs)
+# The one-instance cases run a real ferry-host server; macOS socket
 # paths max out at 104 bytes, so its folder is short.
-swork=$(mktemp -d /tmp/vvh.XXXX)
+swork=$(mktemp -d /tmp/ferryh.XXXX)
 [ -n "$swork" ] && [ -d "$swork" ] || { echo "mktemp failed" >&2; exit 1; }
 cleanup() {
   pkill -f -- "--listen $swork/" 2>/dev/null
   rm -rf "$tmp" "$swork"
 }
 trap cleanup EXIT
-export VOICE_VIM_DB="$tmp/history.sqlite"
+export FERRY_DB="$tmp/history.sqlite"
 # Recording, failing fakes first on PATH: nothing reaches other apps.
 mkdir -p "$swork/fakes" "$swork/empty"
 for f in osascript open neovide; do
   printf '#!/bin/sh\n{ echo "CALL %s"; echo "$*"; } >> "%s/calls"\nexit 1\n' "$f" "$swork" > "$swork/fakes/$f"
   chmod +x "$swork/fakes/$f"
 done
-# A failing ghostty: voice-vim-host ensure finds no GUI settings.
+# A failing ghostty: ferry-host ensure finds no GUI settings.
 printf '#!/bin/sh\nexit 1\n' > "$swork/fakes/ghostty"; chmod +x "$swork/fakes/ghostty"
 : > "$swork/calls"
-export PATH="$swork/fakes:$PATH" VOICE_VIM_NOTES_DIR="$swork/notes" VOICE_VIM_HOST_NVIM_FLAGS=--clean
-unset VOICE_VIM_SOCK
+export PATH="$swork/fakes:$PATH" FERRY_NOTES_DIR="$swork/notes" FERRY_HOST_NVIM_FLAGS=--clean
+unset FERRY_SOCK
 
 cat > "$tmp/spec.lua" <<'LUA'
-local root = assert(os.getenv("VV_ROOT"))
+local root = assert(os.getenv("FERRY_ROOT"))
 local stub = dofile(root .. "/tests/hs_stub.lua")
-local modpath = root .. "/hammerspoon/voice-vim.lua"
+local modpath = root .. "/hammerspoon/ferry.lua"
 local fail = 0
 
 local function check(name, want, got)
@@ -42,7 +42,7 @@ local function check(name, want, got)
   end
 end
 
-local swork = assert(os.getenv("VV_SWORK"))
+local swork = assert(os.getenv("FERRY_SWORK"))
 -- A fake neovide on the search path: host.available() finds it. start()
 -- only records its pre-warm hs.task (the stub never runs tasks).
 local found = { searchPath = { swork .. "/fakes" }, appPaths = {} }
@@ -67,9 +67,9 @@ end
 do
   local rec, M = fresh()
   M.start(opts())
-  check("voicevim-submit bound", "function", type(rec.urlBinds["voicevim-submit"]))
-  check("voicevim-start bound", "function", type(rec.urlBinds["voicevim-start"]))
-  check("voicevim-talk bound", "function", type(rec.urlBinds["voicevim-talk"]))
+  check("ferry-submit bound", "function", type(rec.urlBinds["ferry-submit"]))
+  check("ferry-start bound", "function", type(rec.urlBinds["ferry-start"]))
+  check("ferry-talk bound", "function", type(rec.urlBinds["ferry-talk"]))
   check("defaults: two hotkey binds", 2, #rec.hotkeyBinds)
   local b = rec.hotkeyBinds[1]
   check("hotkey mods are configured mods", table.concat(M.config.hotkey[1], "+"), table.concat(b.mods, "+"))
@@ -112,9 +112,9 @@ do
   end
   M.start(opts())
   check("failing talk bind: logged with (talk)", true, rec:hasLog("e", "failed to bind ctrl+alt+b (talk)"))
-  check("failing talk bind: one alert naming (talk) and voicevim-talk", true,
+  check("failing talk bind: one alert naming (talk) and ferry-talk", true,
     #rec.alerts == 1 and rec.alerts[1]:find("(talk)", 1, true) ~= nil
-      and rec.alerts[1]:find("voicevim-talk", 1, true) ~= nil)
+      and rec.alerts[1]:find("ferry-talk", 1, true) ~= nil)
   check("failing talk bind: hotkey still bound", true, rec:hasLog("i", "bound ctrl+alt+v"))
 end
 
@@ -128,7 +128,7 @@ do
   check("same combo: one alert", 1, #rec.alerts)
 end
 
--- hammerspoon://voicevim-talk?state=down|up reaches the controller's
+-- hammerspoon://ferry-talk?state=down|up reaches the controller's
 -- talkDown/talkUp; another state warns and does nothing.
 do
   local rec, M = fresh()
@@ -136,12 +136,12 @@ do
   local calls = {}
   M._instance.talkDown = function() calls[#calls + 1] = "down" end
   M._instance.talkUp = function() calls[#calls + 1] = "up" end
-  rec:openURL("voicevim-talk", { state = "down" })
-  rec:openURL("voicevim-talk", { state = "up" })
-  rec:openURL("voicevim-talk", { state = "sideways" })
-  rec:openURL("voicevim-talk", {})
-  check("voicevim-talk: down then up reach talkDown, talkUp", "down,up", table.concat(calls, ","))
-  check("voicevim-talk: other states warn", 2, #rec:findLogs("w", "voicevim-talk: state="))
+  rec:openURL("ferry-talk", { state = "down" })
+  rec:openURL("ferry-talk", { state = "up" })
+  rec:openURL("ferry-talk", { state = "sideways" })
+  rec:openURL("ferry-talk", {})
+  check("ferry-talk: down then up reach talkDown, talkUp", "down,up", table.concat(calls, ","))
+  check("ferry-talk: other states warn", 2, #rec:findLogs("w", "ferry-talk: state="))
   rec.hotkeyBinds[2].fn()
   rec.hotkeyBinds[2].released()
   check("talk hotkey: pressed/released reach talkDown, talkUp", "down,up,down,up", table.concat(calls, ","))
@@ -176,7 +176,7 @@ do
   check("nil bind logs error", true, rec:hasLog("e", "failed to bind ctrl+alt+v"))
   check("nil bind alerts", 1, #rec.alerts)
   check("nil bind keeps no hotkey object", nil, M.hotkeyObj)
-  check("URL start still bound after failed bind", "function", type(rec.urlBinds["voicevim-start"]))
+  check("URL start still bound after failed bind", "function", type(rec.urlBinds["ferry-start"]))
 end
 
 -- hs.hotkey.bind errors: error log with the message, alert, start() returns.
@@ -218,7 +218,7 @@ local function countAlerts(rec, needle)
 end
 
 -- Setup shared by the submit cases: Neovide is frontmost, the target app
--- has window 4242. voicevim-submit goes through the instance (hide, then
+-- has window 4242. ferry-submit goes through the instance (hide, then
 -- M.submit).
 local function submitSetup(focusOnFocus)
   local rec, M = fresh()
@@ -235,7 +235,7 @@ end
 do
   local rec = submitSetup(true)
   local file = submitFile("hello there\n")
-  rec:openURL("voicevim-submit", { file = file, target = "com.example.target", window = "4242" })
+  rec:openURL("ferry-submit", { file = file, target = "com.example.target", window = "4242" })
   rec:runTimers()
   check("delivered: one keystroke", 1, #rec.keyStrokes)
   local k = rec.keyStrokes[1] or { mods = {} }
@@ -258,7 +258,7 @@ end
 do
   local rec = submitSetup(false)
   local file = submitFile("never mind\n")
-  rec:openURL("voicevim-submit", { file = file, target = "com.example.target", window = "4242" })
+  rec:openURL("ferry-submit", { file = file, target = "com.example.target", window = "4242" })
   rec:runTimers()
   check("unconfirmed: no keystroke", 0, #rec.keyStrokes)
   check("unconfirmed: alert shown", 1, countAlerts(rec, "copied — paste manually"))
@@ -273,7 +273,7 @@ do
   local rec = submitSetup(true)
   rec:closeWindow(4242)
   local file = submitFile("window gone")
-  rec:openURL("voicevim-submit", { file = file, target = "com.example.target", window = "4242" })
+  rec:openURL("ferry-submit", { file = file, target = "com.example.target", window = "4242" })
   rec:runTimers()
   check("closed window: app activated", 1, #rec.activations)
   check("closed window: one keystroke", 1, #rec.keyStrokes)
@@ -282,11 +282,11 @@ end
 
 -- delivery.lua missing or erroring, or the repo root lookup erroring: no Lua
 -- error escapes, the text stays on the clipboard, and an alert shows.
-local tmpdir = assert(os.getenv("VV_TMP"))
+local tmpdir = assert(os.getenv("FERRY_TMP"))
 local function fakeRoot(name, body)
   local dir = tmpdir .. "/" .. name
-  os.execute("mkdir -p '" .. dir .. "/lua/voice-vim'")
-  local f = assert(io.open(dir .. "/lua/voice-vim/delivery.lua", "w"))
+  os.execute("mkdir -p '" .. dir .. "/lua/ferry'")
+  local f = assert(io.open(dir .. "/lua/ferry/delivery.lua", "w"))
   f:write(body)
   f:close()
   return dir
@@ -323,7 +323,7 @@ end
 do
   local rec = submitSetup(true)
   local file = submitFile("by bundle")
-  rec:openURL("voicevim-submit", { file = file, target = "com.example.target" })
+  rec:openURL("ferry-submit", { file = file, target = "com.example.target" })
   rec:runTimers()
   check("bundle only: app activated", 1, #rec.activations)
   check("bundle only: one keystroke", 1, #rec.keyStrokes)
@@ -334,7 +334,7 @@ do
   local rec = submitSetup(true)
   rec.accessibility = false
   local file = submitFile("no ax")
-  rec:openURL("voicevim-submit", { file = file, target = "com.example.target", window = "4242" })
+  rec:openURL("ferry-submit", { file = file, target = "com.example.target", window = "4242" })
   rec:runTimers()
   check("no AX: no keystroke", 0, #rec.keyStrokes)
   check("no AX: alert", 1, countAlerts(rec, "Accessibility"))
@@ -369,7 +369,7 @@ do
 end
 
 -- --- One instance ----------------------------------------------------------
-local hostbin = root .. "/bin/voice-vim-host"
+local hostbin = root .. "/bin/ferry-host"
 local NEOVIDE = "com.neovide.neovide"
 local function sh(cmd)
   local p = io.popen(cmd .. " 2>&1")
@@ -384,7 +384,7 @@ local function count(list, x)
   return k
 end
 local function hostSh(sock, sub)
-  return sh("VOICE_VIM_SOCK='" .. sock .. "' '" .. hostbin .. "' " .. sub)
+  return sh("FERRY_SOCK='" .. sock .. "' '" .. hostbin .. "' " .. sub)
 end
 -- Anything that would open a window other than our Neovide: an AppleScript
 -- (the removed Ghostty window per press) or a command naming a terminal.
@@ -403,17 +403,17 @@ do
   local M = stub.load(modpath)
   rec.frontmost = rec:app({ bundleID = "com.example.target" })
   M.start({ neovide = { searchPath = { swork .. "/empty" }, appPaths = {} } })
-  local NO = "voice-vim: Neovide is not installed — run ./install.sh"
+  local NO = "ferry: Neovide is not installed — run ./install.sh"
   check("Neovide missing: not running", "unavailable", M.mode)
   check("Neovide missing: one alert", 1, #rec.alerts)
   check("Neovide missing: alert says run install.sh", NO, rec.alerts[1])
   check("Neovide missing: logs the brew command", true, rec:hasLog("e", "brew install --cask neovide-app"))
   check("Neovide missing: hotkey still bound to toggle", M.toggle, rec.hotkeyBinds[1] and rec.hotkeyBinds[1].fn)
   check("Neovide missing: no server pre-warm", 0, #rec.tasks)
-  check("Neovide missing: voicevim-submit and voicevim-hide not bound", "nil nil",
-    tostring(rec.urlBinds["voicevim-submit"]) .. " " .. tostring(rec.urlBinds["voicevim-hide"]))
+  check("Neovide missing: ferry-submit and ferry-hide not bound", "nil nil",
+    tostring(rec.urlBinds["ferry-submit"]) .. " " .. tostring(rec.urlBinds["ferry-hide"]))
   rec.hotkeyBinds[1].fn()
-  rec:openURL("voicevim-start", {})
+  rec:openURL("ferry-start", {})
   rec:runTimers()
   check("Neovide missing: each press alerts again", "3 " .. NO, #rec.alerts .. " " .. tostring(rec.alerts[3]))
   check("Neovide missing: a press opens nothing", "0 0 0",
@@ -422,8 +422,8 @@ do
   check("Neovide missing: talk hotkey still bound", M.talkDown, tb and tb.fn)
   tb.fn()
   tb.released()
-  rec:openURL("voicevim-talk", { state = "down" })
-  rec:openURL("voicevim-talk", { state = "up" })
+  rec:openURL("ferry-talk", { state = "down" })
+  rec:openURL("ferry-talk", { state = "up" })
   rec:runTimers()
   check("Neovide missing: talk down alerts like a press, up adds nothing", "5 " .. NO,
     #rec.alerts .. " " .. tostring(rec.alerts[5]))
@@ -477,7 +477,7 @@ do
   rec:finishTask(1, 1, "", "nvim not found")
   check("ensure fails: stays in instance mode", "instance", M.mode)
   check("ensure fails: hotkey is still toggle", M.toggle, rec.hotkeyBinds[1].fn)
-  check("ensure fails: voicevim-hide still bound", "function", type(rec.urlBinds["voicevim-hide"]))
+  check("ensure fails: ferry-hide still bound", "function", type(rec.urlBinds["ferry-hide"]))
   check("ensure fails: the press runs ensure again", true,
     #rec.tasks == 2 and has(rec.tasks[2].args[2], "'ensure'") and rec.tasks[2].started)
   check("ensure fails: no alert while recovering", 0, #rec.alerts)
@@ -509,10 +509,10 @@ do
     .. "  local pw = c.prewarm\n"
     .. "  c.prewarm = function(cb)\n"
     .. "    pw(cb)\n"
-    .. "    c._afterWarm = function() _G.VV_SHOWN = true end\n"
+    .. "    c._afterWarm = function() _G.FERRY_SHOWN = true end\n"
     .. "    error('prewarm boom')\n"
     .. "  end\n"
-    .. "  _G.VV_BUILT = c\n"
+    .. "  _G.FERRY_BUILT = c\n"
     .. "  return c\n"
     .. "end\n"
     .. "return I\n")
@@ -520,16 +520,16 @@ do
   local rec = stub.install()
   local M = stub.load(modpath)
   rec.frontmost = rec:app({ bundleID = "com.example.target" })
-  _G.VV_BUILT, _G.VV_SHOWN = nil, nil
+  _G.FERRY_BUILT, _G.FERRY_SHOWN = nil, nil
   M.start({ root = bad, sock = swork .. "/g.sock", captureSelection = false, neovide = found })
   check("late setup error: not running, one alert", "unavailable 1", M.mode .. " " .. #rec.alerts)
   check("late setup error: logged", true, rec:hasLog("e", "prewarm boom"))
-  local c = _G.VV_BUILT
+  local c = _G.FERRY_BUILT
   check("late setup error: controller disabled, pending show dropped", "true nil",
     tostring(c and c._disabled) .. " " .. tostring(c and c._afterWarm))
-  check("late setup error: voicevim-hide unbound", nil, rec.urlBinds["voicevim-hide"])
+  check("late setup error: ferry-hide unbound", nil, rec.urlBinds["ferry-hide"])
   rec:finishTask(1, 0, "", "")  -- the pre-warm finishes later
-  check("late setup error: the dropped show never runs", nil, _G.VV_SHOWN)
+  check("late setup error: the dropped show never runs", nil, _G.FERRY_SHOWN)
   c.toggle()
   local shows = 0
   for _, e in ipairs(rec.executes) do if has(e.cmd, "'show'") then shows = shows + 1 end end
@@ -560,8 +560,8 @@ do
   for _, t in ipairs(rec.tasks) do if has(t.args[2], "'ensure'") and t.started then ensures = ensures + 1 end end
   check("instance: start() creates one ensure hs.task", "1 1", #rec.tasks .. " " .. ensures)
   check("instance: ensure uses the socket", true, has(rec.tasks[1].args[2], sock))
-  check("instance: voicevim-hide and voicevim-submit bound", "function function",
-    type(rec.urlBinds["voicevim-hide"]) .. " " .. type(rec.urlBinds["voicevim-submit"]))
+  check("instance: ferry-hide and ferry-submit bound", "function function",
+    type(rec.urlBinds["ferry-hide"]) .. " " .. type(rec.urlBinds["ferry-submit"]))
   hostSh(sock, "ensure")  -- what the pre-warm task does
   rec:finishTask(1, 0, "", "")
   b.fn()
@@ -582,7 +582,7 @@ do
   local file = submitFile("from the note\n")
   local hidesAtPaste
   rec.onKeyStroke = function(_, key) if key == "v" then hidesAtPaste = count(rec.hides, nv) end end
-  rec:openURL("voicevim-submit", { file = file, target = "com.example.target", window = "4242" })
+  rec:openURL("ferry-submit", { file = file, target = "com.example.target", window = "4242" })
   rec:runTimers()
   check("instance: submit URL calls host.hide before Cmd+V", 1, hidesAtPaste)
   check("instance: one Cmd+V after focusing 4242", "1 4242",
@@ -591,9 +591,9 @@ do
     tostring(rec:hasLog("i", "submit: delivered")) .. " " .. tostring(rec.pasteboard.contents))
   check("instance: submit file removed", nil, io.open(file, "r"))
 
-  rec:openURL("voicevim-start", {})  -- shows again, like the hotkey
+  rec:openURL("ferry-start", {})  -- shows again, like the hotkey
   rec:runTimers()
-  check("instance: voicevim-start shows Neovide", true, rec.frontmost == nv)
+  check("instance: ferry-start shows Neovide", true, rec.frontmost == nv)
   b.fn()  -- Neovide focused: keep the draft, hide, refocus 4242
   local drafts = 0
   for _, e in ipairs(rec.executes) do if has(e.cmd, "'draft'") then drafts = drafts + 1 end end
@@ -606,7 +606,7 @@ end
 os.exit(fail)
 LUA
 
-VV_ROOT="$root" VV_TMP="$tmp" VV_SWORK="$swork" perl -e 'alarm 60; exec @ARGV' nvim -l "$tmp/spec.lua" 2>&1
+FERRY_ROOT="$root" FERRY_TMP="$tmp" FERRY_SWORK="$swork" perl -e 'alarm 60; exec @ARGV' nvim -l "$tmp/spec.lua" 2>&1
 status=$?
 echo  # nvim -l leaves the last line unterminated
 

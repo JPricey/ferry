@@ -1,4 +1,4 @@
--- Wispr Flow hands-free toggle for a voice-vim buffer.
+-- Wispr Flow hands-free toggle for a ferry buffer.
 --
 -- start()/stop() open wispr-flow://start-hands-free / stop-hands-free with
 -- `open -g` (through M.open, which tests swap or shadow with a fake `open`).
@@ -52,7 +52,7 @@ M.open_timeout_ms = 5000
 
 M.START_URL = "wispr-flow://start-hands-free"
 M.STOP_URL = "wispr-flow://stop-hands-free"
-M.NO_DICTATION = "voice-vim: no dictation arrived"
+M.NO_DICTATION = "ferry: no dictation arrived"
 
 -- recording: Flow was started by us (or assumed) and has not pasted yet.
 -- adopted: that recording was started outside (adopt_start); only stop()
@@ -72,12 +72,12 @@ local function run_next()
   busy = true
   local ok, err = pcall(vim.system, { "open", "-g", url }, { timeout = M.open_timeout_ms }, function(obj)
     vim.schedule(function()
-      if obj.code ~= 0 then vim.notify("voice-vim: could not open " .. url, vim.log.levels.WARN) end
+      if obj.code ~= 0 then vim.notify("ferry: could not open " .. url, vim.log.levels.WARN) end
       run_next()
     end)
   end)
   if not ok then
-    vim.notify("voice-vim: could not open " .. url .. ": " .. tostring(err), vim.log.levels.WARN)
+    vim.notify("ferry: could not open " .. url .. ": " .. tostring(err), vim.log.levels.WARN)
     run_next()
   end
 end

@@ -64,21 +64,21 @@ Keep prompts short. Give paths to read, not file contents. Ask for short reports
 
 ### Implementer
 
-> You are implementing one task in the voice-vim repo at `~/Code/voice-vim`. Read `AGENTS.md` first and follow it, especially "Do not touch the live system". Use a temp `VOICE_VIM_DB` and test nvim servers for every run.
+> You are implementing one task in the ferry repo at `~/Code/ferry`. Read `AGENTS.md` first and follow it, especially "Do not touch the live system". Use a temp `FERRY_DB` and test nvim servers for every run.
 > Task: `<task line>`. Milestone: `<milestone name>` in `milestones.md`. Read `planning.md` → "Next direction" and `<linked sections>` for background.
 > Make the change, add or update tests, and run `<verification>`. Do not commit.
 > Report in 5 lines or fewer: what changed (files), the verification command and its result, and anything you could not do.
 
 ### Verifier
 
-> You are checking one task in the voice-vim repo at `~/Code/voice-vim`. Read `AGENTS.md`. Do not edit files.
+> You are checking one task in the ferry repo at `~/Code/ferry`. Read `AGENTS.md`. Do not edit files.
 > Task: `<task line>`. Verification: `<verification>`. Review the uncommitted diff (`git diff`, `git status`).
 > Run the verification yourself. Check that the diff does only what the task asks, that tests cover the change, and that nothing touches the real history database, `~/.hammerspoon`, or the running Hammerspoon.
 > Report PASS or FAIL. For FAIL, list each problem with file and line.
 
 ### Planner
 
-> You are breaking down one milestone of the voice-vim repo at `~/Code/voice-vim` into tasks. Read `AGENTS.md`, `motivations.md`, and the milestone `<name>` in `milestones.md`, plus the docs it links. Read existing code to see what is already there.
+> You are breaking down one milestone of the ferry repo at `~/Code/ferry` into tasks. Read `AGENTS.md`, `motivations.md`, and the milestone `<name>` in `milestones.md`, plus the docs it links. Read existing code to see what is already there.
 > Follow these task rules: `<paste "Task rules">`.
 > Return the tasks as a markdown checklist, one task per item, with goal, files, depends-on and verification. Then list any open questions that block the breakdown.
 

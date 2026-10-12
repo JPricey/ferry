@@ -1,11 +1,11 @@
--- voice-vim GUI appearance: make Neovide look like Joe's Ghostty terminal.
+-- ferry GUI appearance: make Neovide look like Joe's Ghostty terminal.
 --
 -- In a terminal, a transparent colorscheme (Normal with no guibg) shows the
 -- terminal's background; in Neovide nothing shows through, and Neovide uses
--- its own default font. bin/voice-vim-host reads Ghostty's font and
--- background (or VOICE_VIM_GUI_FONT / VOICE_VIM_GUI_BG) and calls
+-- its own default font. bin/ferry-host reads Ghostty's font and
+-- background (or FERRY_GUI_FONT / FERRY_GUI_BG) and calls
 -- setup({ font = "Family:h13", bg = "#001e27" }), which stores them in
--- g:voicevim_gui.
+-- g:ferry_gui.
 --
 -- Only while a GUI is attached (g:neovide, or a UI whose client is neovide):
 -- on UIEnter it sets 'guifont' and, if Normal has no guibg, the background;
@@ -60,8 +60,8 @@ end
 function M.setup(settings)
   settings = type(settings) == "table" and settings or {}
   M.settings = { font = vim.trim(tostring(settings.font or "")), bg = clean_bg(settings.bg) }
-  vim.g.voicevim_gui = M.settings
-  local group = vim.api.nvim_create_augroup("voice-vim-gui", { clear = true })
+  vim.g.ferry_gui = M.settings
+  local group = vim.api.nvim_create_augroup("ferry-gui", { clear = true })
   vim.api.nvim_create_autocmd("UIEnter", { group = group, callback = function()
     M.apply()
     -- Neovide may set g:neovide just after attaching.

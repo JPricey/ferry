@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # hammerspoon/instance.lua against the stub in tests/hs_stub.lua under
 # `nvim -l`, with a recording stub host. hs.execute really runs
-# bin/voice-vim-host against a headless nvim on a temp socket (--clean, temp
+# bin/ferry-host against a headless nvim on a temp socket (--clean, temp
 # DB and notes dir); hs.task is recorded, never run. Fake osascript/open/
 # neovide on PATH record and fail, so nothing reaches other apps. Never
 # touches the real Hammerspoon or Joe's nvim server.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # macOS socket paths max out at 104 bytes, so keep the folder short.
-work=$(mktemp -d /tmp/vvi.XXXX)
+work=$(mktemp -d /tmp/ferryi.XXXX)
 [ -n "$work" ] && [ -d "$work" ] || { echo "mktemp failed" >&2; exit 1; }
 cleanup() {
   pkill -f -- "--listen $work/" 2>/dev/null
@@ -22,12 +22,12 @@ for f in osascript open neovide; do
   printf '#!/bin/sh\n{ echo "CALL %s"; echo "$*"; } >> "%s/calls"\nexit 1\n' "$f" "$work" > "$work/fakes/$f"
   chmod +x "$work/fakes/$f"
 done
-# A failing ghostty: voice-vim-host ensure finds no GUI settings.
+# A failing ghostty: ferry-host ensure finds no GUI settings.
 printf '#!/bin/sh\nexit 1\n' > "$work/fakes/ghostty"; chmod +x "$work/fakes/ghostty"
 : > "$work/calls"
-export PATH="$work/fakes:$PATH" VOICE_VIM_DB="$work/history.sqlite"
+export PATH="$work/fakes:$PATH" FERRY_DB="$work/history.sqlite"
 # The controller must pass these itself.
-unset VOICE_VIM_SOCK VOICE_VIM_NOTES_DIR VOICE_VIM_HOST_NVIM_FLAGS
+unset FERRY_SOCK FERRY_NOTES_DIR FERRY_HOST_NVIM_FLAGS
 
 # A stand-in UI: attaches to a server over its socket with a raw msgpack
 # nvim_ui_attach request, then drains redraws until killed.
@@ -42,11 +42,11 @@ while s.recv(65536):
 PY
 
 cat > "$work/spec.lua" <<'LUA'
-local root = assert(os.getenv("VV_ROOT"))
-local work = assert(os.getenv("VV_WORK"))
+local root = assert(os.getenv("FERRY_ROOT"))
+local work = assert(os.getenv("FERRY_WORK"))
 local stub = dofile(root .. "/tests/hs_stub.lua")
 local modpath = root .. "/hammerspoon/instance.lua"
-local hostbin = root .. "/bin/voice-vim-host"
+local hostbin = root .. "/bin/ferry-host"
 local fail = 0
 
 local function check(name, want, got)
@@ -80,8 +80,8 @@ end
 
 local n = 0
 local function hostEnv(sock)
-  return "VOICE_VIM_SOCK='" .. sock .. "' VOICE_VIM_NOTES_DIR='" .. work .. "/notes' "
-    .. "VOICE_VIM_HOST_NVIM_FLAGS=--clean '" .. hostbin .. "' "
+  return "FERRY_SOCK='" .. sock .. "' FERRY_NOTES_DIR='" .. work .. "/notes' "
+    .. "FERRY_HOST_NVIM_FLAGS=--clean '" .. hostbin .. "' "
 end
 local function ensure(sock) return sh(hostEnv(sock) .. "ensure") end
 local function stop(sock) sh(hostEnv(sock) .. "stop") end
@@ -117,7 +117,7 @@ local function setup(opts)
   opts = opts or {}
   n = n + 1
   local rec = stub.install()
-  rec.execStatus = true  -- hs.execute reports voice-vim-host's exit code
+  rec.execStatus = true  -- hs.execute reports ferry-host's exit code
   local sock = work .. "/s" .. n .. ".sock"
   local target = rec:app({ bundleID = "com.example.target" })
   local tw = rec:window({ id = 4242, app = target })
@@ -177,12 +177,12 @@ do
   check("show carries the socket and --clean", true,
     shows[1] ~= nil and has(shows[1].cmd, sock) and has(shows[1].cmd, "--clean"))
   check("note in insert mode with target 4242", "i com.example.target 4242",
-    ask(sock, 'mode()." ".b:voicevim.target." ".b:voicevim.window'))
+    ask(sock, 'mode()." ".b:ferry.target." ".b:ferry.window'))
   check("one host.show", 1, count(t.order, "host.show"))
   rec:runTimers()
   check("logs show: host focused after", true, rec:hasLog("i", "show: host focused after"))
   check("logs show: show took", true, rec:hasLog("i", "show: show took"))
-  check("logger is voice-vim", true, rec:findLogs("i", "show: host focused after")[1].name == "voice-vim")
+  check("logger is ferry", true, rec:findLogs("i", "show: host focused after")[1].name == "ferry")
   check("toggle logs -> show", true, rec:hasLog("i", "-> show;"))
   check("default: no Cmd+C (captureSelection off)", 0, #rec.keyStrokes)
 
@@ -239,20 +239,20 @@ do
   local t = setup()
   local rec, c = t.rec, t.c
   c.bindURLs()
-  check("bindURLs binds voicevim-submit", "function", type(rec.urlBinds["voicevim-submit"]))
-  check("bindURLs binds voicevim-hide", "function", type(rec.urlBinds["voicevim-hide"]))
+  check("bindURLs binds ferry-submit", "function", type(rec.urlBinds["ferry-submit"]))
+  check("bindURLs binds ferry-hide", "function", type(rec.urlBinds["ferry-hide"]))
   c.toggle()
   rec:runTimers()
-  rec:openURL("voicevim-hide", {})
-  check("voicevim-hide calls host.hide", 1, count(t.order, "host.hide"))
-  check("voicevim-hide refocuses 4242", 4242, lastFocusId(rec))
-  check("voicevim-hide runs no draft", 0, #execs(rec, "'draft'"))
+  rec:openURL("ferry-hide", {})
+  check("ferry-hide calls host.hide", 1, count(t.order, "host.hide"))
+  check("ferry-hide refocuses 4242", 4242, lastFocusId(rec))
+  check("ferry-hide runs no draft", 0, #execs(rec, "'draft'"))
   rec:runTimers()
-  check("voicevim-hide logs hide timing", true, rec:hasLog("i", "hide: target focused after"))
-  rec:openURL("voicevim-submit", { file = "f", target = "com.example.target", window = "4242" })
-  check("voicevim-submit hides then delivers", "host.hide,deliver",
+  check("ferry-hide logs hide timing", true, rec:hasLog("i", "hide: target focused after"))
+  rec:openURL("ferry-submit", { file = "f", target = "com.example.target", window = "4242" })
+  check("ferry-submit hides then delivers", "host.hide,deliver",
     table.concat(t.order, ",", #t.order - 1, #t.order))
-  check("voicevim-submit passes the URL params", "f", t.delivered[1] and t.delivered[1].file)
+  check("ferry-submit passes the URL params", "f", t.delivered[1] and t.delivered[1].file)
   stop(t.sock)
 end
 
@@ -273,16 +273,16 @@ do
     return ask(sock, 'luaeval("dofile(\\"' .. work .. "/" .. name .. '\\")")')
   end
   run("flowrec.lua", [[
-    local f = require("voice-vim.flow")
-    f.open = function(u) vim.g.vv_flow = (vim.g.vv_flow or "") .. u .. " " end
-    require("voice-vim.note").host = {
-      hide = function() vim.g.vv_hidden = (vim.g.vv_hidden or 0) + 1 end,
+    local f = require("ferry.flow")
+    f.open = function(u) vim.g.ferry_flow = (vim.g.ferry_flow or "") .. u .. " " end
+    require("ferry.note").host = {
+      hide = function() vim.g.ferry_hidden = (vim.g.ferry_hidden or 0) + 1 end,
       submit = function() end,
     }
     f.start()
     return 1
   ]])
-  local function hidden() return ask(sock, 'get(g:, "vv_hidden", 0)') end
+  local function hidden() return ask(sock, 'get(g:, "ferry_hidden", 0)') end
   ask(sock, 'nvim_buf_set_lines(0, 0, -1, v:false, ["draft words"])')
   local path = ask(sock, "expand(\"%:p\")")
   c.toggle()
@@ -291,7 +291,7 @@ do
   check("Flow recording: host not hidden, target not refocused", "0 0",
     count(t.order, "host.hide") .. " " .. #rec.focuses)
   check("Flow recording: hide waits logged", true, rec:hasLog("i", "hide: Flow is recording"))
-  check("Flow recording: the note sent stop-hands-free", true, has(ask(sock, 'get(g:, "vv_flow", "")'), "stop-hands-free"))
+  check("Flow recording: the note sent stop-hands-free", true, has(ask(sock, 'get(g:, "ferry_flow", "")'), "stop-hands-free"))
   c.toggle()  -- a second press during the wait changes nothing
   check("Flow recording: second press still waits", "0 0",
     count(t.order, "host.hide") .. " " .. hidden())
@@ -302,8 +302,8 @@ do
   end
   check("Flow recording: after the paste the note asks to hide once", "1", hidden())
   check("Flow recording: the draft holds the last words", true, has(sh("cat '" .. path .. "'"), "last words"))
-  rec:openURL("voicevim-hide", {})  -- what the note's hide URL does
-  check("Flow recording: voicevim-hide then hides and refocuses 4242", "1 4242",
+  rec:openURL("ferry-hide", {})  -- what the note's hide URL does
+  check("Flow recording: ferry-hide then hides and refocuses 4242", "1 4242",
     count(t.order, "host.hide") .. " " .. tostring(lastFocusId(rec)))
   stop(sock)
 end
@@ -319,22 +319,22 @@ do
   rec:runTimers()
   local f = assert(io.open(work .. "/flowrec2.lua", "w"))
   f:write([[
-    local f = require("voice-vim.flow")
+    local f = require("ferry.flow")
     f.open = function() end
-    require("voice-vim.note").host = {
-      hide = function() vim.g.vv_hidden = (vim.g.vv_hidden or 0) + 1 end,
-      submit = function() vim.g.vv_submitted = 1 end,
+    require("ferry.note").host = {
+      hide = function() vim.g.ferry_hidden = (vim.g.ferry_hidden or 0) + 1 end,
+      submit = function() vim.g.ferry_submitted = 1 end,
     }
     f.start()
     return 1
   ]])
   f:close()
   ask(sock, 'luaeval("dofile(\\"' .. work .. '/flowrec2.lua\\")")')
-  local function hidden() return ask(sock, 'get(g:, "vv_hidden", 0)') end
+  local function hidden() return ask(sock, 'get(g:, "ferry_hidden", 0)') end
   ask(sock, 'nvim_buf_set_lines(0, 0, -1, v:false, ["draft words"])')
   local path = ask(sock, "expand(\"%:p\")")
   c.toggle()  -- hotkey hide: waits for Flow
-  ask(sock, 'luaeval("require(\\"voice-vim.note\\").cancel()")')  -- Ctrl-Q
+  ask(sock, 'luaeval("require(\\"ferry.note\\").cancel()")')  -- Ctrl-Q
   sh("sleep 0.3")
   check("Ctrl-Q during the hide wait: nothing hidden before Flow's paste", "0 0",
     hidden() .. " " .. count(t.order, "host.hide"))
@@ -346,7 +346,7 @@ do
     sh("sleep 0.02")
   end
   check("Ctrl-Q during the hide wait: after the paste, cancelled and hidden once", "1 0",
-    hidden() .. " " .. ask(sock, 'get(g:, "vv_submitted", 0)'))
+    hidden() .. " " .. ask(sock, 'get(g:, "ferry_submitted", 0)'))
   check("Ctrl-Q during the hide wait: the note file (with the paste) is gone", nil, io.open(path, "r"))
   stop(sock)
 end
@@ -385,10 +385,10 @@ do
     #rec.tasks == 2 and has(task.args[2], "'ensure'") and has(task.args[2], sock) and task.started)
   check("server down: no alert, no host.show yet", "0 0", #rec.alerts .. " " .. count(t.order, "host.show"))
   runTask(rec, #rec.tasks)  -- the task's real command
-  check("after voice-vim-host stop, a toggle restarts the server", "1 up uis=0", servers(sock) .. " " .. status(sock))
+  check("after ferry-host stop, a toggle restarts the server", "1 up uis=0", servers(sock) .. " " .. status(sock))
   check("server down: show retried once", 2, #execs(rec, "'show' 'com.example.target' '4242'"))
   check("restarted server: note in insert mode with target 4242", "i com.example.target 4242",
-    ask(sock, 'mode()." ".b:voicevim.target." ".b:voicevim.window'))
+    ask(sock, 'mode()." ".b:ferry.target." ".b:ferry.window'))
   rec:runTimers()
   check("restarted server: one host.show, host focused", "1 true",
     count(t.order, "host.show") .. " " .. tostring(rec:hasLog("i", "show: host focused after")))
@@ -444,7 +444,7 @@ for _, case in ipairs({ "host.show false", "never focused" }) do
   rec:runTimers()
   check(case .. ": one alert for the press", 1, #rec.alerts)
   check(case .. ": alert says Neovide did not appear", true,
-    has(rec.alerts[1], "voice-vim: Neovide did not appear") and has(rec.alerts[1], "Hammerspoon console"))
+    has(rec.alerts[1], "ferry: Neovide did not appear") and has(rec.alerts[1], "Hammerspoon console"))
   check(case .. ": host launched once", 1, count(t.order, "host.launch"))
   c.toggle()  -- next press, well within launchGrace
   rec:runTimers()
@@ -498,24 +498,24 @@ local function luaRun(sock, name, body)
   f:close()
   return ask(sock, 'luaeval("dofile(\\"' .. work .. "/" .. name .. '\\")")')
 end
--- Record Flow URLs in g:vv_flow instead of running `open`.
+-- Record Flow URLs in g:ferry_flow instead of running `open`.
 local function recordFlow(sock)
   luaRun(sock, "talkrec.lua", [[
-    require("voice-vim.flow").open = function(u) vim.g.vv_flow = (vim.g.vv_flow or "") .. u .. " " end
+    require("ferry.flow").open = function(u) vim.g.ferry_flow = (vim.g.ferry_flow or "") .. u .. " " end
     return 1
   ]])
 end
-local function urls(sock) return ask(sock, 'get(g:, "vv_flow", "")') end
+local function urls(sock) return ask(sock, 'get(g:, "ferry_flow", "")') end
 local function stops(sock)
   local k = 0
   for _ in urls(sock):gmatch("stop%-hands%-free") do k = k + 1 end
   return k
 end
 local function recording(sock)
-  return luaRun(sock, "talkq.lua", 'return tostring(require("voice-vim.flow").recording())')
+  return luaRun(sock, "talkq.lua", 'return tostring(require("ferry.flow").recording())')
 end
 local function waiting(sock)
-  return luaRun(sock, "talkw.lua", 'return tostring(require("voice-vim.flow").state.waiting ~= nil)')
+  return luaRun(sock, "talkw.lua", 'return tostring(require("ferry.flow").state.waiting ~= nil)')
 end
 -- Flow's paste into the note (a bracketed paste reaches nvim as vim.paste).
 local function paste(sock, text)
@@ -561,7 +561,7 @@ do
   check("talkDown: start task before the show execute", true, st ~= nil and shows[1] ~= nil and st.seq < shows[1].seq)
   check("talkDown: server reports recording, no URL", "true ", recording(sock) .. " " .. urls(sock))
   check("talkDown: note in insert mode with target 4242", "i com.example.target 4242",
-    ask(sock, 'mode()." ".b:voicevim.target." ".b:voicevim.window'))
+    ask(sock, 'mode()." ".b:ferry.target." ".b:ferry.window'))
   check("talkDown logs focused=false -> show", true, rec:hasLog("i", "talk: down focused=false -> show"))
   check("talkDown logs the start task", true, rec:hasLog("i", "talk: flow start task started after"))
 
@@ -765,7 +765,7 @@ do
   c.talkUp()
   tick(rec)
   check("Ctrl-S during held modifiers: no release yet", 0, #execs(rec, "'release'"))
-  luaRun(sock, "talks.lua", 'require("voice-vim.flow").toggle() return 1')  -- Ctrl-S
+  luaRun(sock, "talks.lua", 'require("ferry.flow").toggle() return 1')  -- Ctrl-S
   check("Ctrl-S during held modifiers: one stop from Ctrl-S", 1, stops(sock))
   rec.modifiers = {}
   tick(rec)
@@ -789,7 +789,7 @@ do
   check("stray paste: nvim adopted the recording, no URL", "true ", recording(sock) .. " " .. urls(sock))
   paste(sock, "stray")
   check("stray paste: nvim still recording, flow-state recording", "true recording",
-    recording(sock) .. " " .. luaRun(sock, "talkfs.lua", 'return require("voice-vim.note").flow_state()'))
+    recording(sock) .. " " .. luaRun(sock, "talkfs.lua", 'return require("ferry.note").flow_state()'))
   c.talkUp()
   tick(rec)
   check("stray paste then key up: one release --force, exactly one stop, no alert, released", "1 1 1 0 true",
@@ -806,9 +806,9 @@ do
   recordFlow(sock)
   c.talkDown()
   finishStart(rec)
-  luaRun(sock, "talkst.lua", 'require("voice-vim.flow").state.recording = false return 1')  -- old on_paste
+  luaRun(sock, "talkst.lua", 'require("ferry.flow").state.recording = false return 1')  -- old on_paste
   check("stray paste (old flow): flow-state idle", "idle",
-    luaRun(sock, "talkfs.lua", 'return require("voice-vim.note").flow_state()'))
+    luaRun(sock, "talkfs.lua", 'return require("ferry.note").flow_state()'))
   c.talkUp()
   tick(rec)
   check("stray paste (old flow) then key up: one release --force, exactly one stop, no alert", "1 1 1 0",
@@ -824,7 +824,7 @@ do
   recordFlow(sock)
   c.toggle()
   rec:runTimers()
-  luaRun(sock, "talkold.lua", 'require("voice-vim.note").release = function() return "idle" end return 1')
+  luaRun(sock, "talkold.lua", 'require("ferry.note").release = function() return "idle" end return 1')
   c.talkDown(); finishStart(rec); c.talkUp()
   check("release prints idle: one release, no stop, one alert", "1 0 1",
     #execs(rec, "'release'") .. " " .. stops(sock) .. " " .. #rec.alerts)
@@ -839,7 +839,7 @@ do
   local t = setup()
   local rec, c, sock = t.rec, t.c, t.sock
   recordFlow(sock)
-  luaRun(sock, "talkboom.lua", 'require("voice-vim.note").show = function() error("boom") end return 1')
+  luaRun(sock, "talkboom.lua", 'require("ferry.note").show = function() error("boom") end return 1')
   c.talkDown()
   check("show failed: no alert at key down", 0, #rec.alerts)
   finishStart(rec)
@@ -864,7 +864,7 @@ do
   c.talkUp()
   tick(rec)
   check("Ctrl-X during key up: no release while the start task runs", 0, #execs(rec, "'release'"))
-  luaRun(sock, "talkx.lua", 'require("voice-vim.flow").finish_then(0, function() end) return 1')
+  luaRun(sock, "talkx.lua", 'require("ferry.flow").finish_then(0, function() end) return 1')
   rec.focusedWindow = nil  -- the Submit hid the note
   tick(rec)
   check("Ctrl-X during key up: polling stopped, logged, no release, no alert", "true true nil 0 0",
@@ -895,13 +895,13 @@ end
 os.exit(fail)
 LUA
 
-VV_ROOT="$root" VV_WORK="$work" perl -e 'alarm 60; exec @ARGV' nvim -l "$work/spec.lua" 2>&1
+FERRY_ROOT="$root" FERRY_WORK="$work" perl -e 'alarm 60; exec @ARGV' nvim -l "$work/spec.lua" 2>&1
 status=$?
 echo  # nvim -l leaves the last line unterminated
 
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: want '$2' got '$3'"; status=1; fi; }
 check "fake osascript/open/neovide never called" 0 "$(grep -c '^CALL ' "$work/calls")"
-check "voice-vim.lua loads instance.lua" 1 "$(grep -c 'dofile(root .. "/hammerspoon/instance.lua")' "$root/hammerspoon/voice-vim.lua")"
+check "ferry.lua loads instance.lua" 1 "$(grep -c 'dofile(root .. "/hammerspoon/instance.lua")' "$root/hammerspoon/ferry.lua")"
 lj=$(command -v luajit || echo /opt/homebrew/bin/luajit)
 if [ -x "$lj" ]; then
   check "instance.lua parses under LuaJIT" ok "$("$lj" -e "assert(loadfile('$root/hammerspoon/instance.lua')) print('ok')" 2>&1)"

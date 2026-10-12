@@ -1,17 +1,17 @@
--- window-frame.lua: Hammerspoon glue that gives a voice-vim window its frame
+-- window-frame.lua: Hammerspoon glue that gives a ferry window its frame
 -- and remembers where Joe moves it.
 --
 -- The frame logic (default, restore, clamping) is pure and lives in
--- lua/voice-vim/frame.lua; this file only reads screens and windows, sets
+-- lua/ferry/frame.lua; this file only reads screens and windows, sets
 -- the frame, and saves moves. The Neovide host (hammerspoon/hosts/neovide.lua)
--- uses it for the one voice-vim window.
+-- uses it for the one ferry window.
 --
 --   local wf = dofile(root .. "/hammerspoon/window-frame.lua").new({
---     log = log,            -- hs.logger (default: a "voice-vim" logger)
---     frame = frameModule,  -- lua/voice-vim/frame.lua (default: dofile it
+--     log = log,            -- hs.logger (default: a "ferry" logger)
+--     frame = frameModule,  -- lua/ferry/frame.lua (default: dofile it
 --                           -- from root, or from this file's repo)
 --     root = root,          -- repo root, only used to find frame.lua
---     key = "voice-vim.windowFrame",  -- hs.settings key
+--     key = "ferry.windowFrame",  -- hs.settings key
 --     fraction = 0.5,       -- default size, as a fraction of the main screen
 --   })
 --   local before = wf.snapshot("com.neovide.neovide")  -- before opening
@@ -42,7 +42,7 @@
 
 local W = {}
 
-W.KEY = "voice-vim.windowFrame"
+W.KEY = "ferry.windowFrame"
 W.POLL = 0.02           -- seconds between adopt checks
 W.TIMEOUT = 2           -- default adopt timeout, seconds
 W.FULLSCREEN_WAIT = 0.6 -- seconds to wait after leaving fullscreen
@@ -70,11 +70,11 @@ end
 
 function W.new(cfg)
   cfg = cfg or {}
-  local log = cfg.log or hs.logger.new("voice-vim", "info")
+  local log = cfg.log or hs.logger.new("ferry", "info")
   local frame = cfg.frame
   if type(frame) ~= "table" then
     local root = cfg.root or defaultRoot() or "."
-    frame = dofile(root .. "/lua/voice-vim/frame.lua")
+    frame = dofile(root .. "/lua/ferry/frame.lua")
   end
   assert(type(frame) == "table" and type(frame.restore) == "function",
     "window-frame: frame.lua did not return the frame module")

@@ -1,13 +1,13 @@
--- instance.lua: Hammerspoon controller for the one long-lived voice-vim.
+-- instance.lua: Hammerspoon controller for the one long-lived ferry.
 --
--- Loaded by hammerspoon/voice-vim.lua with the Neovide host
+-- Loaded by hammerspoon/ferry.lua with the Neovide host
 -- (hammerspoon/hosts/neovide.lua). The window that shows nvim is an
--- injected host, and the server and note are driven by bin/voice-vim-host.
+-- injected host, and the server and note are driven by bin/ferry-host.
 --
 --   local instance = dofile(root .. "/hammerspoon/instance.lua")
 --   local c = instance.new({ host = host, deliver = M.submit, root = root })
 --   c.prewarm()   -- start the nvim server off the main thread
---   c.bindURLs()  -- hammerspoon://voicevim-submit and voicevim-hide
+--   c.bindURLs()  -- hammerspoon://ferry-submit and ferry-hide
 --   hs.hotkey.bind({ "ctrl", "alt" }, "v", c.toggle)
 --
 -- Host interface (B1 implements it for the picked host). Every function must
@@ -19,34 +19,34 @@
 --   isFocused()         -> bool, why: the host window has keyboard focus.
 --                       why is a short string for the log.
 --   launch(cb)          start the host UI attached to the server
---                       (`voice-vim-host attach-cmd`); cb(ok, why) once it
+--                       (`ferry-host attach-cmd`); cb(ok, why) once it
 --                       has been asked to. Called by show when `status`
 --                       reports no UI attached; the controller then calls
 --                       show once while polling, after cb.
 --
 -- toggle() (the hotkey):
---   host focused -> `voice-vim-host draft`, host.hide, refocus the captured
+--   host focused -> `ferry-host draft`, host.hide, refocus the captured
 --                   window object (its app when the window is gone).
 --                   While Wispr Flow is recording (started from the note),
 --                   draft answers `waiting for flow …` and the controller
 --                   leaves the host up: the note stops Flow, waits for its
---                   paste, then hides itself via voicevim-hide (onHide), so
+--                   paste, then hides itself via ferry-hide (onHide), so
 --                   dictation never lands in the target.
 --   otherwise    -> capture the frontmost app + window (and, with
 --                   captureSelection, the selection as a seed file),
---                   `voice-vim-host show <bundle> <window> [seedfile]`,
---                   `voice-vim-host status`, host.show (host.launch first
+--                   `ferry-host show <bundle> <window> [seedfile]`,
+--                   `ferry-host status`, host.show (host.launch first
 --                   when status says uis=0)
--- Each direction polls every pollInterval and logs to logger `voice-vim`,
+-- Each direction polls every pollInterval and logs to logger `ferry`,
 -- timed from the key press (so the show/draft call is included):
 --   show: show took N ms              hide: draft took N ms
 --   show: host focused after N ms     hide: target focused after N ms
 -- Each press also logs `toggle: focused=<bool> (<why>) -> show|hide`.
 --
--- onSubmit(p) (hammerspoon://voicevim-submit?file=&target=&window=):
---   host.hide, then deliver(p). deliver is injected (B2: voice-vim.lua's
+-- onSubmit(p) (hammerspoon://ferry-submit?file=&target=&window=):
+--   host.hide, then deliver(p). deliver is injected (B2: ferry.lua's
 --   M.submit, which focuses p's target and pastes).
--- onHide() (hammerspoon://voicevim-hide, from :Hide / :Cancel in the note,
+-- onHide() (hammerspoon://ferry-hide, from :Hide / :Cancel in the note,
 --   which already wrote the draft): host.hide, refocus the target.
 --
 -- Blocking: show, status and draft run on the main thread (hs.execute).
@@ -69,9 +69,9 @@
 --               wispr-flow://start-hands-free` as an hs.task), before
 --               anything waits on nvim, so the first word is not clipped.
 --               Host not focused: the show path above with
---               `voice-vim-host show --talk ...` (captures the target, waits
+--               `ferry-host show --talk ...` (captures the target, waits
 --               for the pre-warm, launches the host). Host focused:
---               `voice-vim-host talk` (insert at the cursor; never hides,
+--               `ferry-host talk` (insert at the cursor; never hides,
 --               never re-captures the target). A second down before up is
 --               ignored. A down while the last key up still waits to
 --               release takes that release over (one recording, released at
@@ -80,7 +80,7 @@
 --               the host is focused, the show path has finished (nvim took
 --               the recording, or it failed) and no modifier is down (Flow
 --               pastes with Cmd+V; a held Ctrl+Option would make it
---               Ctrl+Option+Cmd+V), then always runs `voice-vim-host
+--               Ctrl+Option+Cmd+V), then always runs `ferry-host
 --               release --force` once: nvim stops Flow and waits for its
 --               paste (flow.release), and sends the stop even when it
 --               reports idle (Ctrl-S already stopped Flow, a stray paste,
@@ -150,16 +150,16 @@ end
 --   deliver           function(p) for submits (required)
 --   captureSelection  grab the selection as a seed before show (default false)
 --   root              repo root (default: derived from this file's path)
---   sock              VOICE_VIM_SOCK for voice-vim-host (default: its own)
---   notesDir          VOICE_VIM_NOTES_DIR (default: voice-vim-host's own)
---   nvimFlags         VOICE_VIM_HOST_NVIM_FLAGS (tests: "--clean")
+--   sock              FERRY_SOCK for ferry-host (default: its own)
+--   notesDir          FERRY_NOTES_DIR (default: ferry-host's own)
+--   nvimFlags         FERRY_HOST_NVIM_FLAGS (tests: "--clean")
 --   pollInterval      seconds between focus checks (default 0.01)
 --   pollTimeout       seconds before a focus poll gives up (default 5)
 --   selectionTimeout  seconds to wait for Cmd+C to land (default 0.4)
 --   launchGrace       seconds after a host.launch during which uis=0 is
 --                     taken as the UI still starting (default 5)
 --   hostName          name of the host window in alerts (default
---                     "the voice-vim window")
+--                     "the ferry window")
 --   startFlow         function(onExit) that starts Wispr Flow recording and
 --                     returns true once started; onExit(code) when done
 --                     (default: `/usr/bin/open -g wispr-flow://start-hands-free`
@@ -181,7 +181,7 @@ function I.new(cfg)
       pollTimeout = cfg.pollTimeout or 5,
       selectionTimeout = cfg.selectionTimeout or 0.4,
       launchGrace = cfg.launchGrace or 5,
-      hostName = cfg.hostName or "the voice-vim window",
+      hostName = cfg.hostName or "the ferry window",
       startFlow = cfg.startFlow,
       talkModsTimeout = cfg.talkModsTimeout or 1,
       talkStopTimeout = cfg.talkStopTimeout or 5,
@@ -192,15 +192,15 @@ function I.new(cfg)
     target = nil,      -- { app, bundle, win, winId } captured on show
     _timer = nil,      -- current poll timer (kept so it is not collected)
     _tasks = {},       -- running hs.task objects (kept so they are not collected)
-    _warming = false,  -- a pre-warm `voice-vim-host ensure` is running
+    _warming = false,  -- a pre-warm `ferry-host ensure` is running
     _afterWarm = nil,  -- show continuation waiting for the pre-warm
     _launchedAt = nil, -- nowMs() of the last host.launch (nil: none pending)
     _disabled = false, -- disable() was called
-    _boundURLs = false, -- bindURLs() bound voicevim-submit / voicevim-hide
+    _boundURLs = false, -- bindURLs() bound ferry-submit / ferry-hide
     _talk = nil,       -- the talk hold: { t0, up, upAt, startExited, press }
     _talkTimer = nil,  -- talkUp's poll timer
   }
-  local log = hs.logger.new("voice-vim", "info")
+  local log = hs.logger.new("ferry", "info")
   c.log = log
 
   local function try(fn, ...)
@@ -229,14 +229,14 @@ function I.new(cfg)
   if type(c.deliver) ~= "function" then log.e("instance: no deliver function given") end
 
   -- -------------------------------------------------------------------------
-  -- voice-vim-host calls
+  -- ferry-host calls
 
   local function envPrefix()
     local parts = {}
     local function add(k, v) if v ~= nil and v ~= "" then parts[#parts + 1] = k .. "=" .. q(v) end end
-    add("VOICE_VIM_SOCK", c.config.sock)
-    add("VOICE_VIM_NOTES_DIR", c.config.notesDir)
-    add("VOICE_VIM_HOST_NVIM_FLAGS", c.config.nvimFlags)
+    add("FERRY_SOCK", c.config.sock)
+    add("FERRY_NOTES_DIR", c.config.notesDir)
+    add("FERRY_HOST_NVIM_FLAGS", c.config.nvimFlags)
     if #parts == 0 then return "" end
     return table.concat(parts, " ") .. " "
   end
@@ -244,7 +244,7 @@ function I.new(cfg)
   local function command(args)
     local quoted = {}
     for i, a in ipairs(args) do quoted[i] = q(a) end
-    return envPrefix() .. q(c.config.root .. "/bin/voice-vim-host") .. " " .. table.concat(quoted, " ")
+    return envPrefix() .. q(c.config.root .. "/bin/ferry-host") .. " " .. table.concat(quoted, " ")
   end
 
   -- Synchronous call (show, draft). Logs `<label>: <sub> took N ms`.
@@ -277,19 +277,19 @@ function I.new(cfg)
       local ok = code == 0
       local text = trim((out or "") .. (err or ""))
       if ok then
-        log.i(string.format("voice-vim-host %s: done after %d ms %s", args[1], ms(nowMs() - t0), text))
+        log.i(string.format("ferry-host %s: done after %d ms %s", args[1], ms(nowMs() - t0), text))
       else
-        log.e(string.format("voice-vim-host %s: exit %s: %s", args[1], tostring(code), text))
+        log.e(string.format("ferry-host %s: exit %s: %s", args[1], tostring(code), text))
       end
       done(ok, text)
     end, { "-c", cmd })
     if not task then
-      log.e("voice-vim-host " .. args[1] .. ": could not create hs.task")
+      log.e("ferry-host " .. args[1] .. ": could not create hs.task")
       return done(false, "")
     end
     c._tasks[#c._tasks + 1] = task
     if not try(task.start, task) then
-      log.e("voice-vim-host " .. args[1] .. ": hs.task did not start")
+      log.e("ferry-host " .. args[1] .. ": hs.task did not start")
       for i, t in ipairs(c._tasks) do
         if t == task then table.remove(c._tasks, i); break end
       end
@@ -432,7 +432,7 @@ function I.new(cfg)
       return
     end
     log.w("show: failed (" .. tostring(why) .. "); alerting, the next press relaunches")
-    alert("voice-vim: " .. c.config.hostName .. " did not appear — check the Hammerspoon console")
+    alert("ferry: " .. c.config.hostName .. " did not appear — check the Hammerspoon console")
   end
 
   local function hostShow(press)
@@ -451,7 +451,7 @@ function I.new(cfg)
     end)
   end
 
-  -- Number of UIs attached to the server, from `voice-vim-host status`
+  -- Number of UIs attached to the server, from `ferry-host status`
   -- (nil when it does not answer `up uis=N`).
   local function attachedUIs()
     local _, out = runSync("show", { "status" })
@@ -509,7 +509,7 @@ function I.new(cfg)
     if seed then args[#args + 1] = seed end
     local ok, out = runSync("show", args)
     if not ok and not again and out:find("no server on", 1, true) then
-      log.w("show: server down; voice-vim-host ensure, then retry show once")
+      log.w("show: server down; ferry-host ensure, then retry show once")
       c._afterWarm = function() showRest(press, { seed = seed }) end
       c.prewarm()
       return
@@ -522,7 +522,7 @@ function I.new(cfg)
         log.w("show: could not open the note; the talk key up decides")
         return
       end
-      alert("voice-vim: could not open the note (see console)")
+      alert("ferry: could not open the note (see console)")
       return
     end
     if press.talk then press.adopted = true end  -- nvim knows Flow is recording
@@ -708,7 +708,7 @@ function I.new(cfg)
       c._talk = nil
       log.w(string.format("talk: stop withheld %d ms after key up: %s (%s); Flow keeps recording",
         ms(now - talk.upAt), why, describeFocus()))
-      alert(msg or "voice-vim: note did not appear — Flow is still recording; open the note and press Ctrl-S")
+      alert(msg or "ferry: note did not appear — Flow is still recording; open the note and press Ctrl-S")
     end
 
     local function done(why)
@@ -750,7 +750,7 @@ function I.new(cfg)
         return
       end
       log.w("talk: release did not stop Flow (" .. tostring(out) .. "); Flow keeps recording")
-      alert("voice-vim: could not stop Flow — it is still recording; open the note and press Ctrl-S")
+      alert("ferry: could not stop Flow — it is still recording; open the note and press Ctrl-S")
     end
 
     -- nvim took this hold's recording and a Submit, Cancel or Hide wait
@@ -793,13 +793,13 @@ function I.new(cfg)
         -- Ctrl-S in the note stops Flow.
         if not talk.startExited then
           return withhold(now, "the Flow start task is still running",
-            "voice-vim: Flow was slow to start — it may still be recording; open the note and press Ctrl-S")
+            "ferry: Flow was slow to start — it may still be recording; open the note and press Ctrl-S")
         end
         local why = stoppedInNvim(press)
         if why then return done(why) end
         if focused then
           return withhold(now, "the note never took the recording",
-            "voice-vim: the note was not ready — Flow is still recording; stop it in Wispr Flow")
+            "ferry: the note was not ready — Flow is still recording; stop it in Wispr Flow")
         end
         return withhold(now, c.config.hostName .. " not focused")
       end
@@ -813,7 +813,7 @@ function I.new(cfg)
   function c.prewarm(cb)
     if c._warming then return end
     c._warming = true
-    log.i("pre-warm: voice-vim-host ensure (async)")
+    log.i("pre-warm: ferry-host ensure (async)")
     runAsync({ "ensure" }, function(ok)
       c._warming = false
       if not ok then log.w("pre-warm: ensure failed") end
@@ -824,7 +824,7 @@ function I.new(cfg)
     end)
   end
 
-  -- hammerspoon://voicevim-submit: hide the host, then deliver p.
+  -- hammerspoon://ferry-submit: hide the host, then deliver p.
   function c.onSubmit(p)
     p = p or {}
     log.i(string.format("submit: target=%s window=%s", tostring(p.target), tostring(p.window)))
@@ -837,7 +837,7 @@ function I.new(cfg)
     end)
   end
 
-  -- hammerspoon://voicevim-hide: the note already wrote its draft.
+  -- hammerspoon://ferry-hide: the note already wrote its draft.
   function c.onHide()
     local t0 = nowMs()
     log.i("hide: requested by the note")
@@ -850,10 +850,10 @@ function I.new(cfg)
       log.e("bindURLs: hs.urlevent unavailable")
       return c
     end
-    try(hs.urlevent.bind, "voicevim-submit", function(_, params) c.onSubmit(params) end)
-    try(hs.urlevent.bind, "voicevim-hide", function() c.onHide() end)
+    try(hs.urlevent.bind, "ferry-submit", function(_, params) c.onSubmit(params) end)
+    try(hs.urlevent.bind, "ferry-hide", function() c.onHide() end)
     c._boundURLs = true
-    log.i("bound hammerspoon://voicevim-submit and voicevim-hide")
+    log.i("bound hammerspoon://ferry-submit and ferry-hide")
     return c
   end
 
@@ -867,8 +867,8 @@ function I.new(cfg)
     stopTalkPoll()
     c._talk = nil
     if c._boundURLs and hs.urlevent and hs.urlevent.bind then
-      try(hs.urlevent.bind, "voicevim-submit", nil)
-      try(hs.urlevent.bind, "voicevim-hide", nil)
+      try(hs.urlevent.bind, "ferry-submit", nil)
+      try(hs.urlevent.bind, "ferry-hide", nil)
       c._boundURLs = false
     end
     log.w("instance: disabled")

@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
-# Tests for bin/voice-vim-migrate-init on temp copies of init.lua. Never
+# Tests for bin/ferry-migrate-init on temp copies of init.lua. Never
 # touches ~/.hammerspoon (HOME is pointed at a temp dir for the default path).
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-tmp=$(mktemp -d -t vv-migrate-test)
+tmp=$(mktemp -d -t ferry-migrate-test)
 trap 'rm -rf "$tmp"' EXIT
-export VOICE_VIM_DB="$tmp/history.sqlite"
-migrate="$root/bin/voice-vim-migrate-init"
+export FERRY_DB="$tmp/history.sqlite"
+migrate="$root/bin/ferry-migrate-init"
 fail=0
 check() { # name want got
   if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: want '$2' got '$3'"; fail=1; fi
 }
 
-# The voice-vim block as install.sh wrote it into Joe's init.lua, with an
+# The ferry block as install.sh wrote it into Joe's init.lua, with an
 # unrelated line before it.
 fixture() {
   cat <<'LUA'
 hs.loadSpoon("Foo")
 
--- voice-vim: dictate into an ephemeral Neovim buffer, then paste back.
+-- ferry: dictate into an ephemeral Neovim buffer, then paste back.
 require("hs.ipc") -- enables the `hs` CLI for reloading and debugging
-require("voice-vim").start({
+require("ferry").start({
   hotkey = { { "alt" }, "v" },
   autoStartFlow = false,
 })
@@ -30,9 +30,9 @@ expected() {
   cat <<'LUA'
 hs.loadSpoon("Foo")
 
--- voice-vim: dictate into an ephemeral Neovim buffer, then paste back.
+-- ferry: dictate into an ephemeral Neovim buffer, then paste back.
 require("hs.ipc") -- enables the `hs` CLI for reloading and debugging
-require("voice-vim").start({
+require("ferry").start({
   autoStartFlow = false,
 })
 LUA
@@ -68,7 +68,7 @@ check "custom: file unchanged" same "$(cmp -s "$d/orig.lua" "$d/init.lua" && ech
 check "custom: no .bak" no "$([ -e "$d/init.lua.bak" ] && echo yes || echo no)"
 check "custom: says nothing changed" 1 "$(grep -c 'nothing changed' <<<"$out")"
 
-# The same line outside the voice-vim block is left alone.
+# The same line outside the ferry block is left alone.
 d="$tmp/outside"; mkdir -p "$d"
 { echo 'other.start({'; echo '  hotkey = { { "alt" }, "v" },'; echo '})'; fixture; } > "$d/init.lua"
 "$migrate" "$d/init.lua" >/dev/null

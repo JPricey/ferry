@@ -1,7 +1,7 @@
--- Tests for lua/voice-vim/frame.lua.
+-- Tests for lua/ferry/frame.lua.
 -- Run: luajit tests/frame_spec.lua  (or nvim -l tests/frame_spec.lua)
 local here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or "."
-local F = dofile(here .. "/../lua/voice-vim/frame.lua")
+local F = dofile(here .. "/../lua/ferry/frame.lua")
 
 local fail = 0
 local function check(name, want, got)

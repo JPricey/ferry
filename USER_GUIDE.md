@@ -1,6 +1,6 @@
-# voice-vim user guide
+# ferry user guide
 
-voice-vim puts a Vim buffer between your voice and the app you are typing
+ferry puts a Vim buffer between your voice and the app you are typing
 in. Press a hotkey anywhere, dictate with Wispr Flow, fix the text with Vim,
 and send it back to the window you came from.
 
@@ -13,16 +13,16 @@ setting, see `guide.md`.
 - [Wispr Flow](https://wisprflow.ai) installed and working. `install.sh`
   checks for it but does not install it.
 - Optionally [Ghostty](https://ghostty.org): if it is installed, the
-  voice-vim window copies its font and background colour.
+  ferry window copies its font and background colour.
 - Everything else (Hammerspoon, Neovide, Neovim) `install.sh` installs for
   you. Hammerspoon owns the hotkey and does the pasting; Neovide shows
-  voice-vim's one always-running window.
+  ferry's one always-running window.
 
 ## Set it up once
 
 1. From the repo, run `./install.sh`. It installs whatever is missing of
-   Hammerspoon, Neovide and Neovim, links voice-vim into `~/.hammerspoon/`,
-   adds the voice-vim block to `~/.hammerspoon/init.lua`, removes an old
+   Hammerspoon, Neovide and Neovim, links ferry into `~/.hammerspoon/`,
+   adds the ferry block to `~/.hammerspoon/init.lua`, removes an old
    Option+V hotkey line (keeping `init.lua.bak`), and starts or reloads
    Hammerspoon. Each step prints `ok`, `installed`, `skipped` or
    `missing:` with what to do. Running it again changes nothing.
@@ -37,12 +37,15 @@ setting, see `guide.md`.
 
 `./install.sh --check` reports what is installed and what is missing, and
 changes nothing. Re-run `./install.sh` any time; it is also where any new
-setup step lands.
+setup step lands. If you set ferry up before it was called ferry, the next
+`./install.sh` moves that install over once: it saves the open note as a
+draft, stops the old window and server, and moves the history, the window
+position and the `~/.hammerspoon` setup (with an `init.lua` backup).
 
 ## Your first dictation
 
 1. Click into a text field, for example a Slack message box.
-2. Press **Ctrl+Option+V**. The voice-vim window appears with a note in
+2. Press **Ctrl+Option+V**. The ferry window appears with a note in
    insert mode. Its first line, `to: app:…`, says where the text will go
    (Slack's window here); the cursor waits on the line below. The very
    first press after Hammerspoon starts also opens Neovide, so it takes a
@@ -59,13 +62,13 @@ Steps 2 and 3 can be one: hold **Ctrl+Option+B**, speak, let go (see
 
 ## Show, hide and drafts
 
-There is only ever one voice-vim window. The hotkey shows it from any app
+There is only ever one ferry window. The hotkey shows it from any app
 and hides it again from the note, putting you back in the window you came
 from. A hidden note is kept as a draft: the next press brings the same note
 back, and Ctrl-X then sends it to the window you pressed from that time
 (its `to:` line follows, unless you edited it).
 
-`:q` in the note also hides it; it never quits voice-vim. After you send or
+`:q` in the note also hides it; it never quits ferry. After you send or
 cancel, the next press starts a fresh note.
 
 ## Keys
@@ -85,11 +88,11 @@ All of these work in insert mode, so you never have to leave it.
 
 ## Ways to dictate
 
-- **voice-vim's hold to talk.** Hold Ctrl+Option+B from any app, speak,
+- **ferry's hold to talk.** Hold Ctrl+Option+B from any app, speak,
   let go. See the next section.
 - **Flow's own shortcut.** Hold your normal Wispr Flow shortcut in the
-  note, speak, let go. This works in the voice-vim buffer like in any
-  other app, and needs nothing from voice-vim.
+  note, speak, let go. This works in the ferry buffer like in any
+  other app, and needs nothing from ferry.
 - **Ctrl-S.** Press it to start Flow's hands-free mode, speak as long as
   you like, press it again to stop. You stay in insert mode. If you stop
   Flow with its own shortcut instead, that is fine: the next Ctrl-S starts
@@ -113,16 +116,16 @@ usual.
   away so it never reaches your app.
 - **Flow only stops once the note is in front**, so your words never land
   in Slack or wherever you started. If the note does not come up within 5
-  seconds of letting go, voice-vim leaves Flow recording and says so
+  seconds of letting go, ferry leaves Flow recording and says so
   ("note did not appear"); the same if Flow itself was slow to start
   ("Flow was slow to start"). Open the note and press Ctrl-S to stop it.
 - **Change or turn off the key** with `talkHotkey` in Settings
   (`talkHotkey = false` turns it off). It cannot be the same keys as
   `hotkey`: that logs an error and the talk key is not bound.
 - **From Karabiner or another key tool**, open
-  `hammerspoon://voicevim-talk?state=down` when the key goes down and
-  `hammerspoon://voicevim-talk?state=up` when it comes up. In a Karabiner
-  rule, that is a `shell_command` of `open -g "hammerspoon://voicevim-talk?state=down"`
+  `hammerspoon://ferry-talk?state=down` when the key goes down and
+  `hammerspoon://ferry-talk?state=up` when it comes up. In a Karabiner
+  rule, that is a `shell_command` of `open -g "hammerspoon://ferry-talk?state=down"`
   in `to` and the `state=up` one in `to_after_key_up`.
 
 ## Sending
@@ -134,10 +137,10 @@ told apart.
 - With `captureSelection = true` in Settings, text you had selected when
   you pressed the hotkey starts a new note, and sending replaces the
   selection. It is off by default so the window appears instantly.
-- If you send while Flow is still recording (started with Ctrl-S), voice-vim
+- If you send while Flow is still recording (started with Ctrl-S), ferry
   stops Flow first and waits up to 4 seconds for its text, so your last
   words are included.
-- voice-vim only pastes once it has confirmed the right window is in front.
+- ferry only pastes once it has confirmed the right window is in front.
   If it cannot, it pastes nothing and shows **"copied — paste manually"**.
   Your text is on the clipboard: click where it belongs and press Cmd+V.
 - After every send, the text stays on your clipboard, so you can paste it
@@ -160,7 +163,7 @@ the app (its bundle id) and window you pressed the hotkey from. It reads
   its `to:` line says, also while the history sidebar is focused. Then
   press Cmd+V wherever you want it.
 - **Other targets are not sent yet.** `to: tmux:…`, `to: fleet:…`, or a
-  line voice-vim cannot read: Ctrl-X puts the text on the clipboard, says
+  line ferry cannot read: Ctrl-X puts the text on the clipboard, says
   "copied — target …", and leaves the note open so you can fix the line or
   paste by hand.
 
@@ -169,7 +172,7 @@ the app (its bundle id) and window you pressed the hotkey from. It reads
 Ctrl-Q hides the window, sends nothing, throws the note away, and puts you
 back in the window you started from. Sending an empty note, or one you did
 not change, also counts as a cancel. If Flow is still recording when you
-cancel, voice-vim waits for Flow to finish and throws that text away, so it
+cancel, ferry waits for Flow to finish and throws that text away, so it
 never lands in your app.
 
 Hiding with the hotkey while Flow is recording (started with Ctrl-S) works
@@ -201,7 +204,7 @@ hides, and `Ctrl-S` starts or stops Flow (focus moves back to the note, in
 insert mode at the end of the text).
 
 Cancelled notes that had text are marked with `~`. The history lives in
-`~/Library/Application Support/voice-vim/history.sqlite`.
+`~/Library/Application Support/ferry/history.sqlite`.
 
 ## The window
 
@@ -212,22 +215,22 @@ moves onto your main screen.
 
 ## Other ways to start
 
-- `open -g hammerspoon://voicevim-start` from a shell, a launcher or a
+- `open -g hammerspoon://ferry-start` from a shell, a launcher or a
   keyboard tool does what the hotkey does.
-- `hammerspoon://voicevim-talk?state=down` and `?state=up` do what pressing
+- `hammerspoon://ferry-talk?state=down` and `?state=up` do what pressing
   and letting go of the hold to talk key do (see "Hold to talk").
-- `karabiner/voice-vim-hyper.json` is an optional Karabiner-Elements rule.
+- `karabiner/ferry-hyper.json` is an optional Karabiner-Elements rule.
   It turns a held Right Command into a Hyper key, and Hyper+V acts like
   the hotkey. Copy it to `~/.config/karabiner/assets/complex_modifications/`,
   then enable it in Karabiner-Elements → Complex Modifications → Add rule.
 
 ## Settings
 
-Edit the voice-vim block in `~/.hammerspoon/init.lua`, then Reload Config
+Edit the ferry block in `~/.hammerspoon/init.lua`, then Reload Config
 from the Hammerspoon menu bar icon. Leave out any line to keep its default.
 
 ```lua
-require("voice-vim").start({
+require("ferry").start({
   hotkey = { { "ctrl", "alt" }, "v" },  -- the hotkey ("alt" is Option)
   talkHotkey = { { "ctrl", "alt" }, "b" },  -- hold to talk; false turns it off
   captureSelection = false, -- start a new note with the selected text
@@ -238,24 +241,24 @@ require("voice-vim").start({
 ```
 
 Older settings (`mode`, `terminal`, `autoStartFlow`, `windowTitle`) are no
-longer used; voice-vim logs a warning for each and ignores it.
+longer used; ferry logs a warning for each and ignores it.
 
-Environment variables: `VOICE_VIM_HISTORY=0` stops saving history,
-`VOICE_VIM_SIDEBAR=0` keeps the sidebar closed, and `VOICE_VIM_DB` moves the
+Environment variables: `FERRY_HISTORY=0` stops saving history,
+`FERRY_SIDEBAR=0` keeps the sidebar closed, and `FERRY_DB` moves the
 history database.
 
 If Ghostty is installed, Neovide uses its font, size and background
 colour, so the note looks like your terminal even with a transparent
 colorscheme. They are read when
 the Neovim server starts (Reload Config to pick up Ghostty changes);
-`VOICE_VIM_GUI_FONT` (for example `Menlo:h14`) and `VOICE_VIM_GUI_BG` (for
+`FERRY_GUI_FONT` (for example `Menlo:h14`) and `FERRY_GUI_BG` (for
 example `#001e27`) override them. Each time the note appears, other splits
 (such as a file tree your config opens) are closed.
 
 ## When something goes wrong
 
-Open the Hammerspoon console (menu bar icon → Console). voice-vim logs its
-steps there under `voice-vim`: the mode it started in, each show and hide
+Open the Hammerspoon console (menu bar icon → Console). ferry logs its
+steps there under `ferry`: the mode it started in, each show and hide
 with how long it took, the target, the window, each check, the paste.
 
 - **Nothing was pasted.** Look for "copied — paste manually". The text is

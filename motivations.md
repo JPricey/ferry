@@ -44,7 +44,7 @@ lessons". These goals replace the V0 goals where they conflict:
   (Claude Code's Ctrl-G, `git commit`) and as the composer for fleet, Joe's
   agent orchestration tool in `~/Code/fleet`.
 
-This changes one earlier non-goal. voice-vim is still not a general-purpose
+This changes one earlier non-goal. ferry is still not a general-purpose
 note-taking app, but it is now a notes app for dictated text and prompts.
 
 ## Short-term goals (V0)

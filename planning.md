@@ -1,6 +1,6 @@
 # Planning
 
-Brainstorm for where voice-vim goes after V0. `motivations.md` holds the
+Brainstorm for where ferry goes after V0. `motivations.md` holds the
 goals; this file holds the thinking about how to get there.
 
 Read "Status and lessons" and "Next direction" first. The order of work and
@@ -21,7 +21,7 @@ Joe stopped using V0. What went wrong in daily use:
     particular). Posting globally after the target window is confirmed
     frontmost is the usual fix.
   - A fixed `activateDelay` (0.25 s) races the target coming to front and
-    the voice-vim window closing.
+    the ferry window closing.
   - The target is a bundle id only. When the start app is Ghostty (a Claude
     Code pane), "activate Ghostty" brings up whichever Ghostty window macOS
     picks, not the one Joe was in.
@@ -36,24 +36,24 @@ Joe stopped using V0. What went wrong in daily use:
   level, which does not depend on Hammerspoon's hotkey registration.
 - **Every press made a new instance.** Each hotkey press opens a new Ghostty
   window with a new nvim. Windows that were not submitted or cancelled
-  stayed open, and several idle voice-vim windows piled up. Joe wants one
+  stayed open, and several idle ferry windows piled up. Joe wants one
   instance that the hotkey shows and hides.
 - **It felt clunky.** Mostly because of the three problems above, plus the
   cold start of a new window and a new nvim on every press.
 - **History was not an app.** The sidebar lists past sessions, but Joe wants
-  to treat voice-vim as a notes / prompts app: browse the history, reopen an
+  to treat ferry as a notes / prompts app: browse the history, reopen an
   entry, keep editing it, keep drafts, and send it again later.
 
 ## Next direction
 
-The workflow voice-vim must serve: press a hotkey from anywhere, dictate
+The workflow ferry must serve: press a hotkey from anywhere, dictate
 with Wispr Flow into nvim, fix it with vim motions, then send the text where
 it needs to go: a Claude Code pane, the Claude app, Slack, or just the
 clipboard. Often the destination is chosen after writing, not before.
 
 ### One instance that comes and goes
 
-- One long-lived nvim server (`nvim --listen <socket>`) with the voice-vim
+- One long-lived nvim server (`nvim --listen <socket>`) with the ferry
   plugin loaded, in one window that is never closed. Start it at login or on
   the first hotkey press.
 - The hotkey toggles it:
@@ -68,7 +68,7 @@ clipboard. Often the destination is chosen after writing, not before.
   - **A dedicated Ghostty window.** It shares the app with Joe's main Ghostty
     windows, so hide/show must act on that one window (move off-screen or
     minimize), not on the whole app.
-  - **A separate app used only for voice-vim**, such as Neovide (a GUI for
+  - **A separate app used only for ferry**, such as Neovide (a GUI for
     nvim that can attach to a running server) or a second terminal app.
     Show and hide work on the whole app, and the composer never mixes with
     work windows. Neovide is not installed yet.
@@ -90,8 +90,8 @@ needed).
 
 What carried over to "One instance toggled by a hotkey": the server and
 note model, which do not depend on the host. The spike's server script
-became `bin/voice-vim-host` and its `note.lua` became
-`lua/voice-vim/note.lua`. The capture, show, hide and refocus flow and its
+became `bin/ferry-host` and its `note.lua` became
+`lua/ferry/note.lua`. The capture, show, hide and refocus flow and its
 timing logs became `hammerspoon/instance.lua`, with the Neovide adapter in
 `hammerspoon/hosts/neovide.lua` (Neovide sends Cmd+V as a key, so the note
 maps `<D-v>` to paste `+`). The prototypes (`spike/host/`) and the old
@@ -141,27 +141,27 @@ new-window-per-press path were removed on 2026-10-12 (B3).
 
 ### Other ways in
 
-- **`$EDITOR` mode.** `voice-vim-edit <file>` opens the file in the running
+- **`$EDITOR` mode.** `ferry-edit <file>` opens the file in the running
   composer and waits until that buffer is closed, then exits. Point
-  Claude Code's Ctrl-G at it (`EDITOR=voice-vim-edit`) so prompts in progress
+  Claude Code's Ctrl-G at it (`EDITOR=ferry-edit`) so prompts in progress
   get the same composer, dictation and history. The same command works for
   `git commit` and any other tool that runs `$EDITOR`.
 - **Open with a target and seed text** from a URL or the CLI, for example
-  `voice-vim open --target tmux:%12 --seed-file x.md`. The fleet TUI needs
+  `ferry open --target tmux:%12 --seed-file x.md`. The fleet TUI needs
   this for its "compose" key.
 
 ### Fleet integration
 
 Fleet (`~/Code/fleet`) is Joe's local agent orchestration tool, in its own
-repo. It treats voice-vim as its composer. See
+repo. It treats ferry as its composer. See
 `~/Code/fleet/plans/brainstorm/2026-10-11-composer-and-text-editing.md`.
 The contract:
 
-- voice-vim lists fleet targets with `fleet targets --json` and sends with
+- ferry lists fleet targets with `fleet targets --json` and sends with
   `fleet send <target> --file <path>`.
-- Fleet opens voice-vim with a target already set, through the "open with a
+- Fleet opens ferry with a target already set, through the "open with a
   target" entry point.
-- voice-vim must work fully without fleet installed. Hide fleet targets when
+- ferry must work fully without fleet installed. Hide fleet targets when
   the `fleet` command is missing.
 
 ## Next steps, in order
@@ -181,13 +181,13 @@ contract between them.
    with Cmd+C (restoring the clipboard afterwards), writes that selection to
    a temp file, and asks Ghostty over AppleScript to open a window running
    the session script.
-2. **Session script (`bin/voice-vim-session`).** Runs inside that Ghostty
+2. **Session script (`bin/ferry-session`).** Runs inside that Ghostty
    window. Opens Neovim on the temp file in insert mode with
-   `vim/voice-vim.vim` sourced. When Neovim exits it decides submit or
+   `vim/ferry.vim` sourced. When Neovim exits it decides submit or
    cancel: non-zero exit, empty, whitespace-only, or unchanged from the seed
-   means cancel. On submit it calls `hammerspoon://voicevim-submit` with the
+   means cancel. On submit it calls `hammerspoon://ferry-submit` with the
    file path and target bundle id.
-3. **Editor (Neovim + `vim/voice-vim.vim`).** Your normal config plus a few
+3. **Editor (Neovim + `vim/ferry.vim`).** Your normal config plus a few
    buffer-local settings and mappings. `ZZ` writes and quits (submit). `ZQ`
    quits with a non-zero code (cancel). `:Dictate` fires Flow's hands-free
    deep link.
@@ -291,7 +291,7 @@ SQLite rows, refreshed on `BufEnter`. Nothing exotic.
 
 ### Telescope picker
 
-`:Telescope voicevim` with live grep across final text, raw dictation, and
+`:Telescope ferry` with live grep across final text, raw dictation, and
 target app. Multi-select to concatenate several past dictations. Actions
 map to the same insert / paste / yank verbs as the sidebar. Telescope is
 optional; the sidebar should work without it, and a `vim.ui.select`
@@ -358,7 +358,7 @@ keeping the buffer available for the 10%.
 
 Two data sources, one view.
 
-**Our own database.** SQLite at `~/Library/Application Support/voice-vim/
+**Our own database.** SQLite at `~/Library/Application Support/ferry/
 history.sqlite`. One row per session: id, started and ended timestamps,
 target bundle id, target window title or URL if readable, seed text,
 dictated text as it arrived from Flow, final submitted text, and outcome
@@ -426,7 +426,7 @@ plugin-side features prove the workflow.
 
 - Should the plugin be a standalone Neovim plugin (installable via lazy.nvim
   from this repo) rather than a sourced file? Probably yes by V2.
-- Vim compatibility: keep `vim/voice-vim.vim` working for classic Vim, or go
+- Vim compatibility: keep `vim/ferry.vim` working for classic Vim, or go
   Lua-only once the plugin grows? Leaning Lua-only; Neovim is the daily
   driver.
 - Answered 2026-10-11: one instance only. The hotkey shows and hides it.

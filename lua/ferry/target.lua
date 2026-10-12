@@ -9,7 +9,7 @@
 --   tmux:<server>:<pane>        tmux pane; server `default` means no `-L`;
 --                               pane is a tmux target, normally %N, and is
 --                               everything after the second colon
---                               e.g. tmux:default:%12, tmux:voicevim-test:%3
+--                               e.g. tmux:default:%12, tmux:ferry-test:%3
 --   fleet:<id>                  fleet session or task; id is everything
 --                               after `fleet:` and may contain colons
 --                               e.g. fleet:task:jpX -> id task:jpX

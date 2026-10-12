@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh: set up everything voice-vim needs on this Mac. Safe to re-run:
+# install.sh: set up everything ferry needs on this Mac. Safe to re-run:
 # it installs only what is missing and leaves what is already right alone.
 #
 #   ./install.sh           install what is missing, link the module, reload
@@ -7,20 +7,20 @@
 #
 # Each step prints one line: ok, installed, skipped, or missing: <what to do>.
 # Overrides (used by tests/test-install.sh):
-#   VOICE_VIM_APPS_DIR         where .app bundles are looked for (/Applications)
-#   VOICE_VIM_INSTALL_DRY_RUN  1 prints each command instead of running it
+#   FERRY_APPS_DIR         where .app bundles are looked for (/Applications)
+#   FERRY_INSTALL_DRY_RUN  1 prints each command instead of running it
 #   HOME, PATH                 where ~/.hammerspoon and the tools are found
 #
 # Add any future setup step here, following the same pattern.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-apps=${VOICE_VIM_APPS_DIR:-/Applications}
-dry=${VOICE_VIM_INSTALL_DRY_RUN:-0}
+apps=${FERRY_APPS_DIR:-/Applications}
+dry=${FERRY_INSTALL_DRY_RUN:-0}
 hsdir="$HOME/.hammerspoon"
 init="$hsdir/init.lua"
-module="$root/hammerspoon/voice-vim.lua"
-link="$hsdir/voice-vim.lua"
+module="$root/hammerspoon/ferry.lua"
+link="$hsdir/ferry.lua"
 
 check=0
 case "${1:-}" in
@@ -37,7 +37,7 @@ say() {
   printf '%-10s %s\n' "$1" "$2"
 }
 
-# Run a command, or only print it under VOICE_VIM_INSTALL_DRY_RUN=1.
+# Run a command, or only print it under FERRY_INSTALL_DRY_RUN=1.
 run() {
   if [ "$dry" = 1 ]; then echo "+ $*"; else "$@"; fi
 }
@@ -61,7 +61,7 @@ cask() {
 
 # 1. Homebrew installs everything else, so stop here without it.
 # Apple Silicon installs it in /opt/homebrew/bin, which may not be on PATH yet.
-if ! command -v brew >/dev/null 2>&1 && [ -x /opt/homebrew/bin/brew ] && [ -z "${VOICE_VIM_APPS_DIR:-}" ]; then
+if ! command -v brew >/dev/null 2>&1 && [ -x /opt/homebrew/bin/brew ] && [ -z "${FERRY_APPS_DIR:-}" ]; then
   PATH="/opt/homebrew/bin:$PATH"
 fi
 if command -v brew >/dev/null 2>&1; then
@@ -107,6 +107,117 @@ for tool in python3 sqlite3; do
   fi
 done
 
+# >>> BEGIN one-time migration from voice-vim, the old name (R2 removes it) >>>
+# An old install has ~/.hammerspoon/voice-vim.lua, a require("voice-vim")
+# block in init.lua, a server on $TMPDIR/voice-vim.sock or the data folder
+# ~/Library/Application Support/voice-vim. Moving it: save the open draft
+# (the old server still has voice-vim.note in memory), copy the old notes,
+# stop the old Neovide and server (only the processes on the old socket),
+# move the data folder, move the saved window frame (hs -c, before the
+# reload), drop the old link (step 6 makes the new one) and rename the
+# init.lua block (with a .bak). Each action prints one status line.
+old_tmp=${TMPDIR:-/tmp}; old_tmp=${old_tmp%/}
+old_sock="$old_tmp/voice-vim.sock"
+old_link="$hsdir/voice-vim.lua"
+old_data="$HOME/Library/Application Support/voice-vim"
+new_data="$HOME/Library/Application Support/ferry"
+old_require='require("voice-vim")'
+old_found() {
+  [ -L "$old_link" ] || [ -e "$old_link" ] || [ -S "$old_sock" ] || [ -d "$old_data" ] ||
+    { [ -f "$init" ] && grep -qF "$old_require" "$init"; }
+}
+# Pids of processes whose command line contains $1. ps runs first, so the
+# filters below never match themselves.
+old_pids() {
+  local all; all=$(ps -axww -o pid= -o command=)
+  grep -F -- "$1" <<<"$all" | awk -v me=$$ '$1 != me { print $1 }' || true
+}
+old_nvim() { # nvim talking to the old server, cut off after 5 s
+  local nv; nv=$(command -v nvim || echo /opt/homebrew/bin/nvim)
+  perl -e 'alarm 5; exec @ARGV' "$nv" --server "$old_sock" "$@" 2>/dev/null
+}
+old_alive() { [ -S "$old_sock" ] && [ "$(old_nvim --remote-expr 1)" = 1 ]; }
+# Wait up to 5 s until none of the given pids is running.
+old_wait_gone() {
+  local i p up
+  for i in $(seq 50); do
+    up=0; for p in "$@"; do kill -0 "$p" 2>/dev/null && up=1; done
+    [ $up = 0 ] && return 0; sleep 0.1
+  done
+  return 1
+}
+if ! old_found; then
+  say ok "no voice-vim install to migrate"
+elif [ $check = 1 ]; then
+  say missing: "old install found: run ./install.sh to migrate"
+elif [ "$dry" = 1 ]; then
+  echo "+ migrate the voice-vim install (draft, notes, Neovide, server, data, window frame, link, init.lua)"
+  say skipped "voice-vim migration (dry run)"
+else
+  # Save the open draft while the old server still answers.
+  if old_alive; then
+    saved=$(old_nvim --remote-expr "luaeval('(function() local ok, n = pcall(require, \"voice-vim.note\"); if not ok or type(n) ~= \"table\" or type(n.draft) ~= \"function\" then return \"\" end; local ok2, p = pcall(n.draft); return ok2 and tostring(p or \"\") or \"\" end)()')" || true)
+    if [ -n "$saved" ]; then say installed "saved the open voice-vim draft ($saved)"
+    else say ok "no open voice-vim draft to save"; fi
+  fi
+  for pair in voice-vim-notes:ferry-notes voice-vim-outbox:ferry-outbox; do
+    from="$old_tmp/${pair%%:*}" to="$old_tmp/${pair#*:}"
+    if [ -d "$from" ]; then
+      mkdir -p "$to"; cp -Rn "$from/." "$to/" 2>/dev/null || true
+      say installed "copied notes $from -> $to"
+    fi
+  done
+  # The old Neovide: only the process started with --server <old socket>.
+  pids=$(old_pids "--server $old_sock")
+  if [ -n "$pids" ]; then
+    # shellcheck disable=SC2086 # one pid per word
+    kill $pids 2>/dev/null || true
+    if old_wait_gone $pids; then say installed "stopped the old Neovide (pid $(echo $pids))"
+    else say missing: "the old Neovide (pid $(echo $pids)) did not quit: quit it by hand"; fi
+  fi
+  # The old server: ask it to quit, then the process listening on the socket.
+  if old_alive; then
+    old_nvim --remote-expr "luaeval('vim.schedule(function() vim.cmd(\"silent! wall | qall!\") end)')" >/dev/null || true
+  fi
+  pids=$(old_pids "--listen $old_sock")
+  # shellcheck disable=SC2086 # one pid per word
+  if [ -n "$pids" ] && ! old_wait_gone $pids; then kill $pids 2>/dev/null || true; old_wait_gone $pids || true; fi
+  if [ -S "$old_sock" ] || [ -n "$pids" ]; then
+    rm -f "$old_sock"
+    say installed "stopped the old server ($old_sock)"
+  fi
+  if [ -d "$old_data" ]; then
+    if [ -e "$new_data" ]; then
+      say missing: "both $old_data and $new_data exist: merge them by hand"
+    else
+      mv "$old_data" "$new_data"
+      say installed "moved $old_data -> $new_data"
+    fi
+  fi
+  if command -v hs >/dev/null 2>&1 && hs -t 5 -c 'return true' </dev/null >/dev/null 2>&1; then
+    hs -t 5 -c 'local v = hs.settings.get("voice-vim.windowFrame"); if v ~= nil and hs.settings.get("ferry.windowFrame") == nil then hs.settings.set("ferry.windowFrame", v) end; hs.settings.clear("voice-vim.windowFrame")' </dev/null >/dev/null 2>&1 || true
+    say installed "saved window frame moved to hs.settings ferry.windowFrame"
+  else
+    say skipped "saved window frame (no hs CLI; the window opens at its default frame)"
+  fi
+  if [ -L "$old_link" ]; then
+    rm -f "$old_link"
+    say installed "removed the old module link $old_link"
+  elif [ -e "$old_link" ]; then
+    say missing: "$old_link is a regular file: move it aside, then re-run ./install.sh"
+  fi
+  if [ -f "$init" ] && grep -qF "$old_require" "$init"; then
+    bak="$init.bak"
+    [ -e "$bak" ] && bak="$init.bak.$(date +%Y%m%d%H%M%S)"
+    cp -p "$init" "$bak"
+    # Write through the existing file so a symlinked init.lua stays a symlink.
+    new=$(sed -e 's/require("voice-vim")/require("ferry")/' -e 's/^\([[:space:]]*--[[:space:]]*\)voice-vim:/\1ferry:/' "$init")
+    printf '%s\n' "$new" > "$init"
+    say installed "renamed the init.lua block to ferry ($bak is the backup)"
+  fi
+fi
+# <<< END one-time migration from voice-vim <<<
+
 # 6. Link the Hammerspoon module into ~/.hammerspoon. A correct link is
 # left alone; a regular file is never overwritten.
 if [ -L "$link" ] && [ "$(readlink "$link")" = "$module" ]; then
@@ -121,29 +232,29 @@ else
   say installed "module link $link -> $module"
 fi
 
-# 7. Add the voice-vim block to init.lua once. It sets nothing, so the
+# 7. Add the ferry block to init.lua once. It sets nothing, so the
 # module's defaults apply; settings go inside start({ ... }).
-if [ -f "$init" ] && grep -qF 'require("voice-vim")' "$init"; then
-  say ok "voice-vim block in $init"
+if [ -f "$init" ] && grep -qF 'require("ferry")' "$init"; then
+  say ok "ferry block in $init"
 elif [ $check = 1 ]; then
-  say missing: "voice-vim block in $init: run ./install.sh"
+  say missing: "ferry block in $init: run ./install.sh"
 elif [ "$dry" = 1 ]; then
-  echo "+ append the voice-vim block to $init"
-  say installed "voice-vim block in $init"
+  echo "+ append the ferry block to $init"
+  say installed "ferry block in $init"
 else
   mkdir -p "$hsdir"
   if [ -s "$init" ]; then echo >> "$init"; fi
   cat >> "$init" <<'LUA'
--- voice-vim: dictate into Neovim with Wispr Flow, then paste back.
+-- ferry: dictate into Neovim with Wispr Flow, then paste back.
 -- Settings go inside start({ ... }); see guide.md, "Configure".
 require("hs.ipc") -- enables the `hs` CLI for reloading and debugging
-require("voice-vim").start({
+require("ferry").start({
 })
 LUA
-  say installed "voice-vim block in $init"
+  say installed "ferry block in $init"
 fi
 
-# 8. Remove the old Option+V hotkey line (bin/voice-vim-migrate-init keeps
+# 8. Remove the old Option+V hotkey line (bin/ferry-migrate-init keeps
 # a .bak and changes nothing on a second run).
 oldkey='^[[:space:]]*hotkey[[:space:]]*=[[:space:]]*\{[[:space:]]*\{[[:space:]]*"alt"[[:space:]]*\}[[:space:]]*,[[:space:]]*"v"[[:space:]]*\}'
 if [ $check = 1 ]; then
@@ -153,10 +264,10 @@ if [ $check = 1 ]; then
     say ok "no old Option+V hotkey"
   fi
 elif [ "$dry" = 1 ]; then
-  echo "+ $root/bin/voice-vim-migrate-init $init"
+  echo "+ $root/bin/ferry-migrate-init $init"
   say skipped "Option+V migration (dry run)"
 else
-  out=$("$root/bin/voice-vim-migrate-init" "$init")
+  out=$("$root/bin/ferry-migrate-init" "$init")
   case "$out" in
     *"nothing changed"*) say ok "no old Option+V hotkey" ;;
     *) say installed "removed the old Option+V hotkey ($(echo "$out" | sed -n 's/^backup: //p' | head -1) is the backup)" ;;
@@ -190,7 +301,7 @@ Once, by hand (macOS allows no script to do these):
   2. Open Neovide once (open -a Neovide) and click Open if macOS asks, so
      it starts without a prompt later. Quit it again.
 
-Hotkey: Ctrl+Option+V. Settings: the voice-vim block in $init.
+Hotkey: Ctrl+Option+V. Settings: the ferry block in $init.
 MSG
 
 if [ $check = 1 ]; then

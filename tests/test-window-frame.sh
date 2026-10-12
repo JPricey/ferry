@@ -5,14 +5,14 @@
 # the real Hammerspoon, opens no windows, sends no keystrokes.
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-tmp=$(mktemp -d -t vv-wf)
+tmp=$(mktemp -d -t ferry-wf)
 trap 'rm -rf "$tmp"' EXIT
 
 cat > "$tmp/spec.lua" <<'LUA'
-local root = assert(os.getenv("VV_ROOT"))
+local root = assert(os.getenv("FERRY_ROOT"))
 local stub = dofile(root .. "/tests/hs_stub.lua")
 local modpath = root .. "/hammerspoon/window-frame.lua"
-local KEY = "voice-vim.windowFrame"
+local KEY = "ferry.windowFrame"
 local GHOSTTY = "com.mitchellh.ghostty"
 local fail = 0
 
@@ -40,7 +40,7 @@ local function fresh(screens)
   rec.screens = screens
   local app = rec:app({ bundleID = GHOSTTY, windows = {} })
   app._windows[1] = rec:window({ id = 1, app = app })
-  local wf = stub.load(modpath).new({ log = hs.logger.new("voice-vim", "info") })
+  local wf = stub.load(modpath).new({ log = hs.logger.new("ferry", "info") })
   return rec, wf, app
 end
 
@@ -227,7 +227,7 @@ ran=0
 run() { # label cmd...
   local label=$1; shift
   echo "== $label"
-  VV_ROOT="$root" perl -e 'alarm 20; exec @ARGV' "$@" "$tmp/spec.lua" 2>&1 || fail=1 # nvim -l prints to stderr
+  FERRY_ROOT="$root" perl -e 'alarm 20; exec @ARGV' "$@" "$tmp/spec.lua" 2>&1 || fail=1 # nvim -l prints to stderr
   [ "$1" = nvim ] && echo # nvim -l leaves the last line unterminated
   ran=1
 }

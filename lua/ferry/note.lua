@@ -1,12 +1,12 @@
--- voice-vim note core: runs inside the one long-lived nvim server.
+-- ferry note core: runs inside the one long-lived nvim server.
 --
--- bin/voice-vim-host calls the public functions over --remote-expr as
--- luaeval('require"voice-vim.note".<fn>(_A)', {dict}). Each takes one table
--- and returns a string, which voice-vim-host prints.
+-- bin/ferry-host calls the public functions over --remote-expr as
+-- luaeval('require"ferry.note".<fn>(_A)', {dict}). Each takes one table
+-- and returns a string, which ferry-host prints.
 --
 -- One note is "current" until it is finished. show() resumes it, unless a
 -- seed (captured selection) asks for a fresh note. Note files are scratch
--- in $VOICE_VIM_NOTES_DIR; the history database stays the record.
+-- in $FERRY_NOTES_DIR; the history database stays the record.
 --
 -- In a note, :Submit (ZZ, <C-x>, :wq, :x), :Cancel (ZQ) and :Hide (:q)
 -- call M.host instead of exiting. Hide keeps the note as the draft.
@@ -23,9 +23,9 @@
 -- is in progress (flow.adopt_start). Key up calls release(): the stop goes
 -- through flow's queue and waits for the paste like a Submit would.
 --
--- Line 1 of a note is its target header, `to: <spec>` (lua/voice-vim/
+-- Line 1 of a note is its target header, `to: <spec>` (lua/ferry/
 -- target.lua), and the rest is the body. A fresh note's header is the
--- captured target (b:voicevim.auto_spec); a resume rewrites it only while it
+-- captured target (b:ferry.auto_spec); a resume rewrites it only while it
 -- still equals auto_spec, so an edited header is kept. Submit sends the body
 -- to the header's target, or to the captured one when line 1 is not a header.
 -- `to: clipboard` copies the body and hides; :Copy (<C-y>) does that for any
@@ -34,7 +34,7 @@ local M = {}
 
 -- A module note.lua needs at api `want` or later. A running server can hold
 -- one loaded before that (api lower or unset); reload it, keeping its
--- M.state, as voice-vim-host does for this module, then run adopt(old, new)
+-- M.state, as ferry-host does for this module, then run adopt(old, new)
 -- for anything else the old module must hand over. If the reload fails or
 -- is no newer, the loaded one stays.
 local function current(name, want, adopt)
@@ -56,21 +56,21 @@ end
 -- recording and the pending wait across the reload.
 -- The old module's vim.paste hook stays installed, so its on_paste forwards
 -- to the new one (which counts a paste reported by both hooks once).
-local flow = current("voice-vim.flow", 4, function(old, new)
+local flow = current("ferry.flow", 4, function(old, new)
   old.on_paste = function(b) return new.on_paste(b) end
 end)
-local target = require("voice-vim.target")
+local target = require("ferry.target")
 
 -- Bumped when the module changes in a way an already-running server must
--- pick up: bin/voice-vim-host reloads the module (keeping M.state and a
+-- pick up: bin/ferry-host reloads the module (keeping M.state and a
 -- swapped M.host) when the loaded one reports a different api.
 M.api = 8
 
 -- history api 1: open() binds the note keys on the sidebar. Reloaded now
 -- when already loaded, so a sidebar opened from a :History command an older
 -- note module defined has them too.
-local function history() return current("voice-vim.history", 1) end
-if package.loaded["voice-vim.history"] then history() end
+local function history() return current("ferry.history", 1) end
+if package.loaded["ferry.history"] then history() end
 
 -- The current (unfinished) note: { id = uuid, path = file, buf = bufnr,
 -- unstarted = true while it has no history row (see blank()) }.
@@ -80,10 +80,10 @@ M.state = { note = nil, cursor = nil, dir = nil }
 local function notes_dir(opts)
   if opts and opts.dir and opts.dir ~= "" then return opts.dir end
   if M.state.dir then return M.state.dir end
-  local env = os.getenv("VOICE_VIM_NOTES_DIR")
+  local env = os.getenv("FERRY_NOTES_DIR")
   if env and env ~= "" then return env end
   local tmp = (os.getenv("TMPDIR") or "/tmp"):gsub("/$", "")
-  return tmp .. "/voice-vim-notes"
+  return tmp .. "/ferry-notes"
 end
 
 local seeded = false
@@ -132,17 +132,17 @@ local function repo_root()
   return vim.fn.fnamemodify(src, ":p:h:h:h")
 end
 
--- History: `voice-vim-db start` runs in the background when a fresh note
+-- History: `ferry-db start` runs in the background when a fresh note
 -- opens, so show stays fast; finish waits for it, then runs to completion
 -- before the host is called (Hammerspoon deletes the submit file).
 local db_starts = {}
 
 local function db(args, on_exit)
-  local cmd = { repo_root() .. "/bin/voice-vim-db" }
+  local cmd = { repo_root() .. "/bin/ferry-db" }
   vim.list_extend(cmd, args)
   local ok, obj = pcall(vim.system, cmd, { text = true }, on_exit)
   if not ok then
-    vim.notify("voice-vim: history unavailable: " .. tostring(obj), vim.log.levels.WARN)
+    vim.notify("ferry: history unavailable: " .. tostring(obj), vim.log.levels.WARN)
     return nil
   end
   return obj
@@ -189,16 +189,16 @@ local function to_clipboard(text)
   return got_ok and type(got) == "string" and trim(got) == trim(text)
 end
 
-local CLIP_FAIL = "voice-vim: could not copy to the clipboard — note kept"
+local CLIP_FAIL = "ferry: could not copy to the clipboard — note kept"
 
 -- The default host talks to Hammerspoon. submit{file,target,window} reuses
--- V0's voicevim-submit URL (Hammerspoon reads, delivers and deletes the
+-- V0's ferry-submit URL (Hammerspoon reads, delivers and deletes the
 -- file); hide{} asks it to hide the host and refocus the target. If the URL
 -- cannot be opened, the text goes on the clipboard instead.
 M.default_host = {}
 
 function M.default_host.submit(p)
-  local url = "hammerspoon://voicevim-submit?file=" .. enc(p.file) .. "&target=" .. enc(p.target)
+  local url = "hammerspoon://ferry-submit?file=" .. enc(p.file) .. "&target=" .. enc(p.target)
   if p.window and p.window ~= "" then url = url .. "&window=" .. enc(p.window) end
   open_url(url, function()
     local f = io.open(p.file, "r")
@@ -206,17 +206,17 @@ function M.default_host.submit(p)
     if f then f:close() end
     if to_clipboard((text:gsub("\n$", ""))) then
       os.remove(p.file)
-      vim.notify("voice-vim: copied — paste manually", vim.log.levels.WARN)
+      vim.notify("ferry: copied — paste manually", vim.log.levels.WARN)
     else
-      vim.notify("voice-vim: could not reach Hammerspoon or copy to the clipboard — text kept in "
+      vim.notify("ferry: could not reach Hammerspoon or copy to the clipboard — text kept in "
         .. p.file, vim.log.levels.ERROR)
     end
   end)
 end
 
 function M.default_host.hide()
-  open_url("hammerspoon://voicevim-hide", function()
-    vim.notify("voice-vim: could not reach Hammerspoon to hide", vim.log.levels.WARN)
+  open_url("hammerspoon://ferry-hide", function()
+    vim.notify("ferry: could not reach Hammerspoon to hide", vim.log.levels.WARN)
   end)
 end
 
@@ -242,7 +242,7 @@ function M.apply_options(buf)
   flow.attach(buf)
   vim.api.nvim_buf_create_user_command(buf, "Dictate", function() flow.start() end, { force = true })
   vim.keymap.set("n", "<leader>d", "<Cmd>Dictate<CR>", { buffer = buf, silent = true })
-  vim.keymap.set({ "n", "i" }, "<C-s>", "<Cmd>lua require'voice-vim.flow'.toggle()<CR>",
+  vim.keymap.set({ "n", "i" }, "<C-s>", "<Cmd>lua require'ferry.flow'.toggle()<CR>",
     { buffer = buf, silent = true })
   vim.api.nvim_buf_create_user_command(buf, "History", function() M.toggle_history() end,
     { force = true })
@@ -273,7 +273,7 @@ end
 -- normal buffer, not the history sidebar (so not nvim-tree either).
 local function note_window_ok(win)
   if vim.api.nvim_win_get_config(win).relative ~= "" then return false end
-  local hist = package.loaded["voice-vim.history"]
+  local hist = package.loaded["ferry.history"]
   if hist and hist.state and hist.state.win == win then return false end
   return vim.bo[vim.api.nvim_win_get_buf(win)].buftype == ""
 end
@@ -304,12 +304,12 @@ end
 
 local function sidebar_on(opts)
   local v = opts and opts.sidebar
-  if v == nil or v == "" then v = os.getenv("VOICE_VIM_SIDEBAR") end
+  if v == nil or v == "" then v = os.getenv("FERRY_SIDEBAR") end
   return v ~= "0"
 end
 
 -- The note window (current) is the only normal window in its tab, plus the
--- history sidebar on the left unless sidebar is off (VOICE_VIM_SIDEBAR=0),
+-- history sidebar on the left unless sidebar is off (FERRY_SIDEBAR=0),
 -- as in V0. Other windows (e.g. a file tree opened at startup) are closed;
 -- a modified buffer in one just becomes hidden. The sidebar is refreshed
 -- (after show returns) when the note changed since it was last listed.
@@ -329,7 +329,7 @@ local function layout(opts)
   end
   vim.api.nvim_set_current_win(note_win)
   if not want then return end
-  local id = (vim.b.voicevim or {}).id
+  local id = (vim.b.ferry or {}).id
   if side then
     hist.state.main_win = note_win
     if M.state.listed ~= id then
@@ -385,7 +385,7 @@ local function fresh(opts, seed)
   vim.api.nvim_buf_set_lines(note.buf, 0, -1, false, target.join(meta.auto_spec, body))
   vim.api.nvim_win_set_cursor(0, { 2, 0 })
   M.state.note, M.state.cursor = note, nil
-  vim.b[note.buf].voicevim = meta
+  vim.b[note.buf].ferry = meta
   history_start(id, meta.auto_spec, seed)
   vim.cmd("startinsert")
   return note
@@ -396,7 +396,7 @@ local function resume(opts)
   local buf = note_buf(note)
   display(buf)
   M.apply_options(buf)
-  local meta = vim.b[buf].voicevim or { id = note.id, seed = "" }
+  local meta = vim.b[buf].ferry or { id = note.id, seed = "" }
   local prev = captured_spec(meta)
   meta.target, meta.window = opts.target or "", opts.window or ""
   -- The header follows the new target while it is still the automatic one.
@@ -433,7 +433,7 @@ local function resume(opts)
     vim.api.nvim_buf_set_lines(buf, 0, 1, false, { header(spec) })
     meta.auto_spec = spec
   end
-  vim.b[buf].voicevim = meta
+  vim.b[buf].ferry = meta
   if note.unstarted then
     note.unstarted = nil
     history_start(note.id, spec, "")
@@ -578,7 +578,7 @@ function M.draft()
   local win = vim.fn.bufwinid(buf)
   if win ~= -1 then M.state.cursor = vim.api.nvim_win_get_cursor(win) end
   vim.api.nvim_buf_call(buf, function() vim.cmd("silent write!") end)
-  vim.g.voicevim_draft = note.path
+  vim.g.ferry_draft = note.path
   vim.cmd("stopinsert")
   return note.path
 end
@@ -609,7 +609,7 @@ local function blank(wins)
     end)
   end
   note.unstarted = true
-  vim.b[note.buf].voicevim = { id = note.id, target = "", window = "", seed = "" }
+  vim.b[note.buf].ferry = { id = note.id, target = "", window = "", seed = "" }
   M.state.note, M.state.cursor = note, nil
   return note
 end
@@ -617,7 +617,7 @@ end
 -- End a note: record the outcome, and drop its buffer and file. If it was
 -- the current note, a blank note replaces it in its windows.
 local function finish(buf, outcome, file, spec)
-  local meta = vim.b[buf].voicevim or {}
+  local meta = vim.b[buf].ferry or {}
   local note = M.state.note
   local current = note and note.buf == buf
   if meta.id then
@@ -630,7 +630,7 @@ local function finish(buf, outcome, file, spec)
     path = note.path
     M.forget()
   end
-  vim.g.voicevim_draft = nil
+  vim.g.ferry_draft = nil
   vim.cmd("stopinsert")
   local wins = vim.fn.win_findbuf(buf)
   if current then
@@ -651,7 +651,7 @@ end
 local function parts(buf)
   local spec, body = target.split(vim.api.nvim_buf_get_lines(buf, 0, -1, false))
   while spec and #body > 0 and target.split({ body[1] }) == spec do table.remove(body, 1) end
-  return spec or captured_spec(vim.b[buf].voicevim), body
+  return spec or captured_spec(vim.b[buf].ferry), body
 end
 
 -- Write the body to <notes dir>/outbox/<id>.md and return its path. Not
@@ -660,7 +660,7 @@ end
 local function to_tempfile(buf, body)
   local dir = notes_dir() .. "/outbox"
   vim.fn.mkdir(dir, "p")
-  local id = (vim.b[buf].voicevim or {}).id or M.uuid()
+  local id = (vim.b[buf].ferry or {}).id or M.uuid()
   local file = dir .. "/" .. id .. ".md"
   vim.fn.writefile(body, file)
   return file
@@ -691,7 +691,7 @@ end
 -- The body as text, or nil when it is blank or unchanged from the seed
 -- (a Submit or Copy of it is a cancel).
 local function body_text(buf, body)
-  local meta = vim.b[buf].voicevim or {}
+  local meta = vim.b[buf].ferry or {}
   local text = table.concat(body, "\n")
   local trim = function(s) return (s:gsub("\n+$", "")) end
   if not text:find("%S") or trim(text) == trim(meta.seed or "") then return nil end
@@ -728,7 +728,7 @@ local function submit_now(buf)
       vim.notify(string.format("%s (target %q %s)", CLIP_FAIL, spec, why), vim.log.levels.ERROR)
       return
     end
-    vim.notify(string.format("voice-vim: copied — target %q %s", spec, why), vim.log.levels.WARN)
+    vim.notify(string.format("ferry: copied — target %q %s", spec, why), vim.log.levels.WARN)
     return
   end
   local file = to_tempfile(buf, body)
@@ -761,20 +761,20 @@ function M.submit(buf) buf = bufnr(buf); after_flow(buf, submit_now) end
 function M.hide(buf) buf = bufnr(buf); after_flow(buf, hide_now) end
 function M.copy(buf) buf = bufnr(buf); after_flow(buf, copy_now) end
 
--- The note of the current tab: the buffer with b:voicevim in the sidebar's
+-- The note of the current tab: the buffer with b:ferry in the sidebar's
 -- main window, else in any window of the tab, else the current note.
 -- Returns buf and its window in the tab (nil when not shown), or nil.
 function M.tab_note()
   local tab = vim.api.nvim_get_current_tabpage()
   local wins = vim.api.nvim_tabpage_list_wins(tab)
-  local hist = package.loaded["voice-vim.history"]
+  local hist = package.loaded["ferry.history"]
   local main = hist and hist.state and hist.state.main_win
   if main and vim.api.nvim_win_is_valid(main) and vim.api.nvim_win_get_tabpage(main) == tab then
     table.insert(wins, 1, main)
   end
   for _, w in ipairs(wins) do
     local b = vim.api.nvim_win_get_buf(w)
-    if type(vim.b[b].voicevim) == "table" then return b, w end
+    if type(vim.b[b].ferry) == "table" then return b, w end
   end
   if M.state.note then return note_buf(M.state.note), nil end
   return nil
@@ -786,7 +786,7 @@ end
 function M.for_tab_note(action)
   local buf, win = M.tab_note()
   if not buf then
-    vim.notify("voice-vim: no note to " .. action, vim.log.levels.WARN)
+    vim.notify("ferry: no note to " .. action, vim.log.levels.WARN)
     return
   end
   if win then vim.api.nvim_set_current_win(win) else display(buf) end
@@ -840,8 +840,8 @@ end
 -- Neovide sends Cmd+V as <D-v>; terminals never do. Paste the + register,
 -- which is where Wispr Flow puts the dictation, then tell flow a paste
 -- landed (terminal pastes reach it through the vim.paste hook instead).
-local on_paste = "<Cmd>lua require'voice-vim.flow'.on_paste(0)<CR>"
-vim.keymap.set({ "i", "c" }, "<D-v>", "<C-r><C-o>+" .. on_paste, { desc = "voice-vim: paste clipboard" })
-vim.keymap.set("n", "<D-v>", '"+p' .. on_paste, { desc = "voice-vim: paste clipboard" })
+local on_paste = "<Cmd>lua require'ferry.flow'.on_paste(0)<CR>"
+vim.keymap.set({ "i", "c" }, "<D-v>", "<C-r><C-o>+" .. on_paste, { desc = "ferry: paste clipboard" })
+vim.keymap.set("n", "<D-v>", '"+p' .. on_paste, { desc = "ferry: paste clipboard" })
 
 return M

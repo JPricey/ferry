@@ -1,10 +1,10 @@
--- Flow toggle core in lua/voice-vim/flow.lua: start/stop through the
+-- Flow toggle core in lua/ferry/flow.lua: start/stop through the
 -- default M.open (a recording fake `open` first on PATH), paste detection
 -- through the vim.paste hook, and finish_then's wait for the last paste.
 -- Run by tests/test-flow.sh: nvim --headless --clean -l tests/flow_spec.lua <root> <work>
 local root, work = arg[1], arg[2]
 vim.opt.rtp:prepend(root)
-local flow = require("voice-vim.flow")
+local flow = require("ferry.flow")
 local log = work .. "/open.log"
 
 -- io.stdout, not print: print goes through nvim's message grid, which

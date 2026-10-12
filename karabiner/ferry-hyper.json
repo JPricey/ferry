@@ -1,5 +1,5 @@
 {
-  "title": "voice-vim: Hyper key and Hyper+V",
+  "title": "ferry: Hyper key and Hyper+V",
   "rules": [
     {
       "description": "Right Command held acts as Hyper (Cmd+Ctrl+Opt+Shift); tapped alone it stays Right Command",
@@ -21,7 +21,7 @@
       ]
     },
     {
-      "description": "Hyper+V shows or hides voice-vim (hammerspoon://voicevim-start)",
+      "description": "Hyper+V shows or hides ferry (hammerspoon://ferry-start)",
       "manipulators": [
         {
           "type": "basic",
@@ -32,7 +32,7 @@
             }
           },
           "to": [
-            { "shell_command": "open -g 'hammerspoon://voicevim-start'" }
+            { "shell_command": "open -g 'hammerspoon://ferry-start'" }
           ]
         }
       ]

@@ -1,27 +1,27 @@
--- voice-vim: Hammerspoon module.
+-- ferry: Hammerspoon module.
 --
 -- One always-running nvim server shown in Neovide. The hotkey toggles it
 -- (hammerspoon/instance.lua controller with the hammerspoon/hosts/neovide.lua
 -- host): from any app it captures the app and window, then shows the note in
 -- insert mode; from the note it keeps the note as a draft, hides Neovide and
--- refocuses that window. The note (lua/voice-vim/note.lua) sends
--- hammerspoon://voicevim-submit, which hides Neovide and then runs M.submit
--- below, or voicevim-hide. start() pre-warms the server (an hs.task) so the
+-- refocuses that window. The note (lua/ferry/note.lua) sends
+-- hammerspoon://ferry-submit, which hides Neovide and then runs M.submit
+-- below, or ferry-hide. start() pre-warms the server (an hs.task) so the
 -- first press is fast. Without Neovide there is no fallback window: start()
 -- alerts once and each press alerts again.
 --
 -- Submit: put the text on the clipboard, focus the target window, wait until
 -- it is frontmost, Cmd+V. The delivery logic lives in
--- lua/voice-vim/delivery.lua (pure, tested).
+-- lua/ferry/delivery.lua (pure, tested).
 --
 -- Hold to talk: a second hotkey (talkHotkey, default Ctrl+Option+B, or
--- hammerspoon://voicevim-talk?state=down|up) calls the controller's
+-- hammerspoon://ferry-talk?state=down|up) calls the controller's
 -- talkDown when pressed (start Flow, show the note) and talkUp when
 -- released (stop Flow once the note is focused). See instance.lua.
 --
 -- Usage in ~/.hammerspoon/init.lua:
---   local voicevim = require("voice-vim")
---   voicevim.start()  -- Ctrl+Option+V; pass { hotkey = { mods, key } } to change
+--   local ferry = require("ferry")
+--   ferry.start()  -- Ctrl+Option+V; pass { hotkey = { mods, key } } to change
 --                     -- (talkHotkey likewise; talkHotkey = false turns it off)
 
 local M = {}
@@ -48,19 +48,19 @@ M.config = {
   rememberFrame = true,
   -- First-open size, as a fraction of the main screen's width and height.
   windowSize = 0.5,
-  -- The nvim server socket (default $VOICE_VIM_SOCK, else
-  -- ${TMPDIR}/voice-vim.sock, as bin/voice-vim-host).
+  -- The nvim server socket (default $FERRY_SOCK, else
+  -- ${TMPDIR}/ferry.sock, as bin/ferry-host).
   sock = nil,
   -- Extra options for hammerspoon/hosts/neovide.lua new() (searchPath,
   -- appPaths, adoptTimeout, commandLine). Tests use it.
   neovide = nil,
 }
 
-local log = hs.logger.new("voice-vim", "info")
+local log = hs.logger.new("ferry", "info")
 
 local function repoRoot()
   if M.config.root then return M.config.root end
-  -- Resolve this file's real path (~/.hammerspoon/voice-vim.lua is a symlink
+  -- Resolve this file's real path (~/.hammerspoon/ferry.lua is a symlink
   -- into the repo) and go up one directory.
   local src = debug.getinfo(1, "S").source:sub(2)
   local out = hs.execute("realpath " .. string.format("%q", src))
@@ -72,7 +72,7 @@ end
 -- repoRoot() runs inside the pcall too, so any failure ends up here.
 local function loadDelivery()
   local ok, mod = pcall(function()
-    return dofile(repoRoot() .. "/lua/voice-vim/delivery.lua")
+    return dofile(repoRoot() .. "/lua/ferry/delivery.lua")
   end)
   if ok and type(mod) == "table" and type(mod.deliver) == "function" then return mod end
   log.e("submit: cannot load delivery.lua: " .. tostring(mod))
@@ -145,8 +145,8 @@ local function deliveryEnv(win, text)
   return env
 end
 
--- Deliver a note: hammerspoon://voicevim-submit?file=&target=&window=
--- (sent by lua/voice-vim/note.lua; instance.lua hides Neovide first).
+-- Deliver a note: hammerspoon://ferry-submit?file=&target=&window=
+-- (sent by lua/ferry/note.lua; instance.lua hides Neovide first).
 function M.submit(params)
   params = params or {}
   local file, target = params.file, params.target or ""
@@ -164,7 +164,7 @@ function M.submit(params)
   if not hs.accessibilityState() then
     hs.pasteboard.setContents(text)
     log.e("submit: Hammerspoon lacks Accessibility; cannot paste (text left on clipboard)")
-    hs.alert.show("voice-vim: grant Hammerspoon Accessibility to paste (text copied)")
+    hs.alert.show("ferry: grant Hammerspoon Accessibility to paste (text copied)")
     hs.accessibilityState(true)
     return
   end
@@ -252,27 +252,27 @@ local function bindHotkey(spec, suffix, url, pressed, released)
   end
   log.e("failed to bind " .. combo .. suffix .. ": "
     .. (bok and "hs.hotkey.bind returned nil" or tostring(obj)))
-  hs.alert.show("voice-vim: could not bind " .. combo .. suffix .. "; use hammerspoon://" .. url)
+  hs.alert.show("ferry: could not bind " .. combo .. suffix .. "; use hammerspoon://" .. url)
   return nil
 end
 
--- Same default as bin/voice-vim-host.
+-- Same default as bin/ferry-host.
 local function defaultSock()
-  local env = os.getenv("VOICE_VIM_SOCK")
+  local env = os.getenv("FERRY_SOCK")
   if env and env ~= "" then return env end
   local tmp = os.getenv("TMPDIR")
   if not tmp or tmp == "" then tmp = "/tmp" end
-  return (tmp:gsub("/$", "")) .. "/voice-vim.sock"
+  return (tmp:gsub("/$", "")) .. "/ferry.sock"
 end
 
-local NO_NEOVIDE = "voice-vim: Neovide is not installed — run ./install.sh"
+local NO_NEOVIDE = "ferry: Neovide is not installed — run ./install.sh"
 
 -- The controller startInstance() is building; start() disables it if the
 -- setup raises after it was made, so it can never show Neovide afterwards.
 local building = nil
 
 -- Build the one-instance controller: the Neovide host, the controller with
--- M.submit as its deliver, the voicevim-submit / voicevim-hide handlers,
+-- M.submit as its deliver, the ferry-submit / ferry-hide handlers,
 -- and the server pre-warm. Returns the controller and why, or nil and why
 -- (Neovide not found). May raise (start() pcalls it).
 --
@@ -302,8 +302,8 @@ local function startInstance()
   c.bindURLs()
   c.prewarm(function(warm)
     if not warm then
-      log.w("pre-warm: the voice-vim server did not start;"
-        .. " the next press runs voice-vim-host ensure again")
+      log.w("pre-warm: the ferry server did not start;"
+        .. " the next press runs ferry-host ensure again")
     end
   end)
   building = nil
@@ -316,22 +316,22 @@ local function callInstance(name, label, quiet)
   local c = M._instance
   if not c then
     local msg = M._unavailable or NO_NEOVIDE
-    log.w(label .. ": voice-vim is not running (" .. msg .. ")")
+    log.w(label .. ": ferry is not running (" .. msg .. ")")
     if not quiet then hs.alert.show(msg) end
     return
   end
   local ok, err = pcall(c[name])
   if not ok then
     log.e(name .. ": " .. tostring(err))
-    hs.alert.show("voice-vim: error (see console)")
+    hs.alert.show("ferry: error (see console)")
   end
 end
 
--- The hotkey (and hammerspoon://voicevim-start): show or hide the one
+-- The hotkey (and hammerspoon://ferry-start): show or hide the one
 -- instance.
 function M.toggle() callInstance("toggle", "press") end
 
--- The talk hotkey pressed (hammerspoon://voicevim-talk?state=down): start
+-- The talk hotkey pressed (hammerspoon://ferry-talk?state=down): start
 -- Flow and show the note. Without an instance: the same alert as toggle,
 -- and Flow is never started.
 function M.talkDown() callInstance("talkDown", "talk down") end
@@ -340,7 +340,7 @@ function M.talkDown() callInstance("talkDown", "talk down") end
 -- Without an instance talkDown has already alerted.
 function M.talkUp() callInstance("talkUp", "talk up", true) end
 
--- hammerspoon://voicevim-talk?state=down|up (Karabiner, or anything that
+-- hammerspoon://ferry-talk?state=down|up (Karabiner, or anything that
 -- can send key down and key up separately).
 local function onTalkURL(_, params)
   local state = params and params.state
@@ -349,7 +349,7 @@ local function onTalkURL(_, params)
   elseif state == "up" then
     M.talkUp()
   else
-    log.w("voicevim-talk: state=" .. tostring(state) .. " ignored; use state=down or state=up")
+    log.w("ferry-talk: state=" .. tostring(state) .. " ignored; use state=down or state=up")
   end
 end
 
@@ -358,7 +358,7 @@ end
 local OBSOLETE = {
   { "activateDelay", "activateDelay is no longer used; set confirmTimeout instead" },
   { "windowTitle", "windowTitle is no longer used" },
-  { "terminal", "terminal is no longer used; voice-vim always runs in Neovide" },
+  { "terminal", "terminal is no longer used; ferry always runs in Neovide" },
   { "autoStartFlow", "autoStartFlow is no longer used; press Ctrl-S in the note" },
 }
 
@@ -374,7 +374,7 @@ function M.start(cfg)
   if M.config.mode ~= nil then
     if M.config.mode ~= "instance" then
       log.w("mode = " .. tostring(M.config.mode) .. " is no longer used;"
-        .. " voice-vim always runs one instance in Neovide")
+        .. " ferry always runs one instance in Neovide")
     end
     M.config.mode = nil
   end
@@ -392,34 +392,34 @@ function M.start(cfg)
     log.i("mode: one instance in Neovide (" .. tostring(why) .. ")")
   elseif ok then
     M._unavailable = NO_NEOVIDE
-    log.e("mode: Neovide not found (" .. tostring(why) .. "); voice-vim cannot run."
+    log.e("mode: Neovide not found (" .. tostring(why) .. "); ferry cannot run."
       .. " Run ./install.sh (brew install --cask neovide-app)")
     hs.alert.show(M._unavailable)
   else
     -- Half-built controller: drop its pending show and URL handlers.
     if building then pcall(building.disable) end
     building = nil
-    M._unavailable = "voice-vim: setup failed (see console): " .. tostring(c)
+    M._unavailable = "ferry: setup failed (see console): " .. tostring(c)
     log.e("mode: one instance failed to start: " .. tostring(c))
     hs.alert.show(M._unavailable)
   end
-  -- hammerspoon://voicevim-start does what the hotkey does (Karabiner, a
+  -- hammerspoon://ferry-start does what the hotkey does (Karabiner, a
   -- launcher, or `open -g` from a shell).
-  hs.urlevent.bind("voicevim-start", function() M.toggle() end)
-  hs.urlevent.bind("voicevim-talk", onTalkURL)
+  hs.urlevent.bind("ferry-start", function() M.toggle() end)
+  hs.urlevent.bind("ferry-talk", onTalkURL)
   if M.hotkeyObj then M.hotkeyObj:delete(); M.hotkeyObj = nil end
   if M.talkHotkeyObj then M.talkHotkeyObj:delete(); M.talkHotkeyObj = nil end
-  M.hotkeyObj = bindHotkey(M.config.hotkey, "", "voicevim-start", M.toggle)
+  M.hotkeyObj = bindHotkey(M.config.hotkey, "", "ferry-start", M.toggle)
   local talk = M.config.talkHotkey
   if not talk then
     log.i("talk hotkey off")
   elseif comboKey(talk[1], talk[2]) == comboKey(M.config.hotkey[1], M.config.hotkey[2]) then
     local combo = comboName(talk[1], talk[2])
     log.e("talk hotkey " .. combo .. " is the same as the hotkey; not bound")
-    hs.alert.show("voice-vim: talkHotkey " .. combo .. " is the same as the hotkey; not bound")
+    hs.alert.show("ferry: talkHotkey " .. combo .. " is the same as the hotkey; not bound")
   else
     -- Pressed and released; no repeat function, so holding does nothing more.
-    M.talkHotkeyObj = bindHotkey(talk, " (talk)", "voicevim-talk?state=down|up", M.talkDown, M.talkUp)
+    M.talkHotkeyObj = bindHotkey(talk, " (talk)", "ferry-talk?state=down|up", M.talkDown, M.talkUp)
   end
   return M
 end
