@@ -52,6 +52,7 @@ touching `lua/voice-vim/delivery.lua` or the Hammerspoon module,
 `bash tests/test-window-frame.sh` after touching `hammerspoon/window-frame.lua`,
 `bash tests/test-target.sh` after touching `lua/voice-vim/target.lua`,
 `bash tests/test-store.sh` after touching `lua/voice-vim/store.lua`,
+`bash tests/test-tmux.sh` after touching `lua/voice-vim/tmux.lua` (its own `tmux -L voicevim-test` server only),
 and `bash tests/test-host.sh`, `bash tests/test-note.sh` and
 `bash tests/test-instance.sh` after touching `bin/voice-vim-host`,
 `lua/voice-vim/note.lua`, `lua/voice-vim/gui.lua` or `hammerspoon/instance.lua`, and
