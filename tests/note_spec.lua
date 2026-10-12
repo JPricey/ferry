@@ -161,6 +161,8 @@ vim.cmd("Hide")
 check("Hide calls host.hide only", "hide", kinds())
 check("Hide writes the draft", "keep me\n", readfile(p5))
 check("Hide sets g:voicevim_draft", p5, vim.g.voicevim_draft)
+-- history start runs in the background.
+vim.wait(3000, function() return outcome(id5) == "open" end, 20)
 check("Hide leaves the row open", "open", outcome(id5))
 local p6, id6 = show()
 check("next show resumes the draft", p5 .. " " .. id5 .. " keep me",
@@ -368,6 +370,38 @@ check("Cancel while recording: host.hide only after the paste",
   "start-hands-free,stop-hands-free,paste,hide", flow_events())
 check("Cancel while recording records a cancelled row", "cancelled", outcome(id8))
 check("Flow is idle after the voice-key cases", false, flow.recording())
+
+-- --- hold to talk: release, and draft (the main hotkey) during its wait ---
+reset(); events = {}
+local pt = note.show({ target = "com.example.app", window = "4242", talk = "1" })
+check("show{talk}: Flow recording, no URL, insert on row 2", "true  2",
+  tostring(flow.recording()) .. " " .. flow_events() .. " " .. vim.api.nvim_win_get_cursor(0)[1])
+body({ "spoken" })
+at_end()
+check("release: one stop, prints released", "released stop-hands-free", note.release() .. " " .. flow_events())
+check("release wait has kind release", "release", (flow.state.waiting or {}).kind)
+check("draft during a release wait: waiting for flow, no host call yet", "waiting for flow " .. pt .. " ",
+  note.draft() .. " " .. kinds())
+paste_later(" words", 200)
+vim.wait(3000, function() return #calls > 0 end, 10)
+vim.wait(100)
+check("draft during a release wait: one host.hide after the paste", "paste,hide hide", flow_events() .. " " .. kinds())
+check("draft during a release wait: the file holds the paste", "to: app:com.example.app#4242\nspoken words\n", readfile(pt))
+check("release while idle prints idle, sends nothing", "idle ", note.release() .. " " .. flow_events())
+
+reset(); events = {}
+note.show({ target = "com.example.app", window = "4242" })
+body({ "send me" })
+at_end()
+flow.assume_recording()
+vim.cmd("Submit")
+check("draft during a Submit wait: waiting for flow, no host call", "waiting for flow " .. pt .. " ",
+  note.draft() .. " " .. kinds())
+paste_later(" too", 200)
+vim.wait(3000, function() return #calls > 0 end, 10)
+vim.wait(300)
+check("draft during a Submit wait: only host.submit after the paste, with the paste",
+  "stop-hands-free,paste,submit submit send me too\n", flow_events() .. " " .. kinds() .. " " .. tostring((calls[1] or {})[3]))
 
 -- --- default host ---------------------------------------------------------
 note.host = note.default_host

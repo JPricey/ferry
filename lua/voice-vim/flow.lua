@@ -28,6 +28,10 @@
 -- and still waits for Flow's paste.
 local M = {}
 
+-- Bumped when note.lua needs functions an older flow lacks; note.lua
+-- reloads a stale flow module in a running server (keeping M.state).
+M.api = 2
+
 M.paste_timeout_ms = 4000
 M.settle_ms = 150
 M.poll_ms = 50

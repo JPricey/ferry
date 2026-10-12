@@ -18,19 +18,40 @@
 -- Cancel and Hide first wait for Flow's last paste when Flow is recording
 -- (flow.finish_then), so the last words land in the note, not the target.
 --
+-- Hold to talk: Hammerspoon starts Flow itself, then calls show{talk} (or
+-- talk() when the note is already in front), which tells flow a recording
+-- is in progress (flow.adopt_start). Key up calls release(): the stop goes
+-- through flow's queue and waits for the paste like a Submit would.
+--
 -- Line 1 of a note is its target header, `to: <spec>` (lua/voice-vim/
 -- target.lua), and the rest is the body. A fresh note's header is the
 -- captured target (b:voicevim.auto_spec); a resume rewrites it only while it
 -- still equals auto_spec, so an edited header is kept. Submit sends the body
 -- to the header's target, or to the captured one when line 1 is not a header.
 local M = {}
+
+-- note.lua needs flow's api 2 (adopt_start, release). A server that loaded
+-- an older voice-vim.flow before them reloads it here, keeping its state
+-- (recording, the pending wait), as voice-vim-host does for this module.
+local FLOW_API = 2
 local flow = require("voice-vim.flow")
+if flow.api ~= FLOW_API then
+  local old = flow
+  package.loaded["voice-vim.flow"] = nil
+  local ok, m = pcall(require, "voice-vim.flow")
+  if ok and type(m) == "table" and m.api == FLOW_API then
+    m.state = old.state
+    flow = m
+  else
+    package.loaded["voice-vim.flow"] = old
+  end
+end
 local target = require("voice-vim.target")
 
 -- Bumped when the module changes in a way an already-running server must
 -- pick up: bin/voice-vim-host reloads the module (keeping M.state and a
 -- swapped M.host) when the loaded one reports a different api.
-M.api = 3
+M.api = 4
 
 -- The current (unfinished) note: { id = uuid, path = file, buf = bufnr,
 -- unstarted = true while it has no history row (see blank()) }.
@@ -391,9 +412,43 @@ local function resume(opts)
   return note
 end
 
+-- Hold to talk: Flow's paste lands at the cursor, so never in the to:
+-- header. With the cursor on a header line 1, move to the end of line 2
+-- (added when missing) and insert there. Returns true when it moved.
+local function off_header(buf)
+  local win = vim.api.nvim_get_current_win()
+  if vim.api.nvim_win_get_cursor(win)[1] ~= 1 then return false end
+  if target.split(vim.api.nvim_buf_get_lines(buf, 0, 1, false)) == nil then return false end
+  if vim.api.nvim_buf_line_count(buf) < 2 then vim.api.nvim_buf_set_lines(buf, 1, 1, false, { "" }) end
+  local len = #vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1]
+  vim.api.nvim_win_set_cursor(win, { 2, len })
+  if vim.fn.mode():sub(1, 1) ~= "i" then vim.cmd("startinsert!") end
+  return true
+end
+
+-- Insert mode at the cursor, like `a` from normal mode (already in insert
+-- mode: the cursor stays), never in the header.
+local function insert_here(buf)
+  if off_header(buf) then return end
+  if vim.fn.mode():sub(1, 1) == "i" then return end
+  local win = vim.api.nvim_get_current_win()
+  local row, col = unpack(vim.api.nvim_win_get_cursor(win))
+  local line = vim.api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or ""
+  local after = col + #vim.fn.strcharpart(line:sub(col + 1), 0, 1)
+  if line ~= "" and after >= #line then
+    vim.cmd("startinsert!")
+  else
+    if line ~= "" then vim.api.nvim_win_set_cursor(win, { row, after }) end
+    vim.cmd("startinsert")
+  end
+end
+
+local function on(v) return v ~= nil and v ~= "" and v ~= "0" and v ~= false and v ~= 0 end
+
 -- Show the note: resume the unfinished one unless seeded, else open a fresh
 -- note. opts: { target, window, seed = seed file path, dir = notes folder,
--- sidebar = "0" to leave the history sidebar closed }.
+-- sidebar = "0" to leave the history sidebar closed, talk = "1" when
+-- Hammerspoon has started Flow (hold to talk) }.
 -- A resumed note takes the new target and window. Returns the note's path.
 function M.show(opts)
   opts = opts or {}
@@ -406,7 +461,36 @@ function M.show(opts)
     note = fresh(opts, seed)
   end
   layout(opts)
+  if on(opts.talk) then
+    off_header(note.buf)
+    flow.adopt_start()
+  end
   return note.path
+end
+
+-- Hold to talk with the note already in front: no show, no new target, no
+-- layout change. Enter insert mode at the cursor (like `a`, never in the
+-- header) and tell flow that Hammerspoon started a recording. Returns
+-- "talk <path>", or "no note".
+function M.talk()
+  local note = M.state.note
+  if not note then return "no note" end
+  local buf = note_buf(note)
+  display(buf)
+  M.apply_options(buf)
+  insert_here(buf)
+  flow.adopt_start()
+  return "talk " .. note.path
+end
+
+-- Hold to talk, key up: stop Flow through flow's queue and wait for its
+-- paste into the note (flow.release). A Submit, Cancel or Hide right after
+-- takes that wait over. Returns "released", or "idle" when Flow is not
+-- recording (nothing sent).
+function M.release()
+  local note = M.state.note
+  local buf = note and note_buf(note) or vim.api.nvim_get_current_buf()
+  return flow.release(buf) and "released" or "idle"
 end
 
 -- Returned (with the path) by draft() while Flow is recording.
@@ -421,11 +505,17 @@ M.FLOW_WAIT = "waiting for flow"
 -- does. The caller must not hide the host itself then. A Submit or Cancel
 -- during that wait takes it over (flow.finish_then) and also runs only
 -- after the paste, so cancelled dictation never reaches the target.
+-- A key-up release wait has nothing to run after the paste, so draft()
+-- makes it a Hide; a Submit or Cancel wait is left as it is.
 function M.draft()
   local note = M.state.note
   if not note then return "" end
   local buf = note_buf(note)
-  if flow.state.waiting then return M.FLOW_WAIT .. " " .. note.path end
+  local w = flow.state.waiting
+  if w then
+    if w.kind == "release" then M.hide(buf) end
+    return M.FLOW_WAIT .. " " .. note.path
+  end
   if flow.recording() then
     M.hide(buf)
     return M.FLOW_WAIT .. " " .. note.path

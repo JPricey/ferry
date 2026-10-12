@@ -3,13 +3,22 @@
 # note in it. Every call goes through `nvim --server <sock> --remote-expr`;
 # the server side is lua/voice-vim/note.lua.
 #
-# Usage: voice-vim-host ensure|show|draft|attach-cmd|status|stop
+# Usage: voice-vim-host ensure|show|talk|release|draft|attach-cmd|status|stop
 #   ensure                          start the server unless one answers, and
 #                                   load the note module into it
-#   show <target> <window> [seed]   resume the unfinished note, or open a
+#   show [--talk] <target> <window> [seed]
+#                                   resume the unfinished note, or open a
 #                                   fresh one (always fresh with a seed file),
-#                                   in insert mode; prints the note's path
-#   draft                           write the note and set g:voicevim_draft;
+#                                   in insert mode; prints the note's path.
+#                                   --talk: Flow was started (hold to talk),
+#                                   so the note treats it as recording
+#   talk                            hold to talk in the note already shown:
+#                                   insert at the cursor (never in the to:
+#                                   header), Flow recording; prints
+#                                   `talk <path>` or `no note`
+#   release                         stop Flow and wait for its paste into the
+#                                   note; prints `released` or `idle`
+#   draft                          write the note and set g:voicevim_draft;
 #                                   prints its path
 #   attach-cmd                      print the command a UI runs to attach
 #   status                          print `up uis=N` or `down`
@@ -58,7 +67,7 @@ rtp_fix="local vvr = $(luastr "$root"); if not vim.tbl_contains(vim.opt.rtp:get(
 # The note module, as a Lua expression (repo put on rtp first). A server
 # started before the module last changed (note.api differs) reloads it,
 # keeping its state and host.
-note_api=3
+note_api=4
 note_mod="(function(want) $rtp_fix; local n = require(\"voice-vim.note\"); if n.api == want then return n end; package.loaded[\"voice-vim.note\"] = nil; local ok, m = pcall(require, \"voice-vim.note\"); if not ok then package.loaded[\"voice-vim.note\"] = n; return n end; m.state = n.state; if n.host ~= n.default_host then m.host = n.host end; return m end)($note_api)"
 
 ghostty_bin() {
@@ -130,14 +139,16 @@ ensure() {
   rexpr "luaeval('(function(a) local n = $note_mod; return require(\"voice-vim.gui\").setup(a) end)(_A)', $(gui_dict))" >/dev/null
 }
 
-show() { # target window [seedfile]
+show() { # [--talk] target window [seedfile]
   need_server
+  local talk=""
+  if [ "${1:-}" = --talk ]; then talk=1; shift; fi
   local seed=${3:-}
   if [ -n "$seed" ]; then seed=$(cd "$(dirname "$seed")" && pwd)/$(basename "$seed"); fi
   # The reply is the note's path, plus a "?gui" line when the server has no
   # GUI settings yet (started before they existed): those are loaded after.
   local out
-  out=$(rexpr "luaeval('(function(a) local p = $note_mod.show(a); if vim.g.voicevim_gui == nil then p = p .. \"\\n?gui\" end; return p end)(_A)', {'target': $(vimstr "${1:-}"), 'window': $(vimstr "${2:-}"), 'seed': $(vimstr "$seed"), 'dir': $(vimstr "$notes"), 'sidebar': $(vimstr "${VOICE_VIM_SIDEBAR:-}")})" 2>&1) \
+  out=$(rexpr "luaeval('(function(a) local p = $note_mod.show(a); if vim.g.voicevim_gui == nil then p = p .. \"\\n?gui\" end; return p end)(_A)', {'target': $(vimstr "${1:-}"), 'window': $(vimstr "${2:-}"), 'seed': $(vimstr "$seed"), 'dir': $(vimstr "$notes"), 'sidebar': $(vimstr "${VOICE_VIM_SIDEBAR:-}"), 'talk': $(vimstr "$talk")})" 2>&1) \
     || { echo "voice-vim-host: show failed: $out" >&2; return 1; }
   printf '%s\n' "${out%%$'\n'*}"
   case $out in
@@ -163,6 +174,8 @@ stop() {
 case ${1:-} in
   ensure)     ensure ;;
   show)       shift; show "$@" ;;
+  talk)       need_server; call talk '{}' ;;
+  release)    need_server; call release '{}' ;;
   draft)      need_server; call draft '{}' ;;
   attach-cmd) printf '%q --server %q --remote-ui\n' "$nvim_bin" "$sock" ;;
   status)     status ;;

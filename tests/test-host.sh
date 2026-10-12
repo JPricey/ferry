@@ -35,6 +35,10 @@ echo "font-size = 13"
 echo "background = #001e27"
 EOF
 chmod +x "$work/bin/ghostty"
+# A recording fake `open`: Flow's deep links (talk, release) never reach
+# Wispr Flow.
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s/open.log"\n' "$work" >"$work/bin/open"
+chmod +x "$work/bin/open"
 export PATH="$work/bin:$PATH"
 # A transparent colorscheme, like Joe's NeoSolarized: Normal without guibg.
 printf 'hi clear\nhi Normal guifg=#839496 guibg=NONE\nlet g:colors_name = "vvtest"\n' >"$work/colors/vvtest.vim"
@@ -158,10 +162,68 @@ g=$("$host" show com.example.app 4242)
 ask "luaeval('(function() local n = require\"voice-vim.note\"; n.api = 1; n.old = true; vim.g.voicevim_gui = nil; vim.cmd(\"vsplit | split\"); return 1 end)()')" >/dev/null
 "$host" draft >/dev/null
 h=$("$host" show com.example.app 4242)
-check "old server: show reloads the note module and keeps the draft" "3 true $g" \
+check "old server: show reloads the note module and keeps the draft" "4 true $g" \
   "$(ask 'luaeval("require\"voice-vim.note\".api")') $(ask 'luaeval("require\"voice-vim.note\".old == nil")') $h"
 check "old server: show applies the layout" "history $(basename "$g")" "$(wins)"
 check "old server: show loads the GUI settings" "{'bg': '#001e27', 'font': 'Test Mono:h13'}" "$(ask 'string(g:voicevim_gui)')"
+
+# --- hold to talk: show --talk, talk, release ----------------------------------
+lua() { ask "luaeval('tostring($1)')"; }
+rec() { lua 'require"voice-vim.flow".recording()'; }
+cur() { ask 'line(".").":".(col(".") - 1)." ".mode()'; }
+opened() { cat "$work/open.log" 2>/dev/null; rm -f "$work/open.log"; }
+# Flow's paste into the note (a bracketed paste reaches nvim as vim.paste),
+# then wait for flow's release wait to end.
+paste() {
+  ask "luaeval('vim.paste({\"$1\"}, -1)')" >/dev/null
+  for _ in $(seq 100); do [ "$(lua 'require"voice-vim.flow".state.waiting')" = nil ] && break; sleep 0.05; done
+}
+rm -f "$work/open.log"
+ask "luaeval('require\"voice-vim.note\".forget()')" >/dev/null
+t=$("$host" show --talk com.example.app 4242)
+check "show --talk com.example.app 4242: mode i on row 2, Flow recording, no URL opened" "2:0 i true " \
+  "$(cur) $(rec) $(opened)"
+check "release: prints released, one stop-hands-free" "released|-g wispr-flow://stop-hands-free" \
+  "$("$host" release)|$(sleep 0.3; opened)"
+paste "talked"
+check "after Flow's paste the text is in the body; a second release prints idle, opens nothing" \
+  "to: app:com.example.app#4242|talked idle " "$(ask 'join(getline(1, "$"), "|")') $("$host" release) $(opened)"
+
+ask "nvim_buf_set_lines(0, 1, -1, v:false, ['hello world'])" >/dev/null
+"$host" draft >/dev/null
+ask "nvim_win_set_cursor(0, [2, 4])" >/dev/null
+check "talk in normal mode on hello world col 4: talk <path>, insert col 5, Flow recording, no new note" \
+  "talk $t 2:5 i true $t" "$("$host" talk) $(cur) $(rec) $(ask 'g:voicevim_draft')"
+"$host" release >/dev/null; paste " big"
+check "Flow's paste after talk lands at the cursor" "hello big world" "$(ask 'getline(2)')"
+"$host" draft >/dev/null
+ask "nvim_win_set_cursor(0, [1, 3])" >/dev/null
+check "talk with the cursor on the to: header: insert at the end of line 2" "talk $t 2:15 i" "$("$host" talk) $(cur)"
+"$host" release >/dev/null; paste "!"
+check "Flow's paste never lands in the header" "to: app:com.example.app#4242|hello big world!" \
+  "$(ask 'join(getline(1, "$"), "|")')"
+"$host" draft >/dev/null
+ask "nvim_win_set_cursor(0, [1, 0])" >/dev/null
+"$host" draft >/dev/null
+check "show --talk resuming a draft whose cursor was on the header: insert at the end of line 2" \
+  "$t 2:16 i true" "$("$host" show --talk com.example.app 4242) $(cur) $(rec)"
+"$host" release >/dev/null; paste "?"
+check "each of the three releases above sent one stop" 3 "$(opened | grep -c stop-hands-free)"
+ask "luaeval('require\"voice-vim.note\".forget()')" >/dev/null
+check "talk without a note prints no note, Flow untouched" "no note false " "$("$host" talk) $(rec) $(opened)"
+
+# A server holding the API-3 note module (and a flow module from before
+# hold to talk) reloads both on talk, keeping the draft and its target.
+u=$("$host" show com.example.app 4242)
+ask "nvim_buf_set_lines(0, 1, -1, v:false, ['upgrade draft'])" >/dev/null
+"$host" draft >/dev/null
+ask "luaeval('(function() require\"voice-vim.note\".api = 3; local f = require\"voice-vim.flow\"; f.api = nil; f.adopt_start = nil; return 1 end)()')" >/dev/null
+check "API-3 server: talk reloads note (api 4) and flow, keeps the draft and its target" \
+  "talk $u 4 2 to: app:com.example.app#4242|upgrade draft com.example.app 4242 true" \
+  "$("$host" talk) $(lua 'require"voice-vim.note".api') $(lua 'require"voice-vim.flow".api') $(ask 'join(getline(1, "$"), "|")') $(ask 'b:voicevim.target." ".b:voicevim.window') $(rec)"
+check "API-3 server: release after the upgrade sends one stop" "released|-g wispr-flow://stop-hands-free" \
+  "$("$host" release)|$(sleep 0.3; opened)"
+paste " done"
 "$host" stop
 
 # --- overrides and a missing or hung ghostty ------------------------------------
