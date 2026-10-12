@@ -1,13 +1,26 @@
 -- voice-vim: Hammerspoon module.
 --
--- Hotkey -> capture frontmost app, focused window and selection -> open a
--- Ghostty window running Neovim on a temp file -> (shell wrapper runs the
--- editor) -> hammerspoon://voicevim-submit callback -> put the text on the
--- clipboard, focus the target window, wait until it is frontmost, Cmd+V.
--- The delivery logic lives in lua/voice-vim/delivery.lua (pure, tested).
--- Each session gets a token; Hammerspoon maps it to the Ghostty window it
--- opened and closes that window on submit or on hammerspoon://voicevim-cancel
--- (which then refocuses the start window).
+-- Two modes, picked once in start():
+--
+-- "instance" (default): one always-running nvim server shown in Neovide.
+--   The hotkey toggles it (hammerspoon/instance.lua controller with the
+--   hammerspoon/hosts/neovide.lua host): from any app it captures the app
+--   and window, then shows the note in insert mode; from the note it keeps
+--   the note as a draft, hides Neovide and refocuses that window. The note
+--   (lua/voice-vim/note.lua) sends hammerspoon://voicevim-submit, which
+--   hides Neovide and then runs M.submit below, or voicevim-hide.
+--   start() pre-warms the server (an hs.task) so the first press is fast.
+--
+-- "session" (mode = "session", or the fallback when Neovide is not
+--   installed or setting up the instance raises): each press opens a Ghostty
+--   window running Neovim on a temp file (bin/voice-vim-session). Each
+--   session gets a token; Hammerspoon maps it to the Ghostty window it
+--   opened and closes that window on submit or on
+--   hammerspoon://voicevim-cancel (which then refocuses the start window).
+--
+-- Submit is the same in both: put the text on the clipboard, focus the
+-- target window, wait until it is frontmost, Cmd+V. The delivery logic lives
+-- in lua/voice-vim/delivery.lua (pure, tested).
 --
 -- Usage in ~/.hammerspoon/init.lua:
 --   local voicevim = require("voice-vim")
@@ -21,14 +34,20 @@ M.config = {
   hotkey = { { "ctrl", "alt" }, "v" },
   -- Repo root; set by install.sh via the symlinked module path, or override.
   root = nil,
+  -- "instance": one always-running voice-vim in Neovide that the hotkey
+  -- shows and hides. "session": a new Ghostty window per press (the old
+  -- path, also used when Neovide is not installed).
+  mode = "instance",
   -- Copy the current selection into the buffer and replace it on submit.
-  captureSelection = true,
-  -- Start a Flow hands-free dictation as soon as the editor opens.
+  -- nil: on in session mode, off in instance mode (the Cmd+C costs up to
+  -- 0.4 s per press). true or false sets it for both.
+  captureSelection = nil,
+  -- Session mode only: start a Flow hands-free dictation as soon as the
+  -- editor opens.
   autoStartFlow = false,
-  -- Terminal to open the editor in: "ghostty" (default) or "iTerm2".
+  -- Session mode only: terminal to open the editor in: "ghostty" (default)
+  -- or "iTerm2".
   terminal = "ghostty",
-  -- Window title for the Ghostty session window.
-  windowTitle = "voice-vim",
   -- Seconds to wait for the target window to be confirmed frontmost before
   -- giving up on the paste (the text then stays on the clipboard).
   confirmTimeout = 1.0,
@@ -37,6 +56,12 @@ M.config = {
   rememberFrame = true,
   -- First-open size, as a fraction of the main screen's width and height.
   windowSize = 0.5,
+  -- Instance mode: the nvim server socket (default $VOICE_VIM_SOCK, else
+  -- ${TMPDIR}/voice-vim.sock, as bin/voice-vim-host).
+  sock = nil,
+  -- Instance mode: extra options for hammerspoon/hosts/neovide.lua new()
+  -- (searchPath, appPaths, adoptTimeout, commandLine). Tests use it.
+  neovide = nil,
 }
 
 local log = hs.logger.new("voice-vim", "info")
@@ -233,7 +258,7 @@ function M.begin()
     -- Never target a voice-vim window: use the start target of its session.
     log.i("begin: frontmost is a voice-vim window, reusing its target")
     target, winId = reuse.target or "", reuse.windowId
-  elseif M.config.captureSelection and app then
+  elseif M.config.captureSelection ~= false and app then
     sel = grabSelection(app)
   end
 
@@ -433,28 +458,136 @@ local function isOptionOnly(mods)
   return true
 end
 
+-- Same default as bin/voice-vim-host.
+local function defaultSock()
+  local env = os.getenv("VOICE_VIM_SOCK")
+  if env and env ~= "" then return env end
+  local tmp = os.getenv("TMPDIR")
+  if not tmp or tmp == "" then tmp = "/tmp" end
+  return (tmp:gsub("/$", "")) .. "/voice-vim.sock"
+end
+
+local NO_NEOVIDE = "voice-vim: install Neovide for the one-instance mode"
+local INSTANCE_FAILED = "voice-vim: one-instance mode failed (see console); using a new window per press"
+
+-- The controller startInstance() is building; start() disables it if the
+-- setup raises after it was made, so it can never show Neovide afterwards.
+local building = nil
+
+-- Build the one-instance controller: the Neovide host, the controller with
+-- M.submit as its deliver, the voicevim-submit / voicevim-hide handlers,
+-- and the server pre-warm. Returns the controller and why, or nil, why and
+-- the alert to show. May raise (start() pcalls it).
+--
+-- The mode is decided here, synchronously, from what is known now:
+-- Neovide installed and this setup done. The pre-warm's outcome never
+-- changes it: a failed or slow pre-warm leaves the instance in place, and
+-- the next press runs ensure again (instance.lua's recovery), alerting if
+-- that fails too.
+local function startInstance()
+  local root = repoRoot()
+  local sock = M.config.sock or defaultSock()
+  local hcfg = {
+    log = log, sock = sock, root = root, fraction = M.config.windowSize,
+    rememberFrame = M.config.rememberFrame ~= false, windowFrame = frameGlue(),
+  }
+  for k, v in pairs(M.config.neovide or {}) do hcfg[k] = v end
+  local neovide = dofile(root .. "/hammerspoon/hosts/neovide.lua")
+  local host = neovide.new(hcfg)
+  local ok, why = host.available()
+  if not ok then return nil, why, NO_NEOVIDE end
+  local c = dofile(root .. "/hammerspoon/instance.lua").new({
+    host = host, root = root, sock = sock,
+    captureSelection = M.config.captureSelection == true,
+    deliver = function(p) M.submit(p) end,
+    hostName = "Neovide",
+  })
+  building = c
+  c.bindURLs()
+  c.prewarm(function(warm)
+    if not warm then
+      log.w("pre-warm: the voice-vim server did not start; staying in one-instance mode,"
+        .. " the next press runs voice-vim-host ensure again")
+    end
+  end)
+  building = nil
+  return c, why
+end
+
+-- The hotkey (and hammerspoon://voicevim-start) in instance mode: show or
+-- hide the one instance.
+function M.toggle()
+  local c = M._instance
+  if not c then return M.begin() end
+  local ok, err = pcall(c.toggle)
+  if not ok then
+    log.e("toggle: " .. tostring(err))
+    hs.alert.show("voice-vim: error (see console)")
+  end
+end
+
 function M.start(cfg)
-  for k, v in pairs(cfg or {}) do M.config[k] = v end
+  cfg = cfg or {}
+  for k, v in pairs(cfg) do M.config[k] = v end
   if M.config.activateDelay ~= nil then
     -- Old key: submit now waits until the target is frontmost.
     log.w("activateDelay is no longer used; set confirmTimeout instead")
     M.config.activateDelay = nil
   end
-  hs.urlevent.bind("voicevim-submit", function(_, params) M.submit(params) end)
+  if M.config.windowTitle ~= nil then
+    log.w("windowTitle is no longer used")
+    M.config.windowTitle = nil
+  end
+
+  -- Pick the mode, once and synchronously. An error setting up the one
+  -- instance leaves the new-window-per-press path working, with one alert.
+  -- A controller from an earlier start() is switched off first.
+  if M._instance then pcall(M._instance.disable) end
+  M._instance, M.mode = nil, "session"
+  if M.config.mode ~= "session" then
+    building = nil
+    local ok, c, why, alertMsg = pcall(startInstance)
+    if ok and c then
+      M._instance, M.mode = c, "instance"
+      log.i("mode: one instance in Neovide (" .. tostring(why) .. ")")
+    elseif ok then
+      log.w("mode: Neovide not found (" .. tostring(why) .. "); using a new window per press."
+        .. " Install it with: brew install --cask neovide")
+      hs.alert.show(alertMsg or NO_NEOVIDE)
+    else
+      -- Half-built controller: drop its pending show and URL handlers.
+      if building then pcall(building.disable) end
+      building = nil
+      log.e("mode: one instance failed to start: " .. tostring(c) .. "; using a new window per press")
+      hs.alert.show(INSTANCE_FAILED)
+    end
+  else
+    log.i("mode: session (a new window per press)")
+  end
+  if M.mode == "instance" then
+    if cfg.terminal ~= nil then log.w("terminal is only used with mode = \"session\"") end
+    if M.config.autoStartFlow then
+      log.w("autoStartFlow is only used with mode = \"session\"; press Ctrl-S in the note")
+    end
+  else
+    hs.urlevent.bind("voicevim-submit", function(_, params) M.submit(params) end)
+  end
+  -- Sessions opened before a reload still cancel through this.
   hs.urlevent.bind("voicevim-cancel", function(_, params)
     local ok, err = pcall(M.cancel, params)
     if not ok then log.e("cancel: " .. tostring(err)) end
   end)
-  -- hammerspoon://voicevim-start starts a session without the hotkey
-  -- (Karabiner, a launcher, or `open -g` from a shell).
-  hs.urlevent.bind("voicevim-start", function() M.begin() end)
+  local press = M.mode == "instance" and M.toggle or M.begin
+  -- hammerspoon://voicevim-start does what the hotkey does (Karabiner, a
+  -- launcher, or `open -g` from a shell).
+  hs.urlevent.bind("voicevim-start", function() press() end)
   if M.hotkeyObj then M.hotkeyObj:delete(); M.hotkeyObj = nil end
   local mods, key = M.config.hotkey[1], M.config.hotkey[2]
   local combo = table.concat(mods, "+") .. "+" .. key
   if isOptionOnly(mods) then
     log.w("hotkey " .. combo .. " is Option-only; macOS 15+ may refuse it")
   end
-  local ok, obj = pcall(hs.hotkey.bind, mods, key, M.begin)
+  local ok, obj = pcall(hs.hotkey.bind, mods, key, press)
   if ok and obj then
     M.hotkeyObj = obj
     log.i("bound " .. combo)

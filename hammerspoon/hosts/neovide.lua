@@ -2,7 +2,7 @@
 -- instance (GROUND_TRUTHS decision 10). Implements the host interface
 -- documented at the top of hammerspoon/instance.lua.
 --
--- Not loaded by hammerspoon/voice-vim.lua yet (that is task B2). Ported
+-- Loaded by hammerspoon/voice-vim.lua in the one-instance mode. Ported
 -- from the neovide block of spike/host/host.lua and spike/host/neovide.sh.
 --
 --   local neovide = dofile(root .. "/hammerspoon/hosts/neovide.lua")
@@ -24,20 +24,31 @@
 --                is adopted by hammerspoon/window-frame.lua: it gets the
 --                saved frame (or the default) and moves are saved, shared
 --                with the Ghostty session window (hs.settings key
---                voice-vim.windowFrame).
---   show(cb)     app:unhide(), app:activate(), focus its main window. If
+--                voice-vim.windowFrame). If window-frame.lua cannot load,
+--                a plain poll finds the launched window instead, so a held
+--                show still happens (the frame is then left to Neovide).
+--   show(cb)     app:unhide(), unminimize its window (after Cmd+M),
+--                app:activate(), focus the window. If
 --                Neovide is not up yet (just launched) or has no window,
 --                the show is kept and done when the launched window
 --                appears. A window not seen before (Neovide was already
 --                running) is watched for moves, not moved.
 --   hide(cb)     app:hide(). The controller refocuses the target in cb.
---   isFocused()  -> bool, why: the frontmost app is Neovide (bundle
---                com.neovide.neovide, or app name "Neovide").
+--   isFocused()  -> bool, why: the frontmost app is our Neovide and its
+--                window is neither minimized nor invisible (so a press
+--                after Cmd+M shows it instead of hiding nothing).
 --   available()  -> bool, why: a neovide binary or Neovide.app exists.
 --
+-- Our Neovide only: show, hide and isFocused act on the one Neovide process
+-- attached to our socket, never on a Neovide Joe runs for his own editing.
+-- Its pid is remembered from the window adopted after launch, or found by
+-- reading each Neovide process's command line (`ps -o args= -p <pid>`,
+-- once per pid) for `--server <sock>`.
+--
 -- Logs to logger `voice-vim` with prefix `neovide:`. Every hs call is
--- nil-guarded and pcall'd; nothing here blocks Hammerspoon (file checks
--- only, launching runs in hs.task). Valid for Lua 5.4 and LuaJIT.
+-- nil-guarded and pcall'd. Launching runs in hs.task; the only blocking
+-- call is one short `ps` per Neovide pid (cached) to find our instance.
+-- Valid for Lua 5.4 and LuaJIT.
 
 local N = {}
 
@@ -115,6 +126,8 @@ end
 --   appPaths       list of Neovide.app paths to try after
 --                  hs.application.pathForBundleID (default /Applications
 --                  and ~/Applications)
+--   commandLine    function(pid) -> the process's command line or nil
+--                  (default: /bin/ps through hs.execute)
 function N.new(cfg)
   cfg = cfg or {}
   local log = cfg.log or hs.logger.new("voice-vim", "info")
@@ -127,6 +140,7 @@ function N.new(cfg)
       adoptTimeout = cfg.adoptTimeout or N.ADOPT_TIMEOUT,
       searchPath = cfg.searchPath,
       appPaths = cfg.appPaths,
+      commandLine = cfg.commandLine,
     },
     log = log,
     _wf = cfg.windowFrame,  -- window-frame glue (loaded lazily)
@@ -134,6 +148,9 @@ function N.new(cfg)
     _pendingShow = false,   -- show asked for before Neovide had a window
     _launchedAt = nil,      -- seconds of the last launch
     _watchedId = nil,       -- id of the Neovide window whose frame we watch
+    _pid = nil,             -- pid of our Neovide (attached to our socket)
+    _foreign = {},          -- pid -> true for Neovide processes that are not ours
+    _findTimer = nil,       -- fallback poll for the launched window
   }
 
   local function try(fn, ...)
@@ -213,9 +230,72 @@ function N.new(cfg)
     return "open -n -a " .. q(N.NAME) .. " --args --server " .. q(sock), "open"
   end
 
+  -- -------------------------------------------------------------------------
+  -- Our Neovide process
+
+  local function pidOf(app)
+    local p = call(app, "pid")
+    if type(p) == "number" then return p end
+    return nil
+  end
+
+  local function isNeovide(app)
+    return call(app, "bundleID") == N.BUNDLE or call(app, "name") == N.NAME
+  end
+
+  local function commandLine(pid)
+    if type(o.config.commandLine) == "function" then return try(o.config.commandLine, pid) end
+    if not hs.execute then return nil end
+    local out, ok = try(hs.execute, string.format("/bin/ps -o args= -p %d", pid))
+    if not ok or type(out) ~= "string" then return nil end
+    out = out:gsub("%s+$", "")
+    if out == "" then return nil end
+    return out
+  end
+
+  -- Whether app is our Neovide. unknownOk: also yes when its command line
+  -- cannot be read (the window that appeared right after our launch).
+  local function isOurs(app, unknownOk)
+    local pid = pidOf(app)
+    if not pid then return false end
+    if pid == o._pid then return true end
+    if o._foreign[pid] then return false end
+    local cmd = commandLine(pid)
+    if cmd == nil and not unknownOk then return false end
+    if cmd == nil or (" " .. cmd .. " "):find(" --server " .. o.config.sock .. " ", 1, true) then
+      o._pid = pid
+      log.i("neovide: pid " .. pid .. " is ours (--server " .. o.config.sock .. ")")
+      return true
+    end
+    o._foreign[pid] = true
+    log.i("neovide: pid " .. pid .. " is another Neovide, left alone")
+    return false
+  end
+
+  -- Our running Neovide app, or nil.
   local function neovideApp()
-    if not (hs.application and hs.application.get) then return nil end
-    return try(hs.application.get, N.BUNDLE) or try(hs.application.get, N.NAME)
+    if not hs.application then return nil end
+    if o._pid then
+      local app = hs.application.applicationForPID and try(hs.application.applicationForPID, o._pid)
+      if app and isNeovide(app) then return app end
+      log.i("neovide: pid " .. o._pid .. " is gone")
+      o._pid = nil
+    end
+    local cands = {}
+    local list = hs.application.applicationsForBundleID
+      and try(hs.application.applicationsForBundleID, N.BUNDLE)
+    if type(list) == "table" then
+      for _, a in ipairs(list) do cands[#cands + 1] = a end
+    end
+    if hs.application.get then
+      cands[#cands + 1] = try(hs.application.get, N.BUNDLE)
+      cands[#cands + 1] = try(hs.application.get, N.NAME)
+    end
+    for i = 1, #cands do
+      local a = cands[i]
+      if a and isOurs(a) then return a end
+    end
+    return nil
   end
 
   -- -------------------------------------------------------------------------
@@ -249,16 +329,69 @@ function N.new(cfg)
     o._watchedId = id
   end
 
-  -- Unhide, activate and focus the main window; returns the window or nil.
+  -- Our app's window: the main or focused one, else the first of
+  -- allWindows (a minimized window is not always the main window).
+  local function windowOf(app)
+    local win = call(app, "mainWindow") or call(app, "focusedWindow")
+    if win then return win end
+    local all = call(app, "allWindows")
+    if type(all) == "table" then return all[1] end
+    return nil
+  end
+
+  -- Undo Cmd+M: a minimized window stays minimized through unhide/activate.
+  local function unminimize(win)
+    if call(win, "isMinimized") == true then
+      log.i("neovide: window " .. tostring(call(win, "id")) .. " is minimized; unminimizing")
+      call(win, "unminimize")
+    end
+  end
+
+  -- Unhide, unminimize, activate and focus the window; returns it or nil.
   local function bringForward(app)
     call(app, "unhide")
+    local win = windowOf(app)
+    if win then unminimize(win) end
     call(app, "activate")
-    local win = call(app, "mainWindow") or call(app, "focusedWindow")
     if win then
       call(win, "focus")
       watchExisting(win)
     end
     return win
+  end
+
+  -- Unhide, unminimize, activate and focus win (a show held until it
+  -- appeared).
+  local function showHeld(app, win)
+    o._pendingShow = false
+    call(app, "unhide")
+    unminimize(win)
+    call(app, "activate")
+    call(win, "focus")
+  end
+
+  -- Without window-frame.lua: poll for our launched Neovide's window, so a
+  -- show held until it appeared still happens.
+  local function findLaunched()
+    if o._findTimer then call(o._findTimer, "stop") end
+    o._findTimer = nil
+    local deadline = now() + o.config.adoptTimeout
+    local function step()
+      o._findTimer = nil
+      local app = neovideApp()
+      local win = app and windowOf(app)
+      if win then
+        log.i("neovide: window " .. tostring(call(win, "id")) .. " found after launch (no frame glue)")
+        if o._pendingShow then showHeld(app, win) end
+        return
+      end
+      if now() >= deadline then
+        log.w("neovide: launched window not found after " .. o.config.adoptTimeout .. " s")
+        return
+      end
+      o._findTimer = hs.timer and try(hs.timer.doAfter, 0.05, step)
+    end
+    step()
   end
 
   -- -------------------------------------------------------------------------
@@ -299,21 +432,25 @@ function N.new(cfg)
     end
     o._launchedAt = now()
     if wf then
-      try(wf.adopt, N.BUNDLE, before, o.config.adoptTimeout, {
-        frame = o.config.rememberFrame,
-        onFound = function(win)
-          local id = call(win, "id")
-          log.i("neovide: window " .. tostring(id) .. " appeared after launch")
-          if o.config.rememberFrame then o._watchedId = id end
-          if o._pendingShow then
-            o._pendingShow = false
-            local app = call(win, "application") or neovideApp()
-            call(app, "unhide")
-            call(app, "activate")
-            call(win, "focus")
-          end
-        end,
-      })
+      local opts = { frame = o.config.rememberFrame }
+      opts.onFound = function(win)
+        local id = call(win, "id")
+        local app = call(win, "application")
+        if app and not isOurs(app, true) then
+          -- Another Neovide opened a window: leave it where it is (adopt
+          -- reads opts.frame after onFound) and look for ours instead.
+          log.w("neovide: window " .. tostring(id) .. " is not ours; not adopted")
+          opts.frame = false
+          findLaunched()
+          return
+        end
+        log.i("neovide: window " .. tostring(id) .. " appeared after launch")
+        if o.config.rememberFrame then o._watchedId = id end
+        if o._pendingShow then showHeld(app or neovideApp(), win) end
+      end
+      try(wf.adopt, N.BUNDLE, before, o.config.adoptTimeout, opts)
+    else
+      findLaunched()
     end
     done(cb, true)
   end
@@ -327,7 +464,7 @@ function N.new(cfg)
         log.i("neovide: show: not up yet, will show its window when it appears")
         return done(cb, true, "waiting for the launched window")
       end
-      log.w("neovide: show: Neovide not running")
+      log.w("neovide: show: our Neovide (--server " .. o.config.sock .. ") is not running")
       return done(cb, false, "Neovide not running")
     end
     local win = bringForward(app)
@@ -346,16 +483,30 @@ function N.new(cfg)
     if app then
       call(app, "hide")
     else
-      log.i("neovide: hide: Neovide not running")
+      log.i("neovide: hide: our Neovide is not running")
     end
     done(cb, true)
+  end
+
+  -- Our Neovide is frontmost: focused only when its window can be seen.
+  local function windowShown(app, how)
+    local win = windowOf(app)
+    if not win then return false, "Neovide frontmost but has no window" end
+    if call(win, "isMinimized") == true then return false, "Neovide window minimized" end
+    if call(win, "isVisible") == false then return false, "Neovide window not visible" end
+    return true, "Neovide frontmost" .. how
   end
 
   function o.isFocused()
     local app = hs.application and try(hs.application.frontmostApplication)
     local b = call(app, "bundleID")
-    if b == N.BUNDLE then return true, "Neovide frontmost" end
-    if call(app, "name") == N.NAME then return true, "Neovide frontmost (by name)" end
+    local pid = pidOf(app)
+    local how = b == N.BUNDLE and "" or " (by name)"
+    if o._pid and pid == o._pid then return windowShown(app, how) end
+    if isNeovide(app) then
+      if isOurs(app) then return windowShown(app, how) end
+      return false, "frontmost is another Neovide (pid " .. tostring(pid) .. ")"
+    end
     return false, "frontmost is " .. tostring(b)
   end
 

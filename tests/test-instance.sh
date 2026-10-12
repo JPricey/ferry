@@ -153,7 +153,7 @@ local function setup(opts)
     rec:finishTask(#rec.tasks, 0, "", "")
   end
   return { rec = rec, c = c, sock = sock, order = order, delivered = delivered,
-    target = target, hostWin = hostWin }
+    target = target, hostWin = hostWin, host = host }
 end
 
 local function count(list, x)
@@ -254,6 +254,101 @@ do
   stop(t.sock)
 end
 
+-- Hotkey hide while Flow is recording (started from the note): the note
+-- stays up until Flow's paste lands, then asks to be hidden itself.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  c.bindURLs()
+  c.toggle()
+  rec:runTimers()
+  -- In the server: record Flow URLs and host calls instead of running open,
+  -- then start Flow as Ctrl-S would.
+  local function run(name, body)
+    local f = assert(io.open(work .. "/" .. name, "w"))
+    f:write(body)
+    f:close()
+    return ask(sock, 'luaeval("dofile(\\"' .. work .. "/" .. name .. '\\")")')
+  end
+  run("flowrec.lua", [[
+    local f = require("voice-vim.flow")
+    f.open = function(u) vim.g.vv_flow = (vim.g.vv_flow or "") .. u .. " " end
+    require("voice-vim.note").host = {
+      hide = function() vim.g.vv_hidden = (vim.g.vv_hidden or 0) + 1 end,
+      submit = function() end,
+    }
+    f.start()
+    return 1
+  ]])
+  local function hidden() return ask(sock, 'get(g:, "vv_hidden", 0)') end
+  ask(sock, 'nvim_buf_set_lines(0, 0, -1, v:false, ["draft words"])')
+  local path = ask(sock, "expand(\"%:p\")")
+  c.toggle()
+  check("Flow recording: hotkey draft answers waiting for flow", true,
+    has(execs(rec, "'draft'")[1] and rec.executes[#rec.executes].out, "waiting for flow"))
+  check("Flow recording: host not hidden, target not refocused", "0 0",
+    count(t.order, "host.hide") .. " " .. #rec.focuses)
+  check("Flow recording: hide waits logged", true, rec:hasLog("i", "hide: Flow is recording"))
+  check("Flow recording: the note sent stop-hands-free", true, has(ask(sock, 'get(g:, "vv_flow", "")'), "stop-hands-free"))
+  c.toggle()  -- a second press during the wait changes nothing
+  check("Flow recording: second press still waits", "0 0",
+    count(t.order, "host.hide") .. " " .. hidden())
+  run("paste.lua", 'vim.paste({ " last words" }, -1) return 1')  -- Flow's paste
+  for _ = 1, 100 do
+    if hidden() ~= "0" then break end
+    sh("sleep 0.02")
+  end
+  check("Flow recording: after the paste the note asks to hide once", "1", hidden())
+  check("Flow recording: the draft holds the last words", true, has(sh("cat '" .. path .. "'"), "last words"))
+  rec:openURL("voicevim-hide", {})  -- what the note's hide URL does
+  check("Flow recording: voicevim-hide then hides and refocuses 4242", "1 4242",
+    count(t.order, "host.hide") .. " " .. tostring(lastFocusId(rec)))
+  stop(sock)
+end
+
+-- Ctrl-Q during the hotkey's hide-while-recording wait: the cancel takes
+-- over the wait, so nothing hides (and the target is not refocused) until
+-- Flow's paste has landed in the note; then the note is cancelled.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  c.bindURLs()
+  c.toggle()
+  rec:runTimers()
+  local f = assert(io.open(work .. "/flowrec2.lua", "w"))
+  f:write([[
+    local f = require("voice-vim.flow")
+    f.open = function() end
+    require("voice-vim.note").host = {
+      hide = function() vim.g.vv_hidden = (vim.g.vv_hidden or 0) + 1 end,
+      submit = function() vim.g.vv_submitted = 1 end,
+    }
+    f.start()
+    return 1
+  ]])
+  f:close()
+  ask(sock, 'luaeval("dofile(\\"' .. work .. '/flowrec2.lua\\")")')
+  local function hidden() return ask(sock, 'get(g:, "vv_hidden", 0)') end
+  ask(sock, 'nvim_buf_set_lines(0, 0, -1, v:false, ["draft words"])')
+  local path = ask(sock, "expand(\"%:p\")")
+  c.toggle()  -- hotkey hide: waits for Flow
+  ask(sock, 'luaeval("require(\\"voice-vim.note\\").cancel()")')  -- Ctrl-Q
+  sh("sleep 0.3")
+  check("Ctrl-Q during the hide wait: nothing hidden before Flow's paste", "0 0",
+    hidden() .. " " .. count(t.order, "host.hide"))
+  check("Ctrl-Q during the hide wait: note not cancelled yet", "draft words",
+    ask(sock, 'getline(1)'))
+  ask(sock, 'luaeval("vim.paste({\\" late\\"}, -1)")')  -- Flow's paste
+  for _ = 1, 100 do
+    if hidden() ~= "0" then break end
+    sh("sleep 0.02")
+  end
+  check("Ctrl-Q during the hide wait: after the paste, cancelled and hidden once", "1 0",
+    hidden() .. " " .. ask(sock, 'get(g:, "vv_submitted", 0)'))
+  check("Ctrl-Q during the hide wait: the note file (with the paste) is gone", nil, io.open(path, "r"))
+  stop(sock)
+end
+
 -- A press during the pre-warm waits for it: no show, no second server.
 do
   local t = setup({ warm = false })
@@ -333,6 +428,29 @@ do
   stop(sock)
 end
 
+-- A show that fails (host.show false, or the host never gets focus):
+-- one alert per press, and the next press launches the host again
+-- instead of waiting out launchGrace.
+for _, case in ipairs({ "host.show false", "never focused" }) do
+  local t = setup({ pollTimeout = 0.2, hostName = "Neovide" })
+  local rec, c, sock = t.rec, t.c, t.sock
+  t.host.show = function(cb)
+    t.order[#t.order + 1] = "host.show"
+    if case == "host.show false" then cb(false, "Neovide not running") else cb(true) end
+  end
+  c.toggle()
+  rec:runTimers()
+  check(case .. ": one alert for the press", 1, #rec.alerts)
+  check(case .. ": alert says Neovide did not appear", true,
+    has(rec.alerts[1], "voice-vim: Neovide did not appear") and has(rec.alerts[1], "Hammerspoon console"))
+  check(case .. ": host launched once", 1, count(t.order, "host.launch"))
+  c.toggle()  -- next press, well within launchGrace
+  rec:runTimers()
+  check(case .. ": next press launches again", 2, count(t.order, "host.launch"))
+  check(case .. ": next press alerts once more", 2, #rec.alerts)
+  stop(sock)
+end
+
 -- A UI attached: no host.launch.
 do
   local t = setup()
@@ -378,7 +496,7 @@ echo  # nvim -l leaves the last line unterminated
 
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: want '$2' got '$3'"; status=1; fi; }
 check "fake osascript/open/neovide never called" 0 "$(grep -c '^CALL ' "$work/calls")"
-check "voice-vim.lua does not load instance.lua" 0 "$(grep -c 'instance\.lua\|instance"' "$root/hammerspoon/voice-vim.lua")"
+check "voice-vim.lua loads instance.lua" 1 "$(grep -c 'dofile(root .. "/hammerspoon/instance.lua")' "$root/hammerspoon/voice-vim.lua")"
 lj=$(command -v luajit || echo /opt/homebrew/bin/luajit)
 if [ -x "$lj" ]; then
   check "instance.lua parses under LuaJIT" ok "$("$lj" -e "assert(loadfile('$root/hammerspoon/instance.lua')) print('ok')" 2>&1)"

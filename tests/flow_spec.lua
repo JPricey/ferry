@@ -156,16 +156,37 @@ vim.wait(2000, function() return seen ~= nil end, 10)
 check("no paste: fn runs after the 300 ms timeout", true, seen ~= nil and seen >= 300 and seen < 1000)
 check("no paste: notice", flow.NO_DICTATION, notices[1])
 
--- --- second finish_then while waiting ----------------------------------------
+-- --- second finish_then while waiting: takes over and still waits ----------
+-- (Ctrl-Q during the hotkey's hide-while-recording wait must not run before
+-- Flow's paste, or the paste lands in the target.)
+reset_buf()
 flow.paste_timeout_ms = 4000
 flow.assume_recording()
-local first, second = 0, false
+local first, second = 0, nil
 flow.finish_then(buf, function() first = first + 1 end)
-flow.finish_then(buf, function() second = true end)
-check("second finish_then while waiting runs fn at once", true, second)
-vim.wait(500, function() return false end, 10)
-check("the first wait is dropped", 0, first)
+flow.finish_then(buf, function() second = text() end)
+check("second finish_then while waiting does not run at once", nil, second)
 check("second finish_then sends only one stop", "-g wispr-flow://stop-hands-free", opened(1, 300))
+vim.wait(150, function() return false end, 10)
+check("second finish_then: still waiting for the paste", nil, second)
+vim.paste({ "late words" }, -1)
+vim.wait(1000, function() return second ~= nil end, 10)
+check("second finish_then runs after the paste and sees it", "late words", second)
+vim.wait(300, function() return false end, 10)
+check("the first (replaced) fn never runs", 0, first)
+
+-- Taking over a wait that times out: the new fn runs at the timeout, once.
+flow.paste_timeout_ms = 300
+flow.assume_recording()
+local took, runs = nil, 0
+local t3 = vim.uv.hrtime()
+flow.finish_then(buf, function() end)
+opened(1)
+flow.finish_then(buf, function() runs = runs + 1; took = (vim.uv.hrtime() - t3) / 1e6 end)
+vim.wait(2000, function() return took ~= nil end, 10)
+vim.wait(200, function() return false end, 10)
+check("takeover with no paste: runs once after the timeout", true, runs == 1 and took >= 300)
+flow.paste_timeout_ms = 4000
 
 -- --- a hanging `open` is killed and the queue moves on -----------------------
 flow.open_timeout_ms = 200

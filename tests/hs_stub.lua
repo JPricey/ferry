@@ -77,6 +77,14 @@
 -- Neovide host additions (hammerspoon/hosts/neovide.lua):
 --   rec.bundlePaths    bundle id -> app path, for
 --                      hs.application.pathForBundleID (default: none)
+--   rec.appList        every app stub made, in order; app opts.pid sets
+--                      app:pid(), hs.application.applicationForPID(pid)
+--                      finds it and hs.application.applicationsForBundleID
+--                      lists the apps with that bundle id
+--   rec.unminimizes    window stubs passed to win:unminimize()
+--   window opts.minimized  initial win:isMinimized() (default false);
+--                      win:minimize() sets it. win:isVisible() is false
+--                      while minimized or while its app is hidden
 
 local S = {}
 
@@ -104,8 +112,10 @@ end
 -- allWindows), frontmostOnActivate.
 function S.app(rec, opts)
   local a = { _bundle = opts.bundleID, _name = opts.name or opts.bundleID, _window = opts.window,
-    _windows = opts.windows }
+    _windows = opts.windows, _pid = opts.pid }
+  rec.appList[#rec.appList + 1] = a
   function a:bundleID() return self._bundle end
+  function a:pid() return self._pid end
   function a:name() return self._name end
   function a:focusedWindow() return self._window end
   function a:mainWindow() return self._window end
@@ -163,6 +173,17 @@ function S.window(rec, opts)
     return self
   end
   w._fullScreen = opts.fullScreen == true
+  w._minimized = opts.minimized == true
+  function w:isMinimized() return self._minimized end
+  function w:minimize() self._minimized = true; return self end
+  function w:unminimize()
+    rec.unminimizes[#rec.unminimizes + 1] = self
+    self._minimized = false
+    return self
+  end
+  function w:isVisible()
+    return not self._minimized and not (self._app and self._app._hidden == true)
+  end
   function w:isFullScreen() return self._fullScreen end
   function w:setFullScreen(v)
     rec.fullScreenSets[#rec.fullScreenSets + 1] = { win = self, value = v }
@@ -214,7 +235,8 @@ function S.install()
     pasteboardSets = {}, activations = {}, focuses = {}, timers = {},
     apps = {}, windows = {}, windowGets = 0, accessibility = true,
     hides = {}, unhides = {}, moves = {}, tasks = {},
-    settings = {}, bundlePaths = {}, setFrames = {}, fullScreenSets = {}, watchers = {}, closes = {},
+    settings = {}, bundlePaths = {}, appList = {}, setFrames = {}, fullScreenSets = {}, watchers = {}, closes = {},
+    unminimizes = {},
     pasteboard = { contents = nil, changeCount = 0 },
     clock = 1000, screen = { x = 0, y = 0, w = 1440, h = 900 },
   }
@@ -350,6 +372,19 @@ function S.install()
     frontmostApplication = function() return rec.frontmost end,
     get = function(hint) return rec.apps[hint] end,
     pathForBundleID = function(bundle) return rec.bundlePaths[bundle] end,
+    applicationForPID = function(pid)
+      for _, a in ipairs(rec.appList) do
+        if pid ~= nil and a._pid == pid and not a._quit then return a end
+      end
+      return nil
+    end,
+    applicationsForBundleID = function(bundle)
+      local out = {}
+      for _, a in ipairs(rec.appList) do
+        if a._bundle == bundle and not a._quit then out[#out + 1] = a end
+      end
+      return out
+    end,
   }
 
   hs.window = {

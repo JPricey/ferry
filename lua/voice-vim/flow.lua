@@ -15,7 +15,11 @@
 -- when idle; otherwise it sends stop and polls changedtick on a timer (never
 -- blocking the UI) until a paste is signalled, the buffer changed and stayed
 -- quiet settle_ms, or paste_timeout_ms passed. A second call while waiting
--- runs its fn at once and drops the pending one.
+-- takes over that wait: its fn replaces the pending one and still runs only
+-- after the paste (or the timeout), so a cancel pressed during a hide's wait
+-- can never let Flow's paste land in the target (GROUND_TRUTHS req. 8).
+-- There is no "press again to skip the wait"; the wait ends by itself
+-- within paste_timeout_ms.
 local M = {}
 
 M.paste_timeout_ms = 4000
@@ -29,7 +33,8 @@ M.STOP_URL = "wispr-flow://stop-hands-free"
 M.NO_DICTATION = "voice-vim: no dictation arrived"
 
 -- recording: Flow was started by us (or assumed) and has not pasted yet.
--- waiting: the pending finish_then, { timer = uv timer, pasted = fn } or nil.
+-- waiting: the pending finish_then, { timer = uv timer, buf, fn = action,
+-- pasted = fn } or nil.
 M.state = { recording = false, waiting = nil }
 local attached = {}
 
@@ -118,8 +123,8 @@ end
 
 function M.finish_then(buf, fn)
   if M.state.waiting then
-    stop_waiting()
-    fn()
+    -- Takes over the wait (one stop already went out); see the header.
+    M.state.waiting.fn = fn
     return
   end
   if not M.state.recording then
@@ -136,14 +141,14 @@ function M.finish_then(buf, fn)
   local start, tick0 = now_ms(), tick()
   local last_tick, last_change = tick0, nil
   local timer = vim.uv.new_timer()
-  local w = { timer = timer, buf = buf }
+  local w = { timer = timer, buf = buf, fn = fn }
   M.state.waiting = w
 
   local function done(notice)
     if M.state.waiting ~= w then return end
     stop_waiting()
     if notice then vim.notify(notice, vim.log.levels.WARN) end
-    fn()
+    w.fn()
   end
   w.pasted = function() done() end
 

@@ -50,7 +50,8 @@ touching `lua/voice-vim/delivery.lua` or the Hammerspoon module,
 `bash tests/test-window-frame.sh` after touching `hammerspoon/window-frame.lua`,
 and `bash tests/test-host.sh`, `bash tests/test-note.sh` and
 `bash tests/test-instance.sh` after touching `bin/voice-vim-host`,
-`lua/voice-vim/note.lua` or `hammerspoon/instance.lua`.
+`lua/voice-vim/note.lua` or `hammerspoon/instance.lua`, and
+`bash tests/test-host-neovide.sh` after touching `hammerspoon/hosts/neovide.lua`.
 Hammerspoon is installed and the module is linked into `~/.hammerspoon/`;
 Accessibility permission must be granted manually, and Hammerspoon must be
 relaunched after granting it.
@@ -154,6 +155,34 @@ corrections made here. A future feature could feed corrections back through
 the personal dictionary, or by mirroring edits into Flow's `History` rows.
 
 ## V0 shape (as built)
+
+**One instance (default, `mode = "instance"`).** `start()` loads
+`hammerspoon/hosts/neovide.lua` and, when Neovide is installed, builds the
+`hammerspoon/instance.lua` controller with it (deliver = `M.submit` below),
+binds `voicevim-submit`/`voicevim-hide`, and pre-warms the nvim server
+(`bin/voice-vim-host ensure` as an hs.task). The hotkey and `voicevim-start`
+call `M.toggle`: from another app it captures app + window and runs
+`voice-vim-host show` (Neovide is launched with `--server <sock>` when no UI
+is attached), then unhides our Neovide; from the note it runs `draft`, hides
+Neovide and refocuses that window (while Flow is recording, `draft` answers
+`waiting for flow` and the note hides itself after Flow's paste). The note
+(`lua/voice-vim/note.lua`) sends `voicevim-submit` (hide, then the delivery
+of step 5) or `voicevim-hide`. The adapter only touches the Neovide process
+started with our `--server <sock>`. No selection grab unless
+`captureSelection = true`. The mode is decided once, synchronously, in
+`start()`: if Neovide is missing, or setting up the controller raises, it
+logs a `mode:` line, alerts once, and falls back to the session path below
+(a half-built controller is `disable()`d: pending show dropped, URL
+handlers unbound). A failed or slow pre-warm never changes the mode: the
+next press runs `ensure` again and alerts if that fails too. A show that
+fails (`host.show` false, or Neovide not focused within `pollTimeout`)
+alerts once per press, and the next press relaunches Neovide instead of
+waiting out `launchGrace`. Show unminimizes our window after Cmd+M, and
+`isFocused` is false while it is minimized or not visible. Ctrl-X/Ctrl-Q
+during the hotkey's wait for Flow take over that wait
+(`flow.finish_then`) instead of skipping it.
+
+**Session path (`mode = "session"`, or the fallback; removed by B3):**
 
 1. `hammerspoon/voice-vim.lua` hotkey handler records the frontmost app's
    bundle id and the focused window's id (nil-guarded), and grabs the

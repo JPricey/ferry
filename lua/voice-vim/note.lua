@@ -286,12 +286,27 @@ function M.show(opts)
   return note.path
 end
 
+-- Returned (with the path) by draft() while Flow is recording.
+M.FLOW_WAIT = "waiting for flow"
+
 -- Write the current note to disk, record it as the draft and leave insert
 -- mode. Returns its path ("" when there is no note).
+-- While Flow is recording (started from the note) or a finish is already
+-- waiting for its paste, the note must stay in front for Flow's paste: it
+-- returns "waiting for flow <path>" at once, and the note hides itself
+-- through M.host.hide once the paste has landed (or timed out), as :Hide
+-- does. The caller must not hide the host itself then. A Submit or Cancel
+-- during that wait takes it over (flow.finish_then) and also runs only
+-- after the paste, so cancelled dictation never reaches the target.
 function M.draft()
   local note = M.state.note
   if not note then return "" end
   local buf = note_buf(note)
+  if flow.state.waiting then return M.FLOW_WAIT .. " " .. note.path end
+  if flow.recording() then
+    M.hide(buf)
+    return M.FLOW_WAIT .. " " .. note.path
+  end
   local win = vim.fn.bufwinid(buf)
   if win ~= -1 then M.state.cursor = vim.api.nvim_win_get_cursor(win) end
   vim.api.nvim_buf_call(buf, function() vim.cmd("silent write!") end)

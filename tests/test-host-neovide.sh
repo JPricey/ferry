@@ -11,8 +11,11 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # macOS socket paths max out at 104 bytes, so keep the folder short.
 work=$(mktemp -d /tmp/vvn.XXXX)
 [ -n "$work" ] && [ -d "$work" ] || { echo "mktemp failed" >&2; exit 1; }
+ps_ours= ps_other=
 cleanup() {
   pkill -f -- "--listen $work/" 2>/dev/null
+  [ -n "$ps_ours" ] && kill "$ps_ours" 2>/dev/null
+  [ -n "$ps_other" ] && kill "$ps_other" 2>/dev/null
   rm -rf "$work"
 }
 trap cleanup EXIT
@@ -25,6 +28,13 @@ done
 : > "$work/apps/Neovide.app/Contents/Info.plist"
 cp "$work/fakes/neovide" "$work/apps/Neovide.app/Contents/MacOS/neovide"
 : > "$work/calls"
+# Two stand-in processes whose command lines /bin/ps reads: one served on
+# r.sock (ours in the ps case), one on another socket.
+perl -e 'sleep 60' neovide --server "$work/r.sock" </dev/null >/dev/null 2>&1 &
+ps_ours=$!
+perl -e 'sleep 60' neovide --server "$work/other.sock" </dev/null >/dev/null 2>&1 &
+ps_other=$!
+export VV_PS_OURS=$ps_ours VV_PS_OTHER=$ps_other
 export PATH="$work/fakes:$PATH" VOICE_VIM_DB="$work/history.sqlite"
 unset VOICE_VIM_SOCK VOICE_VIM_NOTES_DIR VOICE_VIM_HOST_NVIM_FLAGS
 
@@ -76,17 +86,35 @@ local function runLaunch(rec, i, needle)
   rec:finishTask(i, tonumber(out:match("rc=(%d+)$")) or 1, out, "")
 end
 
+-- Process command lines by pid (rec.cmdlines); "ours" stands for a
+-- Neovide started with --server <this adapter's sock>. rec.cmdlineReads
+-- counts reads per pid.
 local function new(rec, cfg)
   cfg = cfg or {}
   cfg.root = cfg.root or root
   cfg.searchPath = cfg.searchPath or { work .. "/empty" }
   cfg.appPaths = cfg.appPaths or {}
-  return stub.load(modpath).new(cfg)
+  rec.cmdlines = rec.cmdlines or {}
+  rec.cmdlineReads = rec.cmdlineReads or {}
+  local h
+  cfg.commandLine = cfg.commandLine or function(pid)
+    rec.cmdlineReads[pid] = (rec.cmdlineReads[pid] or 0) + 1
+    local c = rec.cmdlines[pid]
+    if c == "ours" then return "/Applications/Neovide.app/Contents/MacOS/neovide --server " .. h.config.sock end
+    return c
+  end
+  h = stub.load(modpath).new(cfg)
+  return h
 end
 
--- Neovide app stub with one window; not frontmost, hidden.
-local function neovide(rec, id)
-  local app = rec:app({ bundleID = NEOVIDE, name = "Neovide", windows = {} })
+-- Neovide app stub with one window; not frontmost, hidden. cmdline: its
+-- command line (default "ours").
+local nextPid = 7000
+local function neovide(rec, id, cmdline)
+  nextPid = nextPid + 1
+  rec.cmdlines = rec.cmdlines or {}
+  rec.cmdlines[nextPid] = cmdline or "ours"
+  local app = rec:app({ bundleID = NEOVIDE, name = "Neovide", windows = {}, pid = nextPid })
   local win = rec:window({ id = id or 50, app = app })
   app._window = win
   app._windows[1] = win
@@ -188,11 +216,47 @@ do
   check("hide: cb(true)", true, got)
   tw:focus()
   check("isFocused false after focus moves away", false, (h.isFocused()))
-  local byName = rec:app({ name = "Neovide" })
+  nextPid = nextPid + 1
+  rec.cmdlines[nextPid] = "ours"
+  local byName = rec:app({ name = "Neovide", pid = nextPid })
+  byName._window = rec:window({ id = 90, app = byName })
   rec.frontmost = byName
   local yes, why = h.isFocused()
   check("isFocused true by app name Neovide", true, yes)
   check("isFocused why says by name", true, has(why, "by name"))
+end
+
+-- Cmd+M: a minimized Neovide window is not focused, and show unminimizes
+-- it (else the hotkey goes silently dead: focused, nothing on screen).
+do
+  local rec = stub.install()
+  other(rec)
+  local app, win = neovide(rec)
+  local h = new(rec)
+  h.show(function() end)
+  check("minimize: shown window is focused", true, (h.isFocused()))
+  win:minimize()  -- Cmd+M: Neovide stays the frontmost app
+  local yes, why = h.isFocused()
+  check("minimize: frontmost Neovide with a minimized window is not focused", false, yes)
+  check("minimize: why says minimized", true, has(why, "minimized"))
+  -- A minimized window is not always the main window: found via allWindows.
+  app._window = nil
+  check("minimize: no main window, minimized in allWindows: not focused", false, (h.isFocused()))
+  h.show(function() end)
+  check("minimize: show unminimizes our window", 1, count(rec.unminimizes, win))
+  check("minimize: show focuses it", win, rec.focuses[#rec.focuses])
+  check("minimize: shown again -> focused", true, (h.isFocused()))
+  check("minimize: unminimize logged", true, rec:hasLog("i", "is minimized; unminimizing"))
+  app._window = win
+  h.show(function() end)
+  check("minimize: a window that is not minimized is not unminimized", 1, #rec.unminimizes)
+  -- Hidden app (window not visible) while frontmost: not focused.
+  app._hidden = true
+  check("not visible: frontmost Neovide with a hidden window is not focused", false, (h.isFocused()))
+  app._hidden = false
+  -- Frontmost with no window at all: not focused.
+  app._window, app._windows = nil, {}
+  check("no window: frontmost Neovide without a window is not focused", false, (h.isFocused()))
 end
 
 -- show/hide with Neovide not running: no error, show reports false.
@@ -249,6 +313,99 @@ do
   check("rememberFrame=false: no setFrame, no watcher", "0 0", #rec.setFrames .. " " .. #rec.watchers)
 end
 
+-- Our Neovide only: Joe's own Neovide (no --server <sock>) is never shown,
+-- hidden or taken as focused. get() returns Joe's (made last).
+do
+  local rec = stub.install()
+  local _, tw = other(rec)
+  local ours, ourWin = neovide(rec, 50)
+  local joes, joeWin = neovide(rec, 70, "/Applications/Neovide.app/Contents/MacOS/neovide")
+  joes._hidden = false
+  local h = new(rec)
+  rec.frontmost, rec.focusedWindow = joes, joeWin
+  local yes, why = h.isFocused()
+  check("own Neovide only: Joe's Neovide frontmost is not focused", false, yes)
+  check("own Neovide only: why names another Neovide", true, has(why, "another Neovide"))
+  tw:focus()
+  h.show(function() end)
+  check("own Neovide only: show unhides and activates ours, not Joe's", "1 1 0 0",
+    count(rec.unhides, ours) .. " " .. count(rec.activations, ours) .. " "
+    .. count(rec.unhides, joes) .. " " .. count(rec.activations, joes))
+  check("own Neovide only: show focuses our window", ourWin, rec.focuses[#rec.focuses])
+  check("own Neovide only: ours frontmost is focused", true, (h.isFocused()))
+  h.hide(function() end)
+  check("own Neovide only: hide hides ours, not Joe's", "1 0", count(rec.hides, ours) .. " " .. count(rec.hides, joes))
+  check("own Neovide only: Joe's logged as left alone", true, rec:hasLog("i", "is another Neovide, left alone"))
+  rec.frontmost = joes
+  h.isFocused(); h.show(function() end); h.isFocused()
+  check("own Neovide only: each command line read once", "1 1",
+    tostring(rec.cmdlineReads[ours:pid()]) .. " " .. tostring(rec.cmdlineReads[joes:pid()]))
+  check("own Neovide only: Joe's never hidden or unhidden", "0 0", count(rec.hides, joes) .. " " .. count(rec.unhides, joes))
+  rec:closeWindow(50)
+  ours._quit = true
+  local got
+  h.show(function(ok) got = ok end)
+  check("own Neovide only: ours quit -> show fails, Joe's untouched", "false 0",
+    tostring(got) .. " " .. count(rec.unhides, joes))
+end
+
+-- The window adopted after launch is ours even when command lines cannot
+-- be read; other Neovides with unreadable command lines are left alone.
+do
+  local rec = stub.install()
+  other(rec)
+  local h = new(rec, { searchPath = { work .. "/fakes" }, commandLine = function() return nil end })
+  local joes = neovide(rec, 70)
+  joes._hidden = false
+  h.launch(function() end)
+  h.show(function() end)
+  local ours, ourWin = neovide(rec, 51)
+  rec:runTimers()
+  check("adopted: launched window shown", "1 " .. tostring(ourWin),
+    count(rec.activations, ours) .. " " .. tostring(rec.focuses[#rec.focuses]))
+  h.hide(function() end)
+  check("adopted: hide acts on the adopted Neovide only", "1 0", count(rec.hides, ours) .. " " .. count(rec.hides, joes))
+  rec.frontmost = joes
+  check("adopted: an unreadable other Neovide is not focused", false, (h.isFocused()))
+end
+
+-- window-frame.lua cannot load: a show held for the launched window still
+-- happens (fallback poll), with no frame set.
+do
+  local rec = stub.install()
+  other(rec)
+  local h = new(rec, { root = work .. "/no-root", searchPath = { work .. "/fakes" } })
+  h.launch(function() end)
+  local got
+  h.show(function(ok) got = ok end)
+  check("no frame glue: show before the window is kept", true, got)
+  check("no frame glue: load error logged", true, rec:hasLog("e", "neovide: cannot load window-frame.lua"))
+  local app, win = neovide(rec, 56)
+  rec:runTimers()
+  check("no frame glue: held show happens when the window appears", "1 1",
+    count(rec.activations, app) .. " " .. count(rec.focuses, win))
+  check("no frame glue: Neovide frontmost", true, (h.isFocused()))
+  check("no frame glue: found by the fallback poll", true, rec:hasLog("i", "found after launch (no frame glue)"))
+  check("no frame glue: no setFrame", 0, #rec.setFrames)
+end
+
+-- Default command-line reader: /bin/ps on real processes.
+do
+  local rec = stub.install()
+  local h = stub.load(modpath).new({ root = root, sock = work .. "/r.sock",
+    searchPath = { work .. "/empty" }, appPaths = {} })
+  local ours = rec:app({ bundleID = NEOVIDE, name = "Neovide", pid = tonumber(os.getenv("VV_PS_OURS")) })
+  ours._window = rec:window({ id = 91, app = ours })
+  local theirs = rec:app({ bundleID = NEOVIDE, name = "Neovide", pid = tonumber(os.getenv("VV_PS_OTHER")) })
+  rec.frontmost = theirs
+  check("ps: a Neovide on another --server socket is not ours", false, (h.isFocused()))
+  rec.frontmost = ours
+  check("ps: the Neovide with --server <sock> is ours", true, (h.isFocused()))
+  local n = 0
+  for _, e in ipairs(rec.executes) do if has(e.cmd, "/bin/ps -o args= -p ") then n = n + 1 end end
+  check("ps: read through /bin/ps once per pid", 2, n)
+end
+
 -- Full controller cycle: instance.lua + this adapter, real voice-vim-host.
 do
   local rec = stub.install()
@@ -302,7 +459,7 @@ echo  # nvim -l leaves the last line unterminated
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: want '$2' got '$3'"; status=1; fi; }
 check "fake osascript never called" 0 "$(grep -c '^CALL osascript' "$work/calls")"
 check "fakes called only by the launch commands run above" 2 "$(grep -c '^CALL ' "$work/calls")"
-check "voice-vim.lua does not load hosts/neovide.lua" 0 "$(grep -c 'hosts/neovide\|hosts\.neovide' "$root/hammerspoon/voice-vim.lua")"
+check "voice-vim.lua loads hosts/neovide.lua" 1 "$(grep -c 'dofile(root .. "/hammerspoon/hosts/neovide.lua")' "$root/hammerspoon/voice-vim.lua")"
 lj=$(command -v luajit || echo /opt/homebrew/bin/luajit)
 if [ -x "$lj" ]; then
   check "hosts/neovide.lua parses under LuaJIT" ok "$("$lj" -e "assert(loadfile('$root/hammerspoon/hosts/neovide.lua')) print('ok')" 2>&1)"

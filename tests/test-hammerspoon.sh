@@ -5,8 +5,25 @@
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 tmp=$(mktemp -d -t vv-hs)
-trap 'rm -rf "$tmp"' EXIT
+# The one-instance cases run a real voice-vim-host server; macOS socket
+# paths max out at 104 bytes, so its folder is short.
+swork=$(mktemp -d /tmp/vvh.XXXX)
+[ -n "$swork" ] && [ -d "$swork" ] || { echo "mktemp failed" >&2; exit 1; }
+cleanup() {
+  pkill -f -- "--listen $swork/" 2>/dev/null
+  rm -rf "$tmp" "$swork"
+}
+trap cleanup EXIT
 export VOICE_VIM_DB="$tmp/history.sqlite"
+# Recording, failing fakes first on PATH: nothing reaches other apps.
+mkdir -p "$swork/fakes" "$swork/empty"
+for f in osascript open neovide; do
+  printf '#!/bin/sh\n{ echo "CALL %s"; echo "$*"; } >> "%s/calls"\nexit 1\n' "$f" "$swork" > "$swork/fakes/$f"
+  chmod +x "$swork/fakes/$f"
+done
+: > "$swork/calls"
+export PATH="$swork/fakes:$PATH" VOICE_VIM_NOTES_DIR="$swork/notes" VOICE_VIM_HOST_NVIM_FLAGS=--clean
+unset VOICE_VIM_SOCK
 
 cat > "$tmp/spec.lua" <<'LUA'
 local root = assert(os.getenv("VV_ROOT"))
@@ -23,10 +40,13 @@ local function check(name, want, got)
   end
 end
 
--- Fresh stub and module for each case.
+-- Fresh stub and module for each case. These cases cover the session path
+-- (mode = "session"); the one-instance cases further down set their own.
 local function fresh()
   local rec = stub.install()
-  return rec, stub.load(modpath)
+  local M = stub.load(modpath)
+  M.config.mode = "session"
+  return rec, M
 end
 
 -- start() with defaults: both URL handlers, hotkey with the configured mods.
@@ -237,7 +257,7 @@ for _, c in ipairs(broken) do
   local name, o = c[1], c[2]
   local rec = submitSetup(true)
   local M = stub.load(modpath)
-  M.start({ hotkey = { { "ctrl", "alt" }, "v" }, root = o.root })
+  M.start({ hotkey = { { "ctrl", "alt" }, "v" }, root = o.root, mode = "session" })
   if o.executeErrors then hs.execute = function() error("realpath boom") end end
   local file = submitFile("keep me\n")
   local ok, err = pcall(function()
@@ -562,11 +582,245 @@ do
   cleanupScripts(rec)
 end
 
+-- --- One instance (mode = "instance", the default) -------------------------
+local swork = assert(os.getenv("VV_SWORK"))
+local hostbin = root .. "/bin/voice-vim-host"
+local NEOVIDE = "com.neovide.neovide"
+local function sh(cmd)
+  local p = io.popen(cmd .. " 2>&1")
+  local out = p:read("*a")
+  p:close()
+  return (out:gsub("%s+$", ""))
+end
+local function has(s, needle) return (s or ""):find(needle, 1, true) ~= nil end
+local function count(list, x)
+  local k = 0
+  for _, v in ipairs(list) do if v == x then k = k + 1 end end
+  return k
+end
+local function hostSh(sock, sub)
+  return sh("VOICE_VIM_SOCK='" .. sock .. "' '" .. hostbin .. "' " .. sub)
+end
+local found = { searchPath = { swork .. "/fakes" }, appPaths = {} }
+local function sessionRuns(rec)
+  local n = 0
+  for _, sc in ipairs(rec.osascripts) do if has(sc, "voice-vim-session") then n = n + 1 end end
+  for _, e in ipairs(rec.executes) do if has(e.cmd, "voice-vim-session") then n = n + 1 end end
+  return n
+end
+
+-- Neovide not installed: today's new window per press, one alert.
+do
+  local rec = stub.install()
+  local M = stub.load(modpath)
+  rec.frontmost = rec:app({ bundleID = "com.example.target" })
+  M.start({ captureSelection = false, neovide = { searchPath = { swork .. "/empty" }, appPaths = {} } })
+  check("default mode is instance", "instance", M.config.mode)
+  check("Neovide missing: falls back to the old path", "session", M.mode)
+  check("Neovide missing: one alert", 1, #rec.alerts)
+  check("Neovide missing: alert says install Neovide", "voice-vim: install Neovide for the one-instance mode", rec.alerts[1])
+  check("Neovide missing: logs the brew command", true, rec:hasLog("w", "brew install --cask neovide"))
+  check("Neovide missing: hotkey runs begin", M.begin, rec.hotkeyBinds[1] and rec.hotkeyBinds[1].fn)
+  check("Neovide missing: no server pre-warm", 0, #rec.tasks)
+  rec.hotkeyBinds[1].fn()
+  check("Neovide missing: the hotkey opens a session window", 1, sessionRuns(rec))
+  cleanupScripts(rec)
+end
+
+-- mode = "session": the old path even with Neovide installed, no alert.
+do
+  local rec = stub.install()
+  local M = stub.load(modpath)
+  M.start({ mode = "session", neovide = found })
+  check("mode=session: old path, no alert, no pre-warm", "session 0 0", M.mode .. " " .. #rec.alerts .. " " .. #rec.tasks)
+end
+
+-- Setting up the one instance raises in start(): old path, one alert.
+do
+  local bad = swork .. "/badroot"
+  sh("mkdir -p '" .. bad .. "/hammerspoon/hosts' && ln -s '" .. root .. "/bin' '" .. root .. "/lua' '" .. bad .. "/'"
+    .. " && ln -s '" .. root .. "/hammerspoon/window-frame.lua' '" .. bad .. "/hammerspoon/'"
+    .. " && ln -s '" .. root .. "/hammerspoon/hosts/neovide.lua' '" .. bad .. "/hammerspoon/hosts/'"
+    .. " && echo 'error(\"instance boom\")' > '" .. bad .. "/hammerspoon/instance.lua'")
+  local rec = stub.install()
+  local M = stub.load(modpath)
+  rec.frontmost = rec:app({ bundleID = "com.example.target" })
+  local ok = pcall(M.start, { root = bad, captureSelection = false, neovide = found })
+  check("setup error: start() does not raise", true, ok)
+  check("setup error: falls back to the old path", "session", M.mode)
+  check("setup error: one alert", 1, #rec.alerts)
+  check("setup error: alert says it failed", true, has(rec.alerts[1], "one-instance mode failed"))
+  check("setup error: logged", true, rec:hasLog("e", "instance boom"))
+  check("setup error: hotkey runs begin", M.begin, rec.hotkeyBinds[1] and rec.hotkeyBinds[1].fn)
+  rec.hotkeyBinds[1].fn()
+  check("setup error: the hotkey opens a session window", 1, sessionRuns(rec))
+  cleanupScripts(rec)
+end
+
+-- The server pre-warm fails: the mode was decided at start() and stays the
+-- one instance. A press (here during the pre-warm) runs ensure again, and
+-- alerts when that fails too; it never opens a session window.
+do
+  local rec = stub.install()
+  rec.execStatus = true
+  local M = stub.load(modpath)
+  local target = rec:app({ bundleID = "com.example.target" })
+  local tw = rec:window({ id = 4242, app = target })
+  target._window = tw
+  rec.frontmost, rec.focusedWindow = target, tw
+  M.start({ sock = swork .. "/f.sock", captureSelection = false, neovide = found })
+  check("ensure fails: instance mode at start()", "instance", M.mode)
+  rec.hotkeyBinds[1].fn()  -- during the pre-warm: waits for it
+  rec:finishTask(1, 1, "", "nvim not found")
+  check("ensure fails: stays in instance mode", "instance", M.mode)
+  check("ensure fails: hotkey is still toggle", M.toggle, rec.hotkeyBinds[1].fn)
+  check("ensure fails: voicevim-hide still bound", "function", type(rec.urlBinds["voicevim-hide"]))
+  check("ensure fails: the press runs ensure again", true,
+    #rec.tasks == 2 and has(rec.tasks[2].args[2], "'ensure'") and rec.tasks[2].started)
+  check("ensure fails: no alert while recovering", 0, #rec.alerts)
+  rec:finishTask(2, 1, "", "nvim not found")
+  check("ensure fails twice: one alert", true,
+    #rec.alerts == 1 and has(rec.alerts[1], "could not open the note"))
+  check("ensure fails: never a session window", 0, sessionRuns(rec))
+  rec.hotkeyBinds[1].fn()  -- the next press tries again
+  check("ensure fails: next press runs ensure again", true,
+    #rec.tasks == 3 and has(rec.tasks[3].args[2], "'ensure'"))
+  rec:finishTask(3, 1, "", "nvim not found")
+  check("ensure fails: still no session window", 0, sessionRuns(rec))
+end
+
+-- Setup raises after the controller was built (here in prewarm, with a show
+-- already waiting for it): old path, and the half-built controller is
+-- disabled so it can never show Neovide (pending show dropped, URL
+-- handlers unbound).
+do
+  local bad = swork .. "/badroot2"
+  sh("mkdir -p '" .. bad .. "/hammerspoon/hosts' && ln -s '" .. root .. "/bin' '" .. root .. "/lua' '" .. bad .. "/'"
+    .. " && ln -s '" .. root .. "/hammerspoon/window-frame.lua' '" .. bad .. "/hammerspoon/'"
+    .. " && ln -s '" .. root .. "/hammerspoon/hosts/neovide.lua' '" .. bad .. "/hammerspoon/hosts/'")
+  local f = assert(io.open(bad .. "/hammerspoon/instance.lua", "w"))
+  f:write("local I = dofile('" .. root .. "/hammerspoon/instance.lua')\n"
+    .. "local new = I.new\n"
+    .. "I.new = function(cfg)\n"
+    .. "  local c = new(cfg)\n"
+    .. "  local pw = c.prewarm\n"
+    .. "  c.prewarm = function(cb)\n"
+    .. "    pw(cb)\n"
+    .. "    c._afterWarm = function() _G.VV_SHOWN = true end\n"
+    .. "    error('prewarm boom')\n"
+    .. "  end\n"
+    .. "  _G.VV_BUILT = c\n"
+    .. "  return c\n"
+    .. "end\n"
+    .. "return I\n")
+  f:close()
+  local rec = stub.install()
+  local M = stub.load(modpath)
+  rec.frontmost = rec:app({ bundleID = "com.example.target" })
+  _G.VV_BUILT, _G.VV_SHOWN = nil, nil
+  M.start({ root = bad, sock = swork .. "/g.sock", captureSelection = false, neovide = found })
+  check("late setup error: old path, one alert", "session 1", M.mode .. " " .. #rec.alerts)
+  check("late setup error: logged", true, rec:hasLog("e", "prewarm boom"))
+  local c = _G.VV_BUILT
+  check("late setup error: controller disabled, pending show dropped", "true nil",
+    tostring(c and c._disabled) .. " " .. tostring(c and c._afterWarm))
+  check("late setup error: voicevim-hide unbound", nil, rec.urlBinds["voicevim-hide"])
+  rec:finishTask(1, 0, "", "")  -- the pre-warm finishes later
+  check("late setup error: the dropped show never runs", nil, _G.VV_SHOWN)
+  c.toggle()
+  local shows = 0
+  for _, e in ipairs(rec.executes) do if has(e.cmd, "'show'") then shows = shows + 1 end end
+  check("late setup error: the disabled controller shows nothing", "0 0", shows .. " " .. #rec.unhides)
+  check("late setup error: hotkey runs begin", M.begin, rec.hotkeyBinds[1] and rec.hotkeyBinds[1].fn)
+end
+
+-- Obsolete keys in instance mode.
+do
+  local rec = stub.install()
+  local M = stub.load(modpath)
+  M.start({ sock = swork .. "/o.sock", terminal = "iTerm2", windowTitle = "x", neovide = found })
+  check("windowTitle warns", true, rec:hasLog("w", "windowTitle is no longer used"))
+  check("terminal warns in instance mode", true, rec:hasLog("w", "terminal is only used with mode"))
+end
+
+-- One instance: the hotkey toggles Neovide, start() pre-warms once, submit
+-- hides Neovide before the Cmd+V, and voice-vim-session never runs.
+do
+  local rec = stub.install()
+  rec.execStatus = true
+  local sock = swork .. "/i.sock"
+  local target = rec:app({ bundleID = "com.example.target" })
+  local tw = rec:window({ id = 4242, app = target })
+  target._window = tw
+  rec.frontmost, rec.focusedWindow = target, tw
+  local M = stub.load(modpath)
+  local cmdlines = {}
+  M.start({ sock = sock, neovide = { searchPath = found.searchPath, appPaths = {},
+    commandLine = function(pid) return cmdlines[pid] end } })
+  check("instance: Neovide found -> instance mode, no alert", "instance 0", M.mode .. " " .. #rec.alerts)
+  local b = rec.hotkeyBinds[1]
+  check("instance: hotkey function is toggle", M.toggle, b and b.fn)
+  local ensures = 0
+  for _, t in ipairs(rec.tasks) do if has(t.args[2], "'ensure'") and t.started then ensures = ensures + 1 end end
+  check("instance: start() creates one ensure hs.task", "1 1", #rec.tasks .. " " .. ensures)
+  check("instance: ensure uses the socket", true, has(rec.tasks[1].args[2], sock))
+  check("instance: voicevim-hide and voicevim-submit bound", "function function",
+    type(rec.urlBinds["voicevim-hide"]) .. " " .. type(rec.urlBinds["voicevim-submit"]))
+  hostSh(sock, "ensure")  -- what the pre-warm task does
+  rec:finishTask(1, 0, "", "")
+  b.fn()
+  local shown = 0
+  for _, e in ipairs(rec.executes) do if has(e.cmd, "'show' 'com.example.target' '4242'") then shown = shown + 1 end end
+  check("instance: press runs show com.example.target 4242", 1, shown)
+  check("instance: no Cmd+C on press (captureSelection off)", 0, #rec.keyStrokes)
+  check("instance: uis=0 -> Neovide launched with --server <sock>", true,
+    rec.tasks[2] ~= nil and has(rec.tasks[2].args[2], "--server '" .. sock .. "'"))
+  local nv = rec:app({ bundleID = NEOVIDE, name = "Neovide", windows = {}, pid = 9001 })
+  cmdlines[9001] = swork .. "/fakes/neovide --server " .. sock
+  local nw = rec:window({ id = 60, app = nv })
+  nv._window, nv._windows[1] = nw, nw
+  rec:runTimers()
+  check("instance: Neovide frontmost after the press", true, rec.frontmost == nv)
+  check("instance: logs show: host focused after", true, rec:hasLog("i", "show: host focused after"))
+
+  local file = submitFile("from the note\n")
+  local hidesAtPaste
+  rec.onKeyStroke = function(_, key) if key == "v" then hidesAtPaste = count(rec.hides, nv) end end
+  rec:openURL("voicevim-submit", { file = file, target = "com.example.target", window = "4242" })
+  rec:runTimers()
+  check("instance: submit URL calls host.hide before Cmd+V", 1, hidesAtPaste)
+  check("instance: one Cmd+V after focusing 4242", "1 4242",
+    #rec.keyStrokes .. " " .. tostring(rec.focuses[#rec.focuses] and rec.focuses[#rec.focuses]:id()))
+  check("instance: delivered, text on the clipboard", "true from the note",
+    tostring(rec:hasLog("i", "submit: delivered")) .. " " .. tostring(rec.pasteboard.contents))
+  check("instance: submit file removed", nil, io.open(file, "r"))
+
+  rec:openURL("voicevim-start", {})  -- shows again, like the hotkey
+  rec:runTimers()
+  check("instance: voicevim-start shows Neovide", true, rec.frontmost == nv)
+  b.fn()  -- Neovide focused: keep the draft, hide, refocus 4242
+  local drafts = 0
+  for _, e in ipairs(rec.executes) do if has(e.cmd, "'draft'") then drafts = drafts + 1 end end
+  check("instance: press while shown runs draft and hides", "1 2", drafts .. " " .. count(rec.hides, nv))
+  check("instance: press while shown refocuses 4242", tw, rec.focuses[#rec.focuses])
+  check("instance: the hotkey never runs voice-vim-session", 0, sessionRuns(rec))
+  hostSh(sock, "stop")
+end
+
 os.exit(fail)
 LUA
 
-VV_ROOT="$root" VV_TMP="$tmp" perl -e 'alarm 20; exec @ARGV' nvim -l "$tmp/spec.lua" 2>&1
+VV_ROOT="$root" VV_TMP="$tmp" VV_SWORK="$swork" perl -e 'alarm 60; exec @ARGV' nvim -l "$tmp/spec.lua" 2>&1
 status=$?
 echo  # nvim -l leaves the last line unterminated
+
+check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: want '$2' got '$3'"; status=1; fi; }
+check "fake osascript/open/neovide never called" 0 "$(grep -c '^CALL ' "$swork/calls")"
+lj=$(command -v luajit || echo /opt/homebrew/bin/luajit)
+if [ -x "$lj" ]; then
+  for f in "$root"/hammerspoon/*.lua "$root"/hammerspoon/hosts/*.lua; do
+    check "$(basename "$f") parses under LuaJIT" ok "$("$lj" -e "assert(loadfile('$f')) print('ok')" 2>&1)"
+  done
+fi
 if [ $status -eq 0 ]; then echo "all ok"; else echo "FAILED"; fi
 exit $status
