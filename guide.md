@@ -188,9 +188,9 @@ the database, and a second run writes nothing new.
 
 `bin/ferry-corrections` compares what Wispr Flow typed into ferry with the
 notes you sent and prints the fixes you made in at least two notes, like
-`2× cube control → kubectl` (`--min N`, `--json`). It only reads Flow's
-database and never changes it; add the words you want in Flow's own
-Dictionary.
+`2× cube control → kubectl` (`--min N`, `--json`). It reads a private
+copy of Flow's database and never opens or changes the original; add the
+words you want in Flow's own Dictionary.
 
 ## Edit the buffer
 

@@ -234,8 +234,8 @@ same words wrong. Run `~/Code/ferry/bin/ferry-corrections` to see them: it
 matches each Flow dictation into ferry with the note you sent and prints
 the fixes you made in at least two notes, most common first, like
 `2× cube control → kubectl`. `--min 1` shows one-off fixes too, and words
-already in Flow's Dictionary are left out. It only reads Flow's database
-and never changes it. Add the words you want in Flow's own Dictionary (in
+already in Flow's Dictionary are left out. It reads a private copy of
+Flow's database and never opens or changes the original. Add the words you want in Flow's own Dictionary (in
 the Wispr Flow app).
 
 ## The window

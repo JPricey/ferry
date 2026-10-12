@@ -10,10 +10,12 @@ substitutions you made in at least N notes, most frequent first:
   3× cube control → kubectl
 
 Add the ones you want as words in Flow's own Dictionary (Flow app →
-Dictionary). This script never writes Flow's data: the database is opened
-with `mode=ro` only while Flow has it open (its -wal and -shm files are
-there); otherwise a temp copy of the database and its -wal is read, so
-nothing is ever created beside Flow's files.
+Dictionary). This script never writes Flow's data and never opens Flow's
+live files with SQLite: it copies the database and its -wal (never the
+-shm) into a private temp dir, as an APFS clone (`cp -c`) or else a plain
+copy, and opens only that copy. A copy that changed while it was taken or
+fails `PRAGMA quick_check` is retaken, up to 3 times; then it exits 2.
+The temp dir is removed on every path.
 
   --flow-db  default ~/Library/Application Support/Wispr Flow/flow.sqlite
   --apps     Flow `app` values that are ferry (default local.ferry,
@@ -38,7 +40,9 @@ import re
 import shutil
 import sqlite3
 import sys
+import subprocess
 import tempfile
+import time
 import urllib.parse
 from datetime import datetime, timezone
 
@@ -70,22 +74,69 @@ def connect_ro(path):
     return con
 
 
-def read_flow(path, apps):
-    """(history rows [(ts, text)], dictionary words casefolded)."""
-    live = os.path.exists(path + "-wal") and os.path.exists(path + "-shm")
-    if live:
+COPY_TRIES = 3
+
+
+class CopyFailed(Exception):
+    pass
+
+
+def clone(src, dst):
+    """APFS clone of src at dst, else a plain copy."""
+    if subprocess.run(["cp", "-c", src, dst], stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL).returncode != 0:
+        shutil.copyfile(src, dst)
+
+
+def stamp(path):
+    """(size, mtime) of path and its -wal, to spot a write during the copy."""
+    out = []
+    for p in (path, path + "-wal"):
         try:
-            return query(connect_ro(path), apps)
-        except sqlite3.Error:
-            pass
-    # No live -shm (Flow is not running) or the read-only open failed: a
-    # read-only open could create a -shm beside Flow's files, so read a copy.
-    with tempfile.TemporaryDirectory(prefix="ferry-corrections.") as d:
-        copy = os.path.join(d, "flow.sqlite")
-        shutil.copyfile(path, copy)
-        if os.path.exists(path + "-wal"):
-            shutil.copyfile(path + "-wal", copy + "-wal")
-        return query(connect_ro(copy), apps)
+            st = os.stat(p)
+            out.append((st.st_size, st.st_mtime_ns))
+        except FileNotFoundError:
+            out.append(None)
+    return out
+
+
+def read_flow(path, apps):
+    """(history rows [(ts, text)], dictionary words casefolded).
+
+    SQLite never opens Flow's live files: even `mode=ro` can create a -wal
+    or -shm beside them (if Flow quits between checks) or rewrite a stale
+    -shm after a crash. So the db and its -wal (never the -shm) are copied
+    into a private temp dir and only the copy is opened. A copy taken while
+    Flow wrote (the files changed meanwhile, the copy fails quick_check or
+    raises DatabaseError) is retaken, up to COPY_TRIES times."""
+    why = ""
+    for attempt in range(COPY_TRIES):
+        if attempt:
+            time.sleep(0.2)
+        with tempfile.TemporaryDirectory(prefix="ferry-corrections.") as d:
+            copy = os.path.join(d, "flow.sqlite")
+            before = stamp(path)
+            clone(path, copy)
+            if before[1] is not None:
+                try:
+                    clone(path + "-wal", copy + "-wal")
+                except FileNotFoundError:
+                    pass  # checkpointed and removed meanwhile; stamp differs
+            if stamp(path) != before:
+                why = "it changed while it was copied"
+                continue
+            con = connect_ro(copy)
+            try:
+                check = con.execute("PRAGMA quick_check").fetchone()
+                if not check or check[0] != "ok":
+                    why = "quick_check: %s" % (check[0] if check else "no answer")
+                    continue
+                return query(con, apps)
+            except sqlite3.DatabaseError as e:
+                why = str(e)
+            finally:
+                con.close()
+    raise CopyFailed("no sound copy after %d tries (%s)" % (COPY_TRIES, why))
 
 
 def query(con, apps):
@@ -195,14 +246,24 @@ def corrections(history, notes, dictionary):
         i = owner(notes, ts)
         if i is not None:
             dictated.setdefault(i, []).append(text)
-    counts = {}
+    counts, spellings = {}, {}
     for i, texts in dictated.items():
-        for pair in substitutions(" ".join(texts), notes[i][3]):
-            if pair[1].casefold() in dictionary:
+        seen = set()
+        for wrong, right in substitutions(" ".join(texts), notes[i][3]):
+            if right.casefold() in dictionary:
                 continue  # Flow already knows the right word
-            counts[pair] = counts.get(pair, 0) + 1
-    return sorted(((n, w, r) for (w, r), n in counts.items()),
-                  key=lambda c: (-c[0], c[1].casefold(), c[2]))
+            key = (wrong.casefold(), right)  # `Cube control` = `cube control`
+            spelled = spellings.setdefault(key, {})
+            spelled[wrong] = spelled.get(wrong, 0) + 1
+            if key not in seen:
+                seen.add(key)
+                counts[key] = counts.get(key, 0) + 1
+    found = []
+    for key, n in counts.items():
+        # the most common spelling of the wrong side; ties by sort order
+        wrong = min(spellings[key].items(), key=lambda s: (-s[1], s[0]))[0]
+        found.append((n, wrong, key[1]))
+    return sorted(found, key=lambda c: (-c[0], c[1].casefold(), c[2]))
 
 
 # ---------------------------------------------------------------------------
@@ -245,8 +306,8 @@ def main(argv):
         return fail("no Wispr Flow database: " + db)
     try:
         history, dictionary = read_flow(db, app_list)
-    except (sqlite3.Error, OSError) as e:
-        return fail("cannot read %s: %s" % (db, e))
+    except (CopyFailed, sqlite3.Error, OSError) as e:
+        return fail("cannot read %s: %s" % (db, str(e).replace("\n", " ")))
 
     found = [c for c in corrections(history, sent_notes(load_notes()), dictionary)
              if c[0] >= least]
