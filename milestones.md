@@ -229,6 +229,24 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-11: W3 done and verified. Changes Hammerspoon behavior: the Ghostty session window gets the saved or default frame; every frame error only logs. Config `rememberFrame = false` leaves the window to Ghostty entirely; `windowSize` sets the default fraction.
   - 2026-10-11: agent checks pass (test-frame, test-window-frame, test-hammerspoon incl. the five W3 cases, luajit syntax); status → needs-joe.
 
+## Close the session window cleanly
+
+- **Status:** in-progress
+- **Needs:** nothing
+- **Deliverable:** ending a session (submit or cancel) leaves no Ghostty "Process exited. Press any key to close the terminal." window behind, and cancel returns focus to the window Joe started from.
+- **Scope:**
+  - Ghostty 1.3.1 shows its "Process exited" screen after `voice-vim-session` exits 0 on cancel, although the AppleScript passes `wait after command:false` and Joe's config does not set `wait-after-command`. Do not rely on Ghostty closing the window: Hammerspoon closes the session window it adopted.
+  - Update `guide.md` (Submit, Cancel) and `AGENTS.md` "V0 shape" step 5.
+- **Agent checks:** `tests/test-hammerspoon.sh` and `tests/test-session.sh` cases below; every test and the luajit syntax check pass.
+- **Joe checks:**
+  1. Reload Config. Ctrl+Option+V from Slack, type a word, Ctrl-Q: the window closes with no "Process exited" screen and Slack is focused again.
+  2. Ctrl+Option+V, type, Ctrl-X: the text lands in Slack and no Ghostty window is left behind (check with Cmd+` in Ghostty or Mission Control).
+  3. Close any leftover "Process exited" windows from earlier sessions by pressing a key in them.
+- **Tasks:**
+  - [ ] **C1. Hammerspoon closes the session window on submit and cancel.** `begin()` generates a session token and passes it to `bin/voice-vim-session` (new optional 4th argument, or env `VOICE_VIM_SESSION_TOKEN` in the command's env prefix); after `adopt` finds the new Ghostty window, Hammerspoon maps token → that `hs.window` (W3's glue already finds it; extend it to report the window, e.g. an `onAdopt` callback). The session script adds `&session=<token>` to the submit URL and, on cancel (non-dry), opens `hammerspoon://voicevim-cancel?target=&window=&session=` when Hammerspoon is running (with `VOICE_VIM_DRY_RUN=1` print `voice-vim-cancel-url: …`; keep the existing `voice-vim-url:` output for submit unchanged). `submit()`: close the session window (`win:close()`) before delivery. New `voicevim-cancel` handler: close the session window, then focus the captured target window (fallback: activate the app). Every close/focus is `pcall`-guarded and only logs (`session: closed window …`, `session: window not found`); a missing token or window changes nothing else. Drop the token mapping after use. Files: `hammerspoon/voice-vim.lua`, `hammerspoon/window-frame.lua` (only if needed for the callback), `bin/voice-vim-session`, `tests/test-hammerspoon.sh`, `tests/hs_stub.lua` (additions: `win:close()` recording), `tests/test-session.sh`, `guide.md`, `AGENTS.md` V0 shape step 5. Depends: none. Verify: `test-session.sh` new cases (dry-run cancel prints `voice-vim-cancel-url:` with target, window and session; submit URL contains `session=`); `test-hammerspoon.sh` new cases (begin + adopt maps the token to the new window; submit with that session closes it once before the Cmd+V; cancel URL closes it and focuses window 4242; unknown session → no close, no error; close throwing → still delivers); all other tests and `luajit` loadfile pass.
+- **Log:**
+  - 2026-10-11: created at Joe's request after Ctrl-Q left a Ghostty "Process exited" screen. The session script exits 0 on cancel and the AppleScript passes `wait after command:false`, so Ghostty is not closing the window as asked; after submit the same screen is probably left behind unseen (a likely cause of the old "idle windows piled up" complaint). Single bugfix task written by the orchestrator.
+
 ## Notes and history browser
 
 - **Status:** todo
@@ -318,3 +336,4 @@ Record each change here, dated, with the reason.
 - 2026-10-11: Joe asked the orchestrator to start "One instance toggled by a hotkey" before the host pick. Its hard need now covers only the host tasks (show/hide wiring, removing the new-window-per-press path). Host-independent tasks (server, note/draft/submit/cancel commands against a stubbed host) go first and must leave V0 working.
 - 2026-10-11: added "Voice keys in the buffer" (Ctrl-Q cancel, Ctrl-S Flow toggle, stop Flow before submit) at Joe's request, with no needs, so it can run before the host pick. "Stop hands-free on submit" moves there from "Dictation polish".
 - 2026-10-11: added "Window size and position" at Joe's request (default centred 50%×50% of the main screen, remember the last frame), with no needs.
+- 2026-10-11: added "Close the session window cleanly" (Hammerspoon closes the session window on submit and cancel; cancel refocuses the start window), with no needs.
