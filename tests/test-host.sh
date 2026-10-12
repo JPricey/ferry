@@ -209,7 +209,7 @@ g=$("$host" show com.example.app 4242)
 ask "luaeval('(function() local n = require\"ferry.note\"; n.api = 7; n.old = true; vim.g.ferry_gui = nil; vim.cmd(\"vsplit | split\"); return 1 end)()')" >/dev/null
 "$host" draft >/dev/null
 h=$("$host" show com.example.app 4242)
-check "old server (note api 7): show reloads the note module to 10 and keeps the draft" "10 true $g" \
+check "old server (note api 7): show reloads the note module to 11 and keeps the draft" "11 true $g" \
   "$(ask 'luaeval("require\"ferry.note\".api")') $(ask 'luaeval("require\"ferry.note\".old == nil")') $h"
 check "old server: show applies the layout" "history $(basename "$g")" "$(wins)"
 check "old server: show loads the GUI settings" "{'bg': '#001e27', 'font': 'Test Mono:h13'}" "$(ask 'string(g:ferry_gui)')"
@@ -288,8 +288,8 @@ u=$("$host" show com.example.app 4242)
 ask "nvim_buf_set_lines(0, 1, -1, v:false, ['upgrade draft'])" >/dev/null
 "$host" draft >/dev/null
 ask "luaeval('(function() require\"ferry.note\".api = 3; local f = require\"ferry.flow\"; f.api = nil; f.adopt_start = nil; return 1 end)()')" >/dev/null
-check "API-3 server: talk reloads note (api 10) and flow (api 5), keeps the draft and its target" \
-  "talk $u 10 5 to: app:com.example.app#4242|upgrade draft com.example.app 4242 true" \
+check "API-3 server: talk reloads note (api 11) and flow (api 5), keeps the draft and its target" \
+  "talk $u 11 5 to: app:com.example.app#4242|upgrade draft com.example.app 4242 true" \
   "$("$host" talk) $(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api') $(ask 'join(getline(1, "$"), "|")') $(ask 'b:ferry.target." ".b:ferry.window') $(rec)"
 check "API-3 server: release after the upgrade sends one stop" "released|-g wispr-flow://stop-hands-free" \
   "$("$host" release)|$(sleep 0.3; opened)"
@@ -298,7 +298,7 @@ paste " done"
 
 # Live upgrade from main 54d10b6 (note api 5, flow api 2, history api 1): a
 # server started from that code keeps running while the repo under it moves
-# to this code (note 10, flow 5). The next host call reloads both modules.
+# to this code (note 11, flow 5). The next host call reloads both modules.
 # Draft, target and to: line are kept, a recording in progress and a pending
 # release wait survive, each release sends exactly one stop, and a paste the
 # old and the new paste hook both report counts once.
@@ -335,8 +335,8 @@ opened >/dev/null
 live=$work/live1; old_server "$live"
 "$live/bin/ferry-host" talk >/dev/null
 upgrade "$live"
-check "upgrade with a recording: release reloads to note 10, flow 5, keeps draft, to: line and target, one stop" \
-  "released 10 5 to: app:com.example.app#4242|live draft com.example.app 4242 true|-g wispr-flow://stop-hands-free" \
+check "upgrade with a recording: release reloads to note 11, flow 5, keeps draft, to: line and target, one stop" \
+  "released 11 5 to: app:com.example.app#4242|live draft com.example.app 4242 true|-g wispr-flow://stop-hands-free" \
   "$("$live/bin/ferry-host" release) $(apis) $(body) $(ask 'b:ferry.target." ".b:ferry.window') $(waiting)|$(sleep 0.3; opened)"
 # A quick second hold during that wait: the new talk adds the new paste hook
 # beside the old one, so the first paste is reported twice.
@@ -367,7 +367,7 @@ check "54d10b6 server: release sends one stop and waits" "true -g wispr-flow://s
   "$(waiting) $(sleep 0.3; opened)"
 upgrade "$live"
 check "upgrade with a pending release wait: release reloads, keeps draft and target, the wait, sends no second stop" \
-  "released 10 5 to: app:com.example.app#4242|live draft com.example.app 4242 true " \
+  "released 11 5 to: app:com.example.app#4242|live draft com.example.app 4242 true " \
   "$("$live/bin/ferry-host" release) $(apis) $(body) $(ask 'b:ferry.target." ".b:ferry.window') $(waiting) $(sleep 0.3; opened)"
 vpaste " landed"
 check "upgrade: Flow's paste ends the old wait, lands once, recording off" \
@@ -375,7 +375,7 @@ check "upgrade: Flow's paste ends the old wait, lands once, recording off" \
 "$live/bin/ferry-host" stop
 
 # Live upgrade from main 1dd6f9b (note api 8, notes as raw scratch files in
-# ${TMPDIR}/ferry-notes): the next call with this code reloads note to 9,
+# ${TMPDIR}/ferry-notes): the next call with this code reloads note to 11,
 # keeps the draft (to: line, text, target), and the draft gets a note file
 # in the notes folder on its next change. The old scratch file is left as
 # it was.
@@ -389,8 +389,8 @@ check "1dd6f9b server: note api 8, raw draft file in the old folder" "8 $work/ol
 upgrade "$live"
 mkdir -p "$FERRY_NOTES_DIR"; before=$(ls "$FERRY_NOTES_DIR" | wc -l | tr -d ' ')
 new=$("$live/bin/ferry-host" show com.example.app 4242)
-check "upgrade from api 8: show reloads to 10, keeps the draft and target, names a note file in the notes folder" \
-  "10 to: app:com.example.app#4242|api 8 draft com.example.app 4242 yes" \
+check "upgrade from api 8: show reloads to 11, keeps the draft and target, names a note file in the notes folder" \
+  "11 to: app:com.example.app#4242|api 8 draft com.example.app 4242 yes" \
   "$(lua 'require"ferry.note".api') $(body) $(ask 'b:ferry.target." ".b:ferry.window') $(case $new in "$FERRY_NOTES_DIR"/????-??-??-??????-*.md) echo yes ;; *) echo "no ($new)" ;; esac)"
 ask "nvim_input('<Esc>A and more')" >/dev/null
 sleep 1.5
@@ -401,6 +401,39 @@ check "upgrade from api 8: the old scratch file is left alone; one new file in t
   "to: app:com.example.app#4242|api 8 draft $((before + 1))" "$(command paste -sd'|' - <"$old") $(ls "$FERRY_NOTES_DIR" | wc -l | tr -d ' ')"
 check "upgrade from api 8: draft prints the new path" "$new" "$("$live/bin/ferry-host" draft)"
 "$live/bin/ferry-host" stop
+
+# Live upgrade from 901e856 (note api 9, H3: note files) and from 3f82b91
+# (note api 10, P5): neither keeps a record of ferry's last write. The next
+# call reloads note to 11 and keeps the draft and its file. Its file counts
+# as ferry's, so the next change saves to the same file; from then on an
+# outside edit with typing forks to a conflict file.
+conflicts() { ls "$FERRY_NOTES_DIR" | grep -c '\.conflict-'; }
+for old in "901e856 9" "3f82b91 10"; do
+  read -r rev n <<<"$old"
+  live=$work/live-$rev; old_tree "$rev" "$live"
+  "$live/bin/ferry-host" ensure >/dev/null
+  p9=$("$live/bin/ferry-host" show com.example.app 4242)
+  ask "nvim_buf_set_lines(0, 1, -1, v:false, ['api $n draft'])" >/dev/null
+  "$live/bin/ferry-host" draft >/dev/null
+  c0=$(conflicts)
+  check "$rev server: note api $n, the draft's file written" "$n draft api $n draft" \
+    "$(lua 'require"ferry.note".api') $(fkey "$p9" state) $(fbody "$p9")"
+  upgrade "$live"
+  check "upgrade from api $n: show reloads to 11, keeps the draft and its file" \
+    "$p9 11 to: app:com.example.app#4242|api $n draft com.example.app 4242" \
+    "$("$live/bin/ferry-host" show com.example.app 4242) $(lua 'require"ferry.note".api') $(body) $(ask 'b:ferry.target." ".b:ferry.window')"
+  ask "nvim_input('<Esc>A kept')" >/dev/null
+  sleep 1.5
+  check "upgrade from api $n: the next change saves to the same file, no conflict file" \
+    "draft api $n draft kept $c0" "$(fkey "$p9" state) $(fbody "$p9") $(conflicts)"
+  perl -pi -e "s/^api $n draft kept\$/edited outside/" "$p9"
+  ask "nvim_input(' more')" >/dev/null
+  sleep 1.5
+  cf9=$(ls "$FERRY_NOTES_DIR"/"$(basename "$p9" .md)".conflict-*.md 2>/dev/null)
+  check "upgrade from api $n: then an outside edit + typing keeps both (file, conflict file)" \
+    "edited outside|api $n draft kept more $((c0 + 1))" "$(fbody "$p9")|$(fbody "$cf9") $(conflicts)"
+  "$live/bin/ferry-host" stop
+done
 
 # --- overrides and a missing or hung ghostty ------------------------------------
 FERRY_GUI_FONT='Other Font:h15' FERRY_GUI_BG='#112233' "$host" ensure >/dev/null

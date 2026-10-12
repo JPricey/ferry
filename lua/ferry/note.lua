@@ -43,6 +43,16 @@
 -- `to: clipboard` copies the body and hides; :Copy (<C-y>) does that for any
 -- header. The file always stores a target (the captured one when line 1 is
 -- not a header), so a body line starting with `to:` stays body on reload.
+--
+-- ferry never overwrites an outside edit: it remembers the bytes of the
+-- note file as it last wrote or read it (b:ferry_disk, a sha256). A write
+-- that finds the file changed since forks instead: the buffer moves to a
+-- sibling <name>.conflict-<time>.md (a fresh id, `conflict_of: <id>`,
+-- state draft), which holds ferry's text from then on, and the outside
+-- edit stays in the original file. One notice. A file changed outside
+-- reloads into the buffer when it has no unsaved typing; with typing, the
+-- fork happens at once. Only a file that matches ferry's own last write
+-- changes without a word.
 local M = {}
 
 -- A module note.lua needs at api `want` or later. A running server can hold
@@ -78,7 +88,7 @@ local store = require("ferry.store")
 -- Bumped when the module changes in a way an already-running server must
 -- pick up: bin/ferry-host reloads the module (keeping M.state and a
 -- swapped M.host) when the loaded one reports a different api.
-M.api = 10
+M.api = 11
 
 -- history api 1: open() binds the note keys on the sidebar. Reloaded now
 -- when already loaded, so a sidebar opened from a :History command an older
@@ -204,17 +214,97 @@ function M.read_note(path, fallback)
   return target.join(spec, body), meta
 end
 
+-- An error notice, shown after the current command: raised inside :write
+-- (BufWriteCmd) or a vim.cmd, an error message would abort the caller
+-- halfway (a Cancel would stop before keeping the note).
+local function alert(msg)
+  vim.schedule(function() vim.notify(msg, vim.log.levels.ERROR) end)
+end
+
+-- --- outside edits ------------------------------------------------------
+
+-- sha256 of the file's bytes, or nil when it cannot be read.
+local function digest(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local text = f:read("a")
+  f:close()
+  return vim.fn.sha256(text or "")
+end
+
+-- Remember path as ferry wrote or read it into buf.
+local function remember(buf, path) vim.b[buf].ferry_disk = digest(path) end
+
+-- True when path holds what ferry last wrote or read into buf. A buffer
+-- with no record (held over from note api 10 or older) counts as ferry's.
+local function ours(buf, path)
+  local rec = vim.b[buf].ferry_disk
+  if type(rec) ~= "string" then return true end
+  return digest(path) == rec
+end
+
+-- Rename buf to path, dropping the unloaded buffer that renaming leaves
+-- behind under the old name. No file is moved.
+local function rename(buf, path)
+  local old = vim.api.nvim_buf_get_name(buf)
+  vim.api.nvim_buf_set_name(buf, path)
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if b ~= buf and not vim.api.nvim_buf_is_loaded(b) and vim.api.nvim_buf_get_name(b) == old then
+      pcall(vim.api.nvim_buf_delete, b, { force = true })
+    end
+  end
+end
+
+-- <dir>/<name>.conflict-<date>-<time>.md next to path, not taken yet.
+local function conflict_path(path)
+  local base = path:gsub("%.md$", "") .. ".conflict-" .. os.date("%Y-%m-%d-%H%M%S")
+  local p, n = base .. ".md", 1
+  while vim.uv.fs_stat(p) do
+    n = n + 1
+    p = base .. "-" .. n .. ".md"
+  end
+  return p
+end
+
+-- path (buf's note file) changed outside ferry: leave it as it is and move
+-- buf to a conflict file beside it, which takes ferry's text from now on.
+-- Returns the conflict file's base frontmatter (the original's, with a
+-- fresh id, `conflict_of` and state draft) and its path.
+local function fork(buf, path)
+  local meta = store.read(path) or {}
+  local orig = rawget(meta, "id") or (vim.b[buf].ferry or {}).id
+  local id = M.uuid()
+  local new = conflict_path(path)
+  store.set(meta, "id", id)
+  store.set(meta, "state", "draft")
+  if orig then store.set(meta, "conflict_of", orig) end
+  rename(buf, new)
+  vim.b[buf].ferry_disk = nil
+  local note = M.state.note
+  if note and note.buf == buf then note.path, note.id = new, id end
+  index(path)
+  vim.notify(string.format("ferry: %s was changed outside ferry and is kept as it is; your text is in %s",
+    vim.fn.fnamemodify(path, ":t"), vim.fn.fnamemodify(new, ":t")), vim.log.levels.WARN)
+  return meta, new
+end
+
 -- Write buf's note file: its frontmatter (kept from the file, unknown keys
 -- and all) with id, state, created, updated and target set, then the body.
 -- opts: state (else the file's, else draft), sent = true to stamp `sent`,
--- target (else the note's spec). Returns true, or false after an error
--- notice.
+-- target (else the note's spec). A file changed outside ferry is never
+-- overwritten: the note forks to a conflict file (see fork). Returns true,
+-- or false after an error notice.
 local function write_note(buf, opts)
   opts = opts or {}
   local path = vim.api.nvim_buf_get_name(buf)
   if path == "" then return false end
   local spec, body = parts(buf)
-  local meta = readable(path) and store.read(path) or {}
+  local meta
+  if readable(path) and not ours(buf, path) then
+    meta, path = fork(buf, path)
+  else
+    meta = readable(path) and store.read(path) or {}
+  end
   local b = vim.b[buf].ferry or {}
   local now = os.time()
   store.set(meta, "id", rawget(meta, "id") or b.id)
@@ -226,9 +316,10 @@ local function write_note(buf, opts)
   vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
   local ok, err = store.write(path, meta, body)
   if not ok then
-    vim.notify("ferry: could not save the note to " .. path .. ": " .. tostring(err), vim.log.levels.ERROR)
+    alert("ferry: could not save the note to " .. path .. ": " .. tostring(err))
     return false
   end
+  remember(buf, path)
   vim.bo[buf].modified = false
   index(path)
   return true
@@ -288,12 +379,33 @@ local function load(buf)
   local lines = M.read_note(path, captured_spec(vim.b[buf].ferry))
   if not lines then return end
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  remember(buf, path)
   vim.bo[buf].modified = false
+end
+
+-- The file changed under buf (FileChangedShell, e.g. on focus): never a
+-- prompt. Still ferry's own last write: nothing to do. Changed outside:
+-- reload it when the buffer has no unsaved typing, else save now, which
+-- forks the typing to a conflict file (write_note).
+local function changed_outside(buf)
+  vim.v.fcs_choice = ""
+  local path = vim.api.nvim_buf_get_name(buf)
+  if not readable(path) or ours(buf, path) then return end
+  vim.schedule(function()
+    if not vim.api.nvim_buf_is_valid(buf) or vim.api.nvim_buf_get_name(buf) ~= path then return end
+    if vim.bo[buf].modified then
+      save(buf)
+    elseif not ours(buf, path) then
+      load(buf)
+      vim.notify("ferry: reloaded " .. vim.fn.fnamemodify(path, ":t") .. " (changed outside ferry)",
+        vim.log.levels.INFO)
+    end
+  end)
 end
 
 -- The file autocmds of a note buffer: :w and every write go through the
 -- note file format, :e reads it back, changes autosave, and the file
--- changing under the buffer (our own writes) never prompts.
+-- changing under the buffer never prompts (see changed_outside).
 local function attach(buf)
   local group = vim.api.nvim_create_augroup("ferry_note_" .. buf, { clear = true })
   local function au(ev, fn) vim.api.nvim_create_autocmd(ev, { group = group, buffer = buf, callback = fn }) end
@@ -310,7 +422,7 @@ local function attach(buf)
   end)
   au("BufReadCmd", function() load(buf) end)
   au({ "TextChanged", "TextChangedI", "InsertLeave" }, function() autosave(buf) end)
-  au("FileChangedShell", function() vim.v.fcs_choice = "" end)
+  au("FileChangedShell", function() changed_outside(buf) end)
   au("BufWipeout", function() stop_timer(buf) end)
 end
 
@@ -324,15 +436,7 @@ local function place(note, dir)
   if buf and vim.api.nvim_buf_is_valid(buf) then
     local m = vim.b[buf].ferry
     if type(m) == "table" then m.created = note.created; vim.b[buf].ferry = m end
-    if old ~= note.path then
-      vim.api.nvim_buf_set_name(buf, note.path)
-      -- Renaming leaves an unloaded buffer under the old name behind.
-      for _, b in ipairs(vim.api.nvim_list_bufs()) do
-        if b ~= buf and not vim.api.nvim_buf_is_loaded(b) and vim.api.nvim_buf_get_name(b) == old then
-          pcall(vim.api.nvim_buf_delete, b, { force = true })
-        end
-      end
-    end
+    if old ~= note.path then rename(buf, note.path) end
   end
 end
 
@@ -852,8 +956,10 @@ end
 
 -- End a note: record the outcome, write its file as sent (submitted) or
 -- cancelled, with spec as its target, and drop its buffer. The file is
--- kept, except a blank Cancel's, which is deleted. If it was the current
--- note, a blank note replaces it in its windows.
+-- kept, except a blank Cancel's, which is deleted (unless it was changed
+-- outside ferry). If it was the current note, a blank note replaces it in
+-- its windows. Returns true; false when a Cancel could not write the file,
+-- which leaves the note as it was (buffer, history row, current note).
 local function finish(buf, outcome, file, spec)
   local meta = vim.b[buf].ferry or {}
   local note = M.state.note
@@ -863,13 +969,14 @@ local function finish(buf, outcome, file, spec)
   local path = vim.api.nvim_buf_get_name(buf)
   stop_timer(buf)
   if outcome == "cancelled" and is_blank(select(2, parts(buf))) then
-    if readable(path) then
+    if readable(path) and ours(buf, path) then
       os.remove(path)
       index(path)
     end
   else
-    write_note(buf, { state = outcome == "submitted" and "sent" or "cancelled",
+    local ok = write_note(buf, { state = outcome == "submitted" and "sent" or "cancelled",
       sent = outcome == "submitted", target = spec })
+    if not ok and outcome == "cancelled" then return false end
   end
   if meta.id then
     -- A blank note submitted before any show has no row yet.
@@ -888,6 +995,7 @@ local function finish(buf, outcome, file, spec)
     for _, win in ipairs(wins) do vim.api.nvim_win_set_buf(win, empty) end
   end
   pcall(vim.api.nvim_buf_delete, buf, { force = true })
+  return true
 end
 
 -- Write the body to <outbox>/<id>.md and return its path. Not
@@ -915,11 +1023,16 @@ local function after_flow(buf, fn)
 end
 
 -- Cancel: record the text as cancelled (blank notes are dropped from
--- history) and hide.
+-- history) and hide. If the note file cannot be written, nothing is
+-- dropped: the note stays shown and current, its copy stays in the outbox,
+-- and an alert names it.
 local function cancel_now(buf)
   local spec, body = parts(buf)
   local file = to_tempfile(buf, body)
-  finish(buf, "cancelled", file, spec)
+  if not finish(buf, "cancelled", file, spec) then
+    alert("ferry: Cancel could not save the note, so it stays open; a copy is in " .. file)
+    return
+  end
   os.remove(file)
   M.host.hide({})
 end

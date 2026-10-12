@@ -447,14 +447,25 @@ body({ "written by :w" })
 vim.cmd("write")
 check(":w writes the frontmatter and the body", "---|draft|written by :w",
   (readfile(pa) or ""):match("^[^\n]*") .. "|" .. nfile(pa):match("^[^|]*") .. "|" .. nfile(pa):match("[^|]*$"))
--- Unknown keys and pinned survive a save.
+-- Unknown keys and pinned survive a save. The pin is an outside write to
+-- an unchanged buffer: checktime reloads it ('autoread', through
+-- BufReadCmd), so the next save is no conflict.
 local m2, b2 = store.read(pa)
 store.set(m2, "pinned", true); store.set(m2, "mood", "calm")
+table.insert(b2, "pinned elsewhere")
 store.write(pa, m2, b2)
+notices = {}
+vim.cmd("checktime")
+vim.wait(300)
+check("an outside write to an unchanged buffer: checktime reloads it, no notice, no prompt",
+  "0 false to: app:com.example.app#4242|written by :w|pinned elsewhere",
+  #notices .. " " .. tostring(vim.bo[ba].modified) .. " " .. lines())
 body({ "after pin" })
 vim.cmd("write")
 local m3 = store.read(pa)
-check("a save keeps pinned and unknown keys", "true calm", tostring(rawget(m3, "pinned")) .. " " .. tostring(rawget(m3, "mood")))
+check("a save keeps pinned and unknown keys, same file", "true calm true",
+  tostring(rawget(m3, "pinned")) .. " " .. tostring(rawget(m3, "mood")) .. " "
+  .. tostring(vim.fn.resolve(vim.api.nvim_buf_get_name(ba)) == vim.fn.resolve(pa)))
 -- A body line starting with to: stays body on reload (fixture body-to.md:
 -- no target in the file, so the captured target becomes the header).
 local fx = io.open(root .. "/tests/fixtures/notes/body-to.md"):read("a")
@@ -493,6 +504,118 @@ vim.wait(5000, function() return listed_state(idx) ~= "none" end, 50)
 check("ferry-notes list shows the sent note", "sent indexed and sent", listed_state(idx))
 check("ferry-notes list leaves out deleted blank cancels", "none", listed_state(ida))
 local _ = bx
+
+-- --- outside edits (H3b) ---------------------------------------------------
+local notes = vim.env.FERRY_NOTES_DIR
+local function conflicts()
+  local out = {}
+  for name in vim.fs.dir(notes) do
+    if name:find("%.conflict%-") then out[#out + 1] = notes .. "/" .. name end
+  end
+  table.sort(out)
+  return out
+end
+local function same(a, b) return vim.fn.resolve(a) == vim.fn.resolve(b) end
+local function changed(buf) vim.api.nvim_exec_autocmds("TextChanged", { buffer = buf }) end
+local T = "draft|app:com.example.app#4242|false|"
+-- ferry's own writes never prompt or fork: autosaves and :w, each followed
+-- by a checktime.
+reset(); notices = {}
+local po, ido, bo = show()
+for i = 1, 3 do
+  body({ "own write " .. i })
+  changed(bo)
+  vim.wait(3000, function() return nfile(po):find("own write " .. i, 1, true) ~= nil end, 20)
+  vim.cmd("checktime")
+  vim.wait(100)
+end
+body({ "own :w" })
+vim.cmd("write")
+vim.cmd("checktime")
+vim.wait(200)
+check("ferry's own writes: no notice, no conflict file, same file", "0 0 true " .. T .. "own :w",
+  #notices .. " " .. #conflicts() .. " " .. tostring(same(vim.api.nvim_buf_get_name(bo), po)) .. " " .. nfile(po))
+
+-- An outside edit while ferry has unsaved typing: both texts survive.
+local mo = store.read(po)
+store.write(po, mo, { "outside edit" })
+body({ "ferry typing" })
+changed(bo)
+vim.wait(3000, function() return #conflicts() > 0 end, 20)
+vim.wait(100)
+local cf = conflicts()[1] or ""
+local cm = store.read(cf) or {}
+check("outside edit + typing: the file keeps the outside edit", T .. "outside edit", nfile(po))
+check("outside edit + typing: a conflict file beside it holds ferry's text, state draft",
+  T .. "ferry typing", nfile(cf))
+local stem = vim.fs.basename(po):gsub("%.md$", "")
+check("the conflict file is <name>.conflict-<time>.md, fresh id, conflict_of, same created", true,
+  vim.fs.basename(cf):match("^" .. vim.pesc(stem) .. "%.conflict%-[%d%-]+%.md$") ~= nil
+  and rawget(cm, "id") ~= ido and rawget(cm, "conflict_of") == ido and rawget(cm, "created") == rawget(mo, "created"))
+check("outside edit + typing: one notice naming both files", true,
+  #notices == 1 and notices[1]:find(vim.fs.basename(po), 1, true) ~= nil
+  and notices[1]:find(vim.fs.basename(cf), 1, true) ~= nil)
+check("the buffer and the current note move to the conflict file", true,
+  same(vim.api.nvim_buf_get_name(bo), cf) and same(note.current().path, cf) and note.current().id == rawget(cm, "id"))
+-- Later saves go to the conflict file, with no further notice.
+body({ "ferry typing more" })
+changed(bo)
+vim.wait(3000, function() return nfile(cf):find("more", 1, true) ~= nil end, 20)
+check("later saves: the conflict file, original untouched, still one notice",
+  T .. "ferry typing more " .. T .. "outside edit 1 1",
+  nfile(cf) .. " " .. nfile(po) .. " " .. #notices .. " " .. #conflicts())
+-- An outside edit found by checktime while ferry has unsaved typing forks
+-- at once, without waiting for the autosave.
+store.write(cf, store.read(cf), { "second outside" })
+body({ "typing again" })
+notices = {}
+vim.cmd("checktime")
+vim.wait(1000, function() return #conflicts() > 1 end, 20)
+local cf2 = vim.tbl_filter(function(x) return x ~= cf end, conflicts())[1] or ""
+check("checktime with unsaved typing: forks at once, one notice, both texts kept",
+  "1 " .. T .. "second outside " .. T .. "typing again", #notices .. " " .. nfile(cf) .. " " .. nfile(cf2))
+-- A blank Cancel never deletes a file changed outside.
+store.write(cf2, store.read(cf2), { "outside again" })
+set({ "to: app:com.example.app#4242", "" })
+vim.cmd("Cancel")
+check("blank Cancel keeps a file changed outside ferry", T .. "outside again", nfile(cf2))
+-- Submit over an outside edit forks too: the sent text is kept.
+reset(); notices = {}
+local ps = show()
+body({ "first save" })
+vim.cmd("write")
+store.write(ps, store.read(ps), { "edited elsewhere" })
+body({ "sent text" })
+vim.cmd("Submit")
+local sstem = vim.fs.basename(ps):gsub("%.md$", "")
+local cs = vim.tbl_filter(function(x) return x:find(sstem, 1, true) ~= nil end, conflicts())
+check("Submit over an outside edit: original kept, sent text in the conflict file, delivered",
+  T .. "edited elsewhere sent|app:com.example.app#4242|true|sent text submit",
+  nfile(ps) .. " " .. nfile(cs[1] or "") .. " " .. kinds())
+
+-- Cancel when the note file cannot be written: nothing is lost.
+reset(); notices = {}
+local pc, idc2, bc = show()
+body({ "keep me" })
+vim.cmd("write")
+vim.fn.setfperm(notes, "r-xr-xr-x")
+body({ "keep me", "more" })
+local cancel_ok = pcall(vim.cmd, "Cancel")
+vim.wait(300)
+vim.fn.setfperm(notes, "rwxr-xr-x")
+check("unwritable notes dir + Cancel raises no error", true, cancel_ok)
+local outbox = vim.env.FERRY_OUTBOX .. "/" .. idc2 .. ".md"
+check("unwritable notes dir + Cancel: no hide, buffer kept and current, history row open",
+  " true true open", kinds() .. " " .. tostring(vim.api.nvim_buf_is_valid(bc)) .. " "
+  .. tostring(note.current() ~= nil and note.current().buf == bc) .. " " .. outcome(idc2))
+check("unwritable notes dir + Cancel: outbox copy kept, file unchanged, an alert names the copy",
+  "keep me|more " .. T .. "keep me true",
+  table.concat(vim.fn.readfile(outbox), "|") .. " " .. nfile(pc) .. " "
+  .. tostring((notices[#notices] or ""):find(outbox, 1, true) ~= nil))
+vim.cmd("Cancel")
+check("Cancel again once writable: cancelled, outbox copy gone, hidden",
+  "cancelled|app:com.example.app#4242|false|keep me|more 0 hide",
+  nfile(pc) .. " " .. vim.fn.filereadable(outbox) .. " " .. kinds())
 
 -- --- voice keys: Flow toggle and the wait for its last paste -------------
 -- Flow pastes into the note as a bracketed paste, i.e. a vim.paste call.

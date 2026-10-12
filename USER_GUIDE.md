@@ -88,6 +88,14 @@ exception is cancelling a note with no text, which leaves no file. A note
 you open and never type in leaves no file either. Set `FERRY_NOTES_DIR` to
 keep notes somewhere else.
 
+You can edit a note file in another editor. If ferry has no unsaved typing
+in that note, it reloads the file when you come back. If it does, ferry
+keeps your other editor's version in the file and saves its own text
+beside it as `<name>.conflict-<time>.md`, with a notice naming both. The
+note then carries on in the conflict file; merge the two by hand. If
+Cancel cannot save the note (say the folder is read-only), the note stays
+open with an alert, and a copy of the text waits in the outbox.
+
 ## Keys
 
 All of these work in insert mode, so you never have to leave it.

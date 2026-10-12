@@ -239,7 +239,7 @@ check "<C-s> in the sidebar starts Flow from the note, in insert mode at the end
 send '<C-s>'; opened >/dev/null
 
 # Live upgrade: a server running the note at api 4 with 4f113ac's history
-# module (sidebar without note keys). show reloads the note to api 10; the
+# module (sidebar without note keys). show reloads the note to api 11; the
 # sidebar reopened with q then :History or <leader>h has the note keys.
 # 4f113ac predates the rename to ferry: its old name is read from its lua/
 # folder and mapped to ferry in both files.
@@ -272,7 +272,7 @@ upgrade_key() { # reopen: keys that reopen the sidebar from the note
 }
 upgrade_key ':History<CR>'
 check "after upgrade: q then :History, <C-x> in the sidebar sends the note" \
-  "10 2 ferry://history submit submitted " \
+  "11 2 ferry://history submit submitted " \
   "$(ask 'luaeval("require\"ferry.note\".api")') $side $(url_kind "$(opened)") $(outcome "$id") $(ask 'v:errmsg')"
 upgrade_key '\h'
 check "after upgrade: q then <leader>h, <C-x> in the sidebar sends the note" \

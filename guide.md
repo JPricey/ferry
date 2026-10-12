@@ -180,6 +180,12 @@ and times in frontmatter above the text. The note window shows only the
 first change, sent and cancelled notes keep theirs, and only cancelling a
 blank note deletes its file.
 
+A note file changed in another editor is never overwritten. With no
+unsaved typing the note reloads it; otherwise your text goes to
+`<name>.conflict-<time>.md` beside it, the note carries on there, and a
+notice names both files. If Cancel cannot save the file, the note stays
+open and a copy waits in the outbox.
+
 ## Edit the buffer
 
 It is a normal Neovim buffer with your config, plus markdown filetype, soft
