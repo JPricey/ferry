@@ -406,6 +406,8 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-12: broken down into T1–T7. Question to Joe: Enter after a tmux paste (blocks T5). T1 runs now (pure module, worktree).
   - 2026-10-12: T1 done and verified (`lua/voice-vim/target.lua`; `server` stays the string `default`, `window` is a number, only a lowercase `to:` on line 1 is a header; `split` does not validate, callers `parse`).
   - 2026-10-12: T4 done and verified (`lua/voice-vim/tmux.lua`; tmux 3.5 answers an unknown `%N` with exit 0 and no output, so `send` also checks the returned pane id; the test re-signs its `claude` copy of `cat` ad hoc, since a plain copy is killed on launch).
+  - 2026-10-12: T2 incident: T2 first ran in the main checkout with a note API bump, so Joe's live server loaded the unverified `to:` header (Joe saw `to: app:com.mitchellh.ghostty#38449`). The implementer moved the work to worktree `t2-to-header` once AGENTS.md said the main checkout is live (32bf520), which rolled main back to API 2. Joe told to delete the `to:` line before sending until T2 lands.
+  - 2026-10-12: T2 verify FAILED (1st): a note whose line 1 already is a `to:` header but has no `auto_spec` (exactly Joe's live draft after the roll-back) got a second header on the next show, and Submit pasted the first. Sent to a new implementer in the same worktree.
 
 ## `$EDITOR` mode and open with a target
 
