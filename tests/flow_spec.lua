@@ -255,6 +255,25 @@ check("release while idle returns false", false, flow.release(buf))
 check("release while idle: no wait", nil, flow.state.waiting)
 check("release while idle logs nothing", "", opened(1, 300))
 
+-- A stray paste with no wait (a late paste from an earlier hold, a Cmd+V)
+-- leaves an adopted recording alone; only our stop ends it. A recording we
+-- started (Ctrl-S) still clears on a paste (Flow's own shortcut stopped it).
+reset_buf()
+flow.adopt_start()
+vim.paste({ "stray" }, -1)
+check("stray paste: an adopted recording stays recording", true, flow.recording())
+check("stray paste: then release sends one stop", "true -g wispr-flow://stop-hands-free",
+  tostring(flow.release(buf)) .. " " .. opened(1))
+vim.paste({ " talked" }, -1)
+vim.wait(1000, function() return flow.state.waiting == nil end, 10)
+check("stray paste: the release's paste ends the wait, adopted cleared", "nil false",
+  tostring(flow.state.waiting) .. " " .. tostring(flow.state.adopted))
+flow.start()
+opened(1)
+vim.paste({ " own" }, -1)
+check("paste after start(): recording clears as before", false, flow.recording())
+vim.wait(1000, function() return not flow.busy() end, 10)
+
 -- A quick second hold while the first release still waits for its paste
 -- (down/up/down/up). Second key up before the first paste: the second stop
 -- goes out at once and the wait also waits for the second paste.

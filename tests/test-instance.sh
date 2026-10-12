@@ -753,7 +753,8 @@ do
 end
 
 -- Ctrl-S in the note stops Flow while the talk modifiers are still down:
--- key up asks nvim, which is idle, so no second stop and no alert.
+-- key up still sends release --force (nvim's idle is not trusted), so Flow
+-- gets one or two stops, never zero, and no alert.
 do
   local t = setup()
   local rec, c, sock = t.rec, t.c, t.sock
@@ -765,12 +766,53 @@ do
   tick(rec)
   check("Ctrl-S during held modifiers: no release yet", 0, #execs(rec, "'release'"))
   luaRun(sock, "talks.lua", 'require("voice-vim.flow").toggle() return 1')  -- Ctrl-S
+  check("Ctrl-S during held modifiers: one stop from Ctrl-S", 1, stops(sock))
   rec.modifiers = {}
   tick(rec)
-  check("Ctrl-S then key up: plain release, no --force, one stop (Ctrl-S's), no alert", "1 0 1 0",
-    #execs(rec, "'release'") .. " " .. #execs(rec, "'--force'") .. " " .. stops(sock) .. " " .. #rec.alerts)
-  check("Ctrl-S then key up: logged nvim already stopped Flow", true,
-    rec:hasLog("i", "talk: no release needed: nvim already stopped Flow (idle)"))
+  check("Ctrl-S then key up: one release --force, two stops (never zero), no alert", "1 1 2 0",
+    #execs(rec, "'release'") .. " " .. #execs(rec, "'release' '--force'") .. " " .. stops(sock) .. " " .. #rec.alerts)
+  check("Ctrl-S then key up: logged the stop sent anyway", true,
+    rec:hasLog("i", "talk: nvim reported Flow idle (Ctrl-S?); sent the stop anyway"))
+  stop(sock)
+end
+
+-- The reported sequence: nvim adopts the hold's recording, a stray paste
+-- lands in the note with no wait running (a late paste from an earlier hold,
+-- or a Cmd+V), then key up: nvim still says recording, and exactly one stop
+-- reaches Flow, no alert.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  recordFlow(sock)
+  c.talkDown()
+  finishStart(rec)
+  check("stray paste: nvim adopted the recording, no URL", "true ", recording(sock) .. " " .. urls(sock))
+  paste(sock, "stray")
+  check("stray paste: nvim still recording, flow-state recording", "true recording",
+    recording(sock) .. " " .. luaRun(sock, "talkfs.lua", 'return require("voice-vim.note").flow_state()'))
+  c.talkUp()
+  tick(rec)
+  check("stray paste then key up: one release --force, exactly one stop, no alert, released", "1 1 1 0 true",
+    #execs(rec, "'release'") .. " " .. #execs(rec, "'release' '--force'") .. " " .. stops(sock) .. " "
+      .. #rec.alerts .. " " .. waiting(sock))
+  stop(sock)
+end
+
+-- The same sequence with an older flow in the server whose stray paste
+-- clears the recording (nvim says idle): key up still sends one stop.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  recordFlow(sock)
+  c.talkDown()
+  finishStart(rec)
+  luaRun(sock, "talkst.lua", 'require("voice-vim.flow").state.recording = false return 1')  -- old on_paste
+  check("stray paste (old flow): flow-state idle", "idle",
+    luaRun(sock, "talkfs.lua", 'return require("voice-vim.note").flow_state()'))
+  c.talkUp()
+  tick(rec)
+  check("stray paste (old flow) then key up: one release --force, exactly one stop, no alert", "1 1 1 0",
+    #execs(rec, "'release'") .. " " .. #execs(rec, "'release' '--force'") .. " " .. stops(sock) .. " " .. #rec.alerts)
   stop(sock)
 end
 

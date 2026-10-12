@@ -34,11 +34,15 @@
 -- wait also wait for that recording's paste (w.more). Two hooks reporting
 -- one paste (a live module reload) count once: pastes are told apart by the
 -- buffer's changedtick.
+--
+-- An adopted recording (talk key held) ends only by our own stop: a paste
+-- with no wait running (a late paste from an earlier hold, or a Cmd+V into
+-- the note) leaves it recording, so key up and a Submit still stop Flow.
 local M = {}
 
 -- Bumped when note.lua needs functions an older flow lacks; note.lua
 -- reloads a stale flow module in a running server (keeping M.state).
-M.api = 3
+M.api = 4
 
 M.paste_timeout_ms = 4000
 M.settle_ms = 150
@@ -51,10 +55,12 @@ M.STOP_URL = "wispr-flow://stop-hands-free"
 M.NO_DICTATION = "voice-vim: no dictation arrived"
 
 -- recording: Flow was started by us (or assumed) and has not pasted yet.
+-- adopted: that recording was started outside (adopt_start); only stop()
+-- clears it, never a stray paste.
 -- waiting: the pending finish_then, { timer = uv timer, buf, fn = action,
 -- pasted = fn, kind = "finish" | "release", more = pastes still due after
 -- the next one (a recording stopped during this wait) } or nil.
-M.state = { recording = false, waiting = nil }
+M.state = { recording = false, adopted = false, waiting = nil }
 local attached = {}
 
 -- One `open` at a time, in call order, so a quick start/stop pair cannot
@@ -91,6 +97,7 @@ function M.busy() return busy or #queue > 0 end
 -- queued (say a stop), Flow may see that link after the outside start, so
 -- one start is queued behind it. Already recording: nothing.
 function M.adopt_start()
+  M.state.adopted = true
   if M.state.recording then return end
   M.state.recording = true
   if M.busy() then M.open(M.START_URL) end
@@ -100,12 +107,12 @@ end
 function M.assume_recording() M.state.recording = true end
 
 function M.start()
-  M.state.recording = true
+  M.state.recording, M.state.adopted = true, false
   M.open(M.START_URL)
 end
 
 function M.stop()
-  M.state.recording = false
+  M.state.recording, M.state.adopted = false, false
   M.open(M.STOP_URL)
 end
 
@@ -116,11 +123,12 @@ end
 -- A paste landed in buf: Flow has stopped, and a pending finish_then can run.
 -- During a wait the paste is the stopped recording's: `recording` is left
 -- alone (it is only true again when a new one started during the wait).
+-- With no wait, an adopted recording is left alone too (see the header).
 function M.on_paste(buf)
   if buf == nil or buf == 0 then buf = vim.api.nvim_get_current_buf() end
   local w = M.state.waiting
   if not w then
-    M.state.recording = false
+    if not M.state.adopted then M.state.recording = false end
   elseif w.buf == buf then
     vim.schedule(w.pasted)
   end

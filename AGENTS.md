@@ -206,12 +206,14 @@ wispr-flow://start-hands-free` as an hs.task), then runs `show --talk`
 (nvim's `flow.adopt_start`: recording, no URL) or, with the note focused,
 `talk` (insert at the cursor, never hides). `c.talkUp` polls until the start
 task exited, our Neovide is focused, nvim took the recording and no
-modifier is down, then runs `voice-vim-host release` once (`--force` when
-nvim never took it): every stop goes through nvim's Flow queue, so
-Ctrl-X/Ctrl-Q right after take over its wait. Not ready 5 s after key up:
-no stop (it could beat the start, or Flow's paste would land elsewhere),
-one alert by cause. nvim already idle or waiting (Ctrl-S, Submit, Cancel):
-no stop, no alert. Without an instance, talkDown alerts like a press and
+modifier is down, then runs `voice-vim-host release --force` once (a stop
+even when nvim says idle: Ctrl-S already stopped Flow, or nvim never took
+it; a stop to an idle Flow is harmless): every stop goes through nvim's
+Flow queue, so Ctrl-X/Ctrl-Q right after take over its wait. A paste with
+no wait running never clears an adopted recording in `flow.lua`. Not ready
+5 s after key up: no stop (it could beat the start, or Flow's paste would
+land elsewhere), one alert by cause. A Submit/Cancel/Hide wait already
+running in nvim (`flow-state` waiting): no stop, no alert. Without an instance, talkDown alerts like a press and
 never starts Flow.
 
 **Delivery.** `voicevim-submit?file=&target=&window=` hides Neovide, then

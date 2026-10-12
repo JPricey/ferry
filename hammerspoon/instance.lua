@@ -80,26 +80,28 @@
 --               the host is focused, the show path has finished (nvim took
 --               the recording, or it failed) and no modifier is down (Flow
 --               pastes with Cmd+V; a held Ctrl+Option would make it
---               Ctrl+Option+Cmd+V), then runs `voice-vim-host release`
---               once: nvim stops Flow and waits for its paste
---               (flow.release). When nvim never took the recording it is
---               `release --force`, which sends the stop anyway; when it took
---               it and prints idle (Ctrl-S already stopped Flow), no stop
---               and no alert. Modifiers still down talkModsTimeout
---               after the host was ready: release anyway. Not released
---               talkStopTimeout after key up (start task still running,
---               host not focused, or the show never finished): no release
---               (a stop could beat the start to Flow, or Flow's paste would
---               land in whatever is in front), one alert worded by cause
---               (Flow slow to start, note did not appear, note not ready);
---               Flow records on until stopped. Exception: nvim no longer has a
---               recording (`flow-state` is waiting or idle; asked when the
---               note loses focus and at the timeout): a Submit, Cancel,
---               Hide or Ctrl-S already stopped Flow, so no alert. A show
---               that failed and the host not focused: alert at once. A
---               release that fails or prints anything else: alert. So every
---               hold ends in one stop or one alert. A talk press's failed
---               show does not alert itself; this one does.
+--               Ctrl+Option+Cmd+V), then always runs `voice-vim-host
+--               release --force` once: nvim stops Flow and waits for its
+--               paste (flow.release), and sends the stop even when it
+--               reports idle (Ctrl-S already stopped Flow, a stray paste,
+--               or nvim never took the recording), since a stop to an idle
+--               Flow is harmless and a missed one leaves Flow recording.
+--               Modifiers still down talkModsTimeout after the host was
+--               ready: release anyway. Not released talkStopTimeout after
+--               key up (start task still running, host not focused, or the
+--               show never finished): no release (a stop could beat the
+--               start to Flow, or Flow's paste would land in whatever is in
+--               front), one alert worded by cause (Flow slow to start, note
+--               did not appear, note not ready); Flow records on until
+--               stopped. The one quiet end: nvim took this hold's recording
+--               and `flow-state` says `waiting` (asked when the note loses
+--               focus and at the timeout): a Submit, Cancel or Hide wait
+--               took over and sent the stop, so no release and no alert.
+--               An idle answer is not trusted. A show that failed and the host
+--               not focused: alert at once. A release that fails or prints
+--               anything else: alert. So every hold ends in one stop (two
+--               after a Ctrl-S while held) or one alert. A talk press's
+--               failed show does not alert itself; this one does.
 --   Logs: `talk: down focused=<b> -> show|more`, `talk: flow start task
 --   started after N ms`, `talk: flow start exited after N ms`, `talk: up
 --   after N ms held`, `talk: release after N ms (waited focus N ms, mods
@@ -699,7 +701,8 @@ function I.new(cfg)
     local focusAt, readyAt, lossChecked
 
     -- Every hold ends in exactly one of: release (one stop through nvim),
-    -- withhold (no stop, one alert), or done (nvim already stopped Flow).
+    -- withhold (no stop, one alert), or done (a Submit/Cancel/Hide wait in
+    -- nvim already stopped Flow).
     -- msg: the alert, worded by cause (default: the note did not appear).
     local function withhold(now, why, msg)
       c._talk = nil
@@ -728,33 +731,34 @@ function I.new(cfg)
       end
       log.i(string.format("talk: release after %d ms (waited focus %d ms, mods %d ms)",
         ms(now - talk.upAt), ms(focusAt - talk.upAt), ms(now - readyAt)))
-      -- nvim took the recording: a plain release, which prints idle when a
-      -- Ctrl-S already stopped Flow, so Flow never gets a second stop.
-      -- Otherwise --force: nvim sends the stop although it never took the
-      -- recording (no note), so the hold still ends in one stop. The host is
-      -- focused, so Flow's paste lands in it, never in the target app.
+      -- Always --force, so the hold ends in a stop: nvim may report idle
+      -- while Flow records (Ctrl-S stopped Flow and the user spoke on, a
+      -- stray paste in an older flow module, or nvim never took the
+      -- recording), and a stop to an idle Flow is harmless. A Submit, Cancel
+      -- or Hide wait that took over keeps its own stop (prints released).
+      -- The host is focused, so Flow's paste lands in it, never in the
+      -- target app.
       local adopted = talk.press ~= nil and talk.press.adopted == true
-      local args = adopted and { "release" } or { "release", "--force" }
-      local ok, out = runSync("talk", args)
+      local ok, out = runSync("talk", { "release", "--force" })
       if ok and out == "released" then return end
       if ok and out == "forced" then
-        log.w("talk: nvim had no recording to release; it sent the stop anyway")
-        return
-      end
-      if ok and out == "idle" and adopted and flowState() == "idle" then
-        log.i("talk: no release needed: nvim already stopped Flow (idle)")
+        if adopted then
+          log.i("talk: nvim reported Flow idle (Ctrl-S?); sent the stop anyway")
+        else
+          log.w("talk: nvim had no recording to release; it sent the stop anyway")
+        end
         return
       end
       log.w("talk: release did not stop Flow (" .. tostring(out) .. "); Flow keeps recording")
       alert("voice-vim: could not stop Flow — it is still recording; open the note and press Ctrl-S")
     end
 
-    -- nvim took this hold's recording and has already stopped it (a Submit,
-    -- Cancel or Hide in the note took over, or Ctrl-S): nothing to release.
+    -- nvim took this hold's recording and a Submit, Cancel or Hide wait
+    -- took over (that wait sent the stop): nothing to release. Idle is not
+    -- trusted: Flow may still be recording.
     local function stoppedInNvim(press)
       if not press.adopted then return nil end
-      local st = flowState()
-      if st == "waiting" or st == "idle" then return "nvim already stopped Flow (" .. st .. ")" end
+      if flowState() == "waiting" then return "nvim already stopped Flow (waiting)" end
       return nil
     end
 

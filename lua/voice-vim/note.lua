@@ -51,11 +51,12 @@ local function current(name, want, adopt)
   return old
 end
 
--- flow api 3: adopt_start, release, a quick second hold during a release
--- wait. Its state keeps a recording and the pending wait across the reload.
+-- flow api 4: adopt_start, release, a quick second hold during a release
+-- wait, a stray paste keeps an adopted recording. Its state keeps a
+-- recording and the pending wait across the reload.
 -- The old module's vim.paste hook stays installed, so its on_paste forwards
 -- to the new one (which counts a paste reported by both hooks once).
-local flow = current("voice-vim.flow", 3, function(old, new)
+local flow = current("voice-vim.flow", 4, function(old, new)
   old.on_paste = function(b) return new.on_paste(b) end
 end)
 local target = require("voice-vim.target")
@@ -63,7 +64,7 @@ local target = require("voice-vim.target")
 -- Bumped when the module changes in a way an already-running server must
 -- pick up: bin/voice-vim-host reloads the module (keeping M.state and a
 -- swapped M.host) when the loaded one reports a different api.
-M.api = 7
+M.api = 8
 
 -- history api 1: open() binds the note keys on the sidebar. Reloaded now
 -- when already loaded, so a sidebar opened from a :History command an older

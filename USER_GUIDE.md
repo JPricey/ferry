@@ -282,6 +282,9 @@ with how long it took, the target, the window, each check, the paste.
   note did not come up in time. Open the note (Ctrl+Option+V) and press
   Ctrl-S to stop Flow. The console's `talk:` lines show each step with
   its timing.
+- **"The note was not ready".** The note came up but never took the
+  recording, so Flow is still recording. Stop it in Wispr Flow, then press
+  the talk key again.
 - **Submit says it needs Accessibility.** Grant it to Hammerspoon, then
   quit and restart Hammerspoon.
 - **The sidebar shows the wrong app.** It shows the app that was in front
