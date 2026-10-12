@@ -260,6 +260,26 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-11: C1 done and verified. Changes Hammerspoon behavior and the session script: session token, `voicevim-cancel` URL, window closed before paste and on cancel, cancel refocuses the start window, a press from a voice-vim window reuses its target. Minor: session maps leak a few entries per abandoned session until reload; a cancel before adopt finds the window would leave it open.
   - 2026-10-11: agent checks pass (all 14 test scripts, luajit syntax); status → needs-joe.
 
+## One installer
+
+- **Status:** in-progress
+- **Needs:** nothing
+- **Deliverable:** `./install.sh` sets up everything voice-vim needs on a Mac, safely re-runnable, and is the home for any future setup step.
+- **Scope:**
+  - Check Homebrew; if missing, stop with the install command to run.
+  - Install what is missing, skip what is present: Hammerspoon (cask), Neovide (cask), Neovim (`nvim`). Check, but do not install, Ghostty and Wispr Flow (print where to get them). Check `python3` and `sqlite3` exist.
+  - Link the Hammerspoon module and add the `init.lua` block (as today), and run `bin/voice-vim-migrate-init` so an old Option+V line is removed.
+  - Start Hammerspoon, or reload it if it is already running (`hs -c 'hs.reload()'` when the `hs` CLI works, else tell Joe to Reload Config).
+  - End with a checklist of the manual steps no script can do: Accessibility for Hammerspoon (then relaunch it), Automation for Ghostty, opening Neovide once.
+  - `--check` reports what is installed and what is missing, and changes nothing.
+  - Update `USER_GUIDE.md` ("Set it up once"), `guide.md` and `README.md`.
+- **Agent checks:** `tests/test-install.sh` runs `install.sh` with a temp `HOME`, fake `brew`/`open`/`hs` first on PATH, and a fake Applications dir; never the real system.
+- **Joe checks:** run `./install.sh --check`, then `./install.sh`; read the summary; run it again and confirm it changes nothing the second time.
+- **Tasks:**
+  - [ ] **I1. Make install.sh the one setup script.** As in Scope. Make every system path overridable for tests (`VOICE_VIM_APPS_DIR` default `/Applications`, `HOME`, PATH lookups), and add `VOICE_VIM_INSTALL_DRY_RUN=1` that prints each command instead of running it. Each step prints one line: `ok`, `installed`, `skipped`, or `missing: <what to do>`. Idempotent: a second run installs nothing, adds no second `init.lua` block, and leaves an existing symlink alone. Files: `install.sh`, `tests/test-install.sh`, `USER_GUIDE.md`, `guide.md`, `README.md`, `AGENTS.md` (test list). Depends: none. Verify: `bash tests/test-install.sh` exits 0 with ok lines for: missing brew → exits non-zero with the brew install command; fresh temp HOME → fake brew asked for `hammerspoon`, `neovide` and `neovim` once each, symlink and `init.lua` block created, migration run; second run → no brew installs, one `init.lua` block, unchanged files; `--check` → no fake calls, no files changed, lists missing items; Ghostty or Wispr Flow missing → `missing:` line, not installed; an `init.lua` with the old Option+V line → line removed with `.bak`; Hammerspoon already running with a working fake `hs` → `hs -c` reload called. `bash -n install.sh` passes.
+- **Log:**
+  - 2026-10-11: created at Joe's request ("an installer which installs Neovide / home for any other setup"). Extends the existing `install.sh` instead of adding a second script. Single task written by the orchestrator.
+
 ## Notes and history browser
 
 - **Status:** todo
@@ -351,3 +371,4 @@ Record each change here, dated, with the reason.
 - 2026-10-11: added "Window size and position" at Joe's request (default centred 50%×50% of the main screen, remember the last frame), with no needs.
 - 2026-10-11: added "Close the session window cleanly" (Hammerspoon closes the session window on submit and cancel; cancel refocuses the start window), with no needs.
 - 2026-10-11: Joe picked Neovide as the host (spike → done without trying all three). B2 keeps the old path as a fallback when Neovide is missing; B3 (removing it) waits for Joe's checks of the one instance.
+- 2026-10-11: added "One installer" at Joe's request: `install.sh` becomes the single setup script (Homebrew check, Hammerspoon, Neovide, Neovim, checks for Ghostty/Wispr Flow/python3/sqlite3, Hammerspoon link and migration, manual-steps checklist, `--check`).
