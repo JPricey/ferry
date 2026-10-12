@@ -178,7 +178,7 @@ end
 vim.g.mapleader = "\\"
 local buf = vim.api.nvim_create_buf(true, false)
 vim.api.nvim_set_current_buf(buf)
-check("api 1", 1, F.api)
+check("api 2", 2, F.api)
 F.setup(buf)
 F.setup(buf) -- twice is fine
 local function set(lines)
@@ -205,6 +205,22 @@ vim.api.nvim_win_set_cursor(0, { 4, 0 })
 vim.cmd("FixJoin")
 check("no '[: :FixJoin on the paragraph only",
   "a|b||c d (4)", get())
+
+-- A recorded paste (b:ferry_paste, from flow.on_paste) wins over '[,'],
+-- which a write sets to the whole buffer; one out of bounds: paragraph.
+set({ "keep this", "line broken", "we should", "deploy it." })
+vim.b[buf].ferry_paste = { 3, 4 }
+vim.api.nvim_buf_set_mark(buf, "[", 1, 0, {})
+vim.api.nvim_buf_set_mark(buf, "]", 4, 0, {})
+vim.cmd("FixJoin")
+check("b:ferry_paste wins over '[,']: only the paste joined, the record follows",
+  "keep this|line broken|we should deploy it. (3) 3,3", get() .. " " .. table.concat(vim.b[buf].ferry_paste, ","))
+set({ "a", "b", "", "c", "d" })
+vim.b[buf].ferry_paste = { 4, 9 }
+vim.api.nvim_win_set_cursor(0, { 4, 0 })
+vim.cmd("FixJoin")
+check("b:ferry_paste out of bounds: the paragraph", "a|b||c d (4)", get())
+vim.b[buf].ferry_paste = nil
 
 -- Explicit range.
 set({ "x", "y", "z" })

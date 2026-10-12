@@ -18,7 +18,7 @@
 --   <C-s> (n, i), :Dictate              Wispr Flow hands-free
 --   :FixJoin, :FixFillers, <leader>fj, ff, fw, :Corrections
 --                                       fix-ups and the corrections list,
---                                       as in a note (fixup api 1,
+--                                       as in a note (fixup api 2,
 --                                       corrections api 1)
 -- Submit, Cancel and Hide first wait for Flow's last paste when Flow is
 -- recording (flow.finish_then), so the last words land in the file and a
@@ -62,7 +62,9 @@ local M = {}
 -- api 3: on_show, on_talk, on_release, on_draft.
 -- api 4: a finished Submit is recorded as a sent note; start takes dir.
 -- api 5: fix-ups and :Corrections in the edit buffer.
-M.api = 5
+-- api 6: show reapplies the buffer's keys after a reload (b:ferry_edit_api);
+-- fix-ups act on the last paste (fixup api 2).
+M.api = 6
 
 -- The pending edit: { file, done, dir = notes folder or nil, started =
 -- Unix time, buf, tab = edit tab, prev_tab = the tab it came from,
@@ -244,8 +246,11 @@ function M.hide(buf)
   end)
 end
 
--- Options, keys and commands of the edit buffer (current window).
+-- Options, keys and commands of the edit buffer (current window). The
+-- buffer remembers the module api that set them (b:ferry_edit_api), so a
+-- show after a reload to a newer module sets them again (show_options).
 local function apply_options(buf)
+  vim.b[buf].ferry_edit_api = M.api
   vim.cmd([[
     setlocal wrap linebreak nolist
     setlocal noswapfile nobackup nowritebackup noundofile
@@ -261,7 +266,7 @@ local function apply_options(buf)
   cmd("Dictate", function() require("ferry.flow").start() end)
   -- Fix-ups and :Corrections, as in a note; a fix-up module that fails to
   -- load costs only its keys.
-  local fok, ferr = pcall(function() current("ferry.fixup", 1).setup(buf) end)
+  local fok, ferr = pcall(function() current("ferry.fixup", 2).setup(buf) end)
   if not fok then alert("ferry: fix-up keys unavailable: " .. tostring(ferr)) end
   vim.api.nvim_buf_create_user_command(buf, "Corrections", function()
     current("ferry.corrections", 1).open({ dir = (M.state.edit or {}).dir })
@@ -343,6 +348,13 @@ function M.start(opts)
   return "ok"
 end
 
+-- An edit started by an older module (a live reload since) lacks the
+-- keys this one adds: set them again, with its buffer in the current
+-- window.
+local function show_options(buf)
+  if vim.b[buf].ferry_edit_api ~= M.api then apply_options(buf) end
+end
+
 -- Bring the pending edit's tab back to front (reopened when it was
 -- closed, e.g. :q! in it) in insert mode. Returns the file, or "none".
 function M.show()
@@ -358,6 +370,7 @@ function M.show()
   end
   local win = vim.fn.bufwinid(e.buf)
   if win ~= -1 then vim.api.nvim_set_current_win(win) else vim.api.nvim_win_set_buf(0, e.buf) end
+  show_options(e.buf)
   vim.cmd("startinsert")
   return e.file
 end
@@ -441,6 +454,7 @@ function M.on_talk()
   if vim.api.nvim_get_current_buf() ~= e.buf then
     if M.show() == "none" then return "no note" end
   else
+    show_options(e.buf)
     insert_here(e.buf)
   end
   flow().adopt_start()

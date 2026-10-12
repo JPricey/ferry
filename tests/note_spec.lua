@@ -831,5 +831,47 @@ check("q closes the split, back in the note", "true false",
   tostring(vim.api.nvim_get_current_win() == nwin) .. " " .. tostring(vim.api.nvim_buf_is_valid(cbuf)))
 os.remove(work .. "/corr.mode")
 
+-- --- fix-ups after the autosave act on the last paste only ----------------
+-- A write sets '[,'] to the whole buffer: the paste's lines are recorded
+-- when it lands (flow.on_paste, b:ferry_paste), and the autosave writes
+-- with lockmarks. Cmd+V (Neovide's <D-v>) is how Flow's paste arrives.
+local autosave_ms = note.autosave_ms
+note.autosave_ms = 50
+show()
+local pbuf = vim.api.nvim_get_current_buf()
+vim.cmd("stopinsert")
+set({ "keep this", "line broken", "" })
+vim.api.nvim_win_set_cursor(0, { 3, 0 })
+clip["+"] = { "we should", "deploy it." }
+vim.api.nvim_feedkeys(vim.keycode("a<D-v><Esc>"), "xt", false)
+local function body() return table.concat(vim.api.nvim_buf_get_lines(pbuf, 0, -1, false), "|") end
+local function marks() return vim.api.nvim_buf_get_mark(pbuf, "[")[1] .. "," .. vim.api.nvim_buf_get_mark(pbuf, "]")[1] end
+check("<D-v> pastes into the note and records its lines", "keep this|line broken|we should|deploy it. 3,4",
+  body() .. " " .. table.concat(vim.b[pbuf].ferry_paste or {}, ","))
+vim.api.nvim_exec_autocmds("TextChanged", { buffer = pbuf })
+local npath2 = vim.api.nvim_buf_get_name(pbuf)
+vim.wait(2000, function() return not vim.bo[pbuf].modified and vim.fn.filereadable(npath2) == 1 end, 10)
+vim.wait(200)
+check("past the autosave: written, '[,'] still the paste (lockmarks)", "false we should|deploy it. 3,4",
+  tostring(vim.bo[pbuf].modified) .. " " .. table.concat(select(2, store.read(npath2)) or {}, "|"):gsub("^keep this|line broken|", "") .. " " .. marks())
+-- As a write without lockmarks leaves them: the record still wins.
+vim.api.nvim_buf_set_mark(pbuf, "[", 1, 0, {})
+vim.api.nvim_buf_set_mark(pbuf, "]", 4, 0, {})
+vim.cmd("FixJoin")
+check(":FixJoin with no range after the autosave joins only the pasted lines, the record follows",
+  "keep this|line broken|we should deploy it. 3,3", body() .. " " .. table.concat(vim.b[pbuf].ferry_paste or {}, ","))
+set({ "a", "b", "", "c", "d" })
+vim.b[pbuf].ferry_paste = { 4, 9 }
+vim.api.nvim_win_set_cursor(0, { 4, 0 })
+vim.cmd("FixJoin")
+check("a recorded paste out of bounds: :FixJoin on the paragraph at the cursor", "a|b||c d", body())
+-- A terminal's bracketed paste can arrive in chunks: the record spans them all.
+set({ "keep", "" })
+vim.api.nvim_win_set_cursor(0, { 2, 0 })
+vim.paste({ "one", "two" }, 1); vim.paste({ "", "three" }, 2); vim.paste({ "", "four" }, 3)
+check("a streamed paste records all its lines", "keep|one|two|three|four 2,5",
+  body() .. " " .. table.concat(vim.b[pbuf].ferry_paste or {}, ","))
+note.autosave_ms = autosave_ms
+
 say(fail == 0 and "note_spec: all ok" or "note_spec: FAILED")
 os.exit(fail)

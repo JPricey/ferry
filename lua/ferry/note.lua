@@ -80,11 +80,12 @@ end
 
 -- flow api 5: adopt_start, release, a quick second hold during a release
 -- wait, a stray paste keeps an adopted recording, stopped(); api 6: a
--- timed-out wait forgets its stop, one-line notices. Its state
+-- timed-out wait forgets its stop, one-line notices; api 7: on_paste
+-- records the paste's lines (b:ferry_paste, fixup's default range). Its state
 -- keeps a recording and the pending wait across the reload.
 -- The old module's vim.paste hook stays installed, so its on_paste forwards
 -- to the new one (which counts a paste reported by both hooks once).
-local flow = current("ferry.flow", 6, function(old, new)
+local flow = current("ferry.flow", 7, function(old, new)
   old.on_paste = function(b) return new.on_paste(b) end
 end)
 local target = require("ferry.target")
@@ -101,7 +102,9 @@ local function say(msg, level) require("ferry.notice").notify(msg, level) end
 -- 18: history api 6 (the open note listed, marked ▶); every note write
 -- tells the sidebar (history.note_saved); pin_open.
 -- 19: fix-ups (fixup api 1) and :Corrections (corrections api 1) in a note.
-M.api = 19
+-- 20: fix-ups act on the last paste after an autosave (flow api 7, fixup
+-- api 2); the autosave write keeps '[,'] (lockmarks).
+M.api = 20
 
 -- history api 4: the browser on the notes index (open, send, pin, ...,
 -- / search; opening syncs); 5: one-line notices; 6: the open note listed,
@@ -417,7 +420,8 @@ local function save(buf)
   -- only a write nvim knows of clears its "file exists" (E13) guard on a
   -- buffer whose file appeared after it was loaded, so a later :w works.
   -- With BufWriteCmd set, BufWritePre/Post (formatters) do not run.
-  vim.api.nvim_buf_call(buf, function() vim.cmd("silent keepalt write!") end)
+  -- lockmarks: a write would set '[,'] to the whole buffer.
+  vim.api.nvim_buf_call(buf, function() vim.cmd("silent keepalt lockmarks write!") end)
   return readable(vim.api.nvim_buf_get_name(buf)) and not vim.bo[buf].modified
 end
 
@@ -631,13 +635,14 @@ end
 -- Swappable (tests use a recording stub).
 M.host = M.default_host
 
--- fixup api 1: :FixJoin, :FixFillers, <leader>fj/ff/fw (lua/ferry/fixup.lua).
+-- fixup api 1: :FixJoin, :FixFillers, <leader>fj/ff/fw (lua/ferry/fixup.lua);
+-- 2: their default range is the recorded paste (b:ferry_paste).
 -- corrections api 1: the :Corrections split (lua/ferry/corrections.lua),
 -- loaded on first use. A note shown by an older module gains both on its
 -- next show (apply_options runs on every show). A module that fails to
 -- load costs its keys, never the show: one notice.
 local function fix_keys(buf)
-  local ok, err = pcall(function() current("ferry.fixup", 1).setup(buf) end)
+  local ok, err = pcall(function() current("ferry.fixup", 2).setup(buf) end)
   if not ok and not M.state.fixup_failed then
     M.state.fixup_failed = true
     say("ferry: fix-up keys unavailable: " .. tostring(err), vim.log.levels.WARN)
@@ -865,9 +870,11 @@ local function on(v) return v ~= nil and v ~= "" and v ~= "0" and v ~= false and
 -- A pending $EDITOR edit wins the hotkey: show, browse, talk, release and draft
 -- go to lua/ferry/edit.lua (api 3: on_show, ...) while one is pending.
 -- Returns that module, or nil. A server that never loaded it has none.
+-- An older loaded one is reloaded to api 6, whose show gives an edit
+-- already pending the keys it lacks (fix-ups).
 local function pending_edit()
   if not package.loaded["ferry.edit"] then return nil end
-  local e = current("ferry.edit", 3)
+  local e = current("ferry.edit", 6)
   if (e.api or 0) >= 3 and e.pending() then return e end
   return nil
 end

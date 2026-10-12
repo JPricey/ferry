@@ -18,6 +18,8 @@ check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: want '$2'
 napi=$(sed -n 's/^note_api=//p' "$host")
 # The history api the note module reloads an older history module to.
 hapi=$(sed -n 's/^M.api = //p' "$root/lua/ferry/history.lua")
+# The flow api the note module reloads an older flow module to.
+fapi=$(sed -n 's/^M.api = //p' "$root/lua/ferry/flow.lua")
 ask() { nvim --server "$FERRY_SOCK" --remote-expr "$1" 2>&1; }
 servers() { pgrep -f -- "--listen $FERRY_SOCK" | wc -l | tr -d ' '; }
 gone() { test -e "$FERRY_SOCK" && echo present || echo gone; }
@@ -428,8 +430,8 @@ u=$("$host" show com.example.app 4242)
 ask "nvim_buf_set_lines(0, 0, -1, v:false, ['upgrade draft'])" >/dev/null
 "$host" draft >/dev/null
 ask "luaeval('(function() require\"ferry.note\".api = 3; local f = require\"ferry.flow\"; f.api = nil; f.adopt_start = nil; return 1 end)()')" >/dev/null
-check "API-3 server: talk reloads note (current api) and flow (api 6), keeps the draft and its target" \
-  "talk $u $napi 6 upgrade draft com.example.app 4242 true" \
+check "API-3 server: talk reloads note (current api) and flow (current api), keeps the draft and its target" \
+  "talk $u $napi $fapi upgrade draft com.example.app 4242 true" \
   "$("$host" talk) $(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api') $(ask 'join(getline(1, "$"), "|")') $(ask 'b:ferry.target." ".b:ferry.window') $(rec)"
 check "API-3 server: release after the upgrade sends one stop" "released|-g wispr-flow://stop-hands-free" \
   "$("$host" release)|$(opened_wait)"
@@ -531,7 +533,7 @@ check "upgrade from api 11: Submit sends the whole buffer to the captured target
 "$live/bin/ferry-host" stop
 
 # Live upgrade from af9efd3 (note api 12, flow api 5): the next show
-# reloads note to the current api and flow to 6 (Q1, Q2c), keeping the draft.
+# reloads note and flow to the current api (Q1, Q2c), keeping the draft.
 live=$work/live-api12; old_tree af9efd3 "$live"
 "$live/bin/ferry-host" ensure >/dev/null
 p12=$("$live/bin/ferry-host" show com.example.app 4242)
@@ -539,14 +541,14 @@ ask "nvim_buf_set_lines(0, 0, -1, v:false, ['api 12 draft'])" >/dev/null
 "$live/bin/ferry-host" draft >/dev/null
 check "af9efd3 server: note api 12, flow api 5" "12 5" "$(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api')"
 upgrade "$live"
-check "upgrade from api 12: show reloads note to the current api and flow to 6, keeps the draft and its target" \
-  "$p12 $napi 6 api 12 draft com.example.app 4242" \
+check "upgrade from api 12: show reloads note and flow to the current api, keeps the draft and its target" \
+  "$p12 $napi $fapi api 12 draft com.example.app 4242" \
   "$("$live/bin/ferry-host" show com.example.app 4242) $(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api') $(body) $(ask 'b:ferry.target." ".b:ferry.window')"
 "$live/bin/ferry-host" stop
 
 # Live upgrade from 57e7b8c (main at H5: note api 14, flow api 5, history
-# api 4): the next show reloads note to the current api, flow to 6 and
-# history to the current api, keeping the draft.
+# api 4): the next show reloads note, flow and history to the current
+# api, keeping the draft.
 live=$work/live-api14; old_tree 57e7b8c "$live"
 "$live/bin/ferry-host" ensure >/dev/null
 p14=$("$live/bin/ferry-host" show com.example.app 4242)
@@ -554,8 +556,8 @@ ask "nvim_buf_set_lines(0, 0, -1, v:false, ['api 14 draft'])" >/dev/null
 "$live/bin/ferry-host" draft >/dev/null
 check "57e7b8c server: note api 14, flow api 5, history api 4" "14 5 4" "$(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api') $(lua 'require"ferry.history".api')"
 upgrade "$live"
-check "upgrade from api 14: show reloads note to the current api, flow to 6 and history to the current api, keeps the draft and its target" \
-  "$p14 $napi 6 $hapi api 14 draft com.example.app 4242" \
+check "upgrade from api 14: show reloads note, flow and history to the current api, keeps the draft and its target" \
+  "$p14 $napi $fapi $hapi api 14 draft com.example.app 4242" \
   "$("$live/bin/ferry-host" show com.example.app 4242) $(lua 'require"ferry.note".api') $(lua 'require"ferry.flow".api') $(lua 'require"ferry.history".api') $(body) $(ask 'b:ferry.target." ".b:ferry.window')"
 "$live/bin/ferry-host" stop
 

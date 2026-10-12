@@ -53,7 +53,9 @@ local M = {}
 -- reloads a stale flow module in a running server (keeping M.state).
 -- api 6: a timed-out or wiped wait forgets its stop (stop_gen), and
 -- notices are one screen line (ferry.notice).
-M.api = 6
+-- api 7: on_paste records the paste's lines as b:ferry_paste (fixup's
+-- default range).
+M.api = 7
 
 M.paste_timeout_ms = 4000
 M.settle_ms = 150
@@ -162,8 +164,21 @@ end
 -- During a wait the paste is the stopped recording's: `recording` is left
 -- alone (it is only true again when a new one started during the wait).
 -- With no wait, an adopted recording is left alone too (see the header).
+-- The paste's lines ('[ to '], set by the paste) are kept as
+-- b:ferry_paste = { first, last } for fixup.lua's default range: a write
+-- (the note's autosave) resets '[,'] to the whole buffer. Not from the
+-- command line (<D-v> there pastes into it, not the buffer).
+local function remember_paste(buf)
+  if vim.api.nvim_get_mode().mode:sub(1, 1) == "c" then return end
+  if not vim.api.nvim_buf_is_valid(buf) then return end
+  local s = vim.api.nvim_buf_get_mark(buf, "[")[1]
+  local e = vim.api.nvim_buf_get_mark(buf, "]")[1]
+  if s >= 1 and s <= e then vim.b[buf].ferry_paste = { s, e } end
+end
+
 function M.on_paste(buf)
   if buf == nil or buf == 0 then buf = vim.api.nvim_get_current_buf() end
+  remember_paste(buf)
   local w = M.state.waiting
   if not w then
     if not M.state.adopted then M.state.recording = false end
@@ -178,11 +193,20 @@ local paste_hook
 local function install_paste_hook()
   if paste_hook then return end
   local orig = vim.paste
+  local first -- a streamed paste's first line ('[ after its first chunk)
   paste_hook = function(lines, phase)
     local buf = vim.api.nvim_get_current_buf()
     local ret = orig(lines, phase)
+    if phase == 1 then first = vim.api.nvim_buf_get_mark(buf, "[")[1] end
     -- -1: whole paste in one call; 3: last chunk of a streamed paste.
-    if attached[buf] and (phase == -1 or phase == 3) then M.on_paste(buf) end
+    if attached[buf] and (phase == -1 or phase == 3) then
+      M.on_paste(buf)
+      local p = vim.b[buf].ferry_paste
+      if phase == 3 and first and first >= 1 and type(p) == "table" and first < p[1] then
+        vim.b[buf].ferry_paste = { first, p[2] }
+      end
+    end
+    if phase == -1 or phase == 3 then first = nil end
     return ret
   end
   vim.paste = paste_hook

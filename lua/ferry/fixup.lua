@@ -34,15 +34,19 @@
 -- fillers. A missing or unreadable file means the built-ins, no error.
 --
 -- setup(buf) (needs nvim): buffer-local :FixJoin and :FixFillers.
--- With no range they act on '[,'] (the last change, normally Flow's
--- paste), else on the paragraph at the cursor. Maps <leader>fj, ff in
+-- With no range they act on the last paste: b:ferry_paste = { first,
+-- last } (flow.on_paste records it when the paste lands, since a write,
+-- such as the note's autosave, resets '[,'] to the whole buffer); with no
+-- record, on '[,'] (the last change); else, or when the record no longer
+-- fits the buffer, on the paragraph at the cursor. Maps <leader>fj, ff in
 -- normal (default range) and visual (the selection) mode, and <leader>fw
 -- cycles the word at the cursor (or the one-line selection) through its
 -- group. The list is read on each use, so edits apply at once.
 local M = {}
 
 -- Bumped when a running server must reload this module. 1: first version.
-M.api = 1
+-- 2: the default range prefers the recorded paste (b:ferry_paste).
+M.api = 2
 
 M.DEFAULT_GROUPS = {
   { "their", "there", "they're" },
@@ -450,26 +454,42 @@ end
 
 -- nvim side ---------------------------------------------------------------
 
--- The default range in buf: '[,'] when set and inside the buffer, else
--- the paragraph at the cursor.
+-- The default range in buf, and whether it is the recorded paste:
+-- b:ferry_paste when it fits the buffer (else the paragraph); with no
+-- record, '[,'] when set and inside the buffer; else the paragraph at the
+-- cursor.
 function M.default_range(buf)
   local n = vim.api.nvim_buf_line_count(buf)
+  local function paragraph()
+    local row = 1
+    if vim.api.nvim_get_current_buf() == buf then row = vim.api.nvim_win_get_cursor(0)[1] end
+    return M.paragraph(vim.api.nvim_buf_get_lines(buf, 0, -1, false), row)
+  end
+  local p = vim.b[buf].ferry_paste
+  if type(p) == "table" then
+    local s, e = tonumber(p[1]), tonumber(p[2])
+    if s and e and s >= 1 and s <= e and e <= n then return s, e, true end
+    local ps, pe = paragraph()
+    return ps, pe, false
+  end
   local s = vim.api.nvim_buf_get_mark(buf, "[")[1]
   local e = vim.api.nvim_buf_get_mark(buf, "]")[1]
-  if s >= 1 and s <= e and e <= n then return s, e end
-  local row = 1
-  if vim.api.nvim_get_current_buf() == buf then row = vim.api.nvim_win_get_cursor(0)[1] end
-  return M.paragraph(vim.api.nvim_buf_get_lines(buf, 0, -1, false), row)
+  if s >= 1 and s <= e and e <= n then return s, e, false end
+  local ps, pe = paragraph()
+  return ps, pe, false
 end
 
 -- Run fn(lines, s, e) over lines s..e of buf (default range when s is nil)
--- and write back what it returns, only if anything changed.
+-- and write back what it returns, only if anything changed. A fix over
+-- the recorded paste keeps the record on the lines it became.
 local function apply(buf, s, e, fn)
-  if not s then s, e = M.default_range(buf) end
+  local pasted = false
+  if not s then s, e, pasted = M.default_range(buf) end
   local old = vim.api.nvim_buf_get_lines(buf, s - 1, e, false)
   local new = fn(old, s, e)
   if table.concat(new, "\n") == table.concat(old, "\n") and #new == #old then return false end
   vim.api.nvim_buf_set_lines(buf, s - 1, e, false, new)
+  if pasted then vim.b[buf].ferry_paste = #new > 0 and { s, s + #new - 1 } or nil end
   return true
 end
 
