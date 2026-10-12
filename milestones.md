@@ -182,7 +182,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
 
 ## Window size and position
 
-- **Status:** breaking-down
+- **Status:** in-progress
 - **Needs:** nothing
 - **Deliverable:** the voice-vim window opens where Joe last left it, at the size he left it, instead of fullscreen.
 - **Scope:**
@@ -192,10 +192,20 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - Applies to today's Ghostty session window now. The one-instance host adapter (B1 in "One instance toggled by a hotkey") reuses the same saved frame.
   - Keep the frame logic pure and tested (no `hs`); keep the Hammerspoon glue thin. Update `guide.md`.
 - **Agent checks:** pure-logic tests for the default frame, restore and off-screen clamping; `tests/test-hammerspoon.sh` cases with stub screens and windows: a new session window gets the default frame, a moved window's frame is saved, and the next session window gets the saved frame. All tests and the luajit syntax check pass.
-- **Joe checks:** reload Hammerspoon; the first session opens centred at half size; move and resize it, cancel, open again: same place and size; repeat after unplugging an external monitor if you use one.
-- **Tasks:** not broken down yet.
+- **Joe checks:**
+  1. Hammerspoon console: `hs.settings.clear("voice-vim.windowFrame")`, then Reload Config.
+  2. Ctrl+Option+V: the window opens centred at half the screen's width and height; the console shows `frame: default …`. Note whether it visibly jumps from another size first, and whether it was native fullscreen (its own Space) before.
+  3. Move and resize it: the console shows one `frame: saved …` per drag. `ZQ`.
+  4. Ctrl+Option+V again: same place and size, console shows `frame: restored …`.
+  5. With an external monitor: drag the window onto it, `ZQ`, unplug, Ctrl+Option+V: it is on the laptop screen at the same size (or shrunk), console shows `frame: moved onto main screen`.
+  6. Submit once into Slack: the paste still lands.
+- **Tasks:**
+  - [ ] **W1. Pure frame logic.** `lua/voice-vim/frame.lua` (no `hs`/`vim` globals, loaded with `dofile` like `delivery.lua`): `default(screen, fraction)`, `onScreen(f, screens)`, `clamp(f, screen)`, `restore(saved, screens, main, fraction)` → `frame, reason` (`restored|moved|default`). Integers; rejects non-numeric or tiny sizes (w<200 or h<100); screens are `{x,y,w,h}`. Files: `lua/voice-vim/frame.lua`, `tests/frame_spec.lua`, `tests/test-frame.sh` (like `test-delivery.sh`). Depends: none. Verify: `bash tests/test-frame.sh` exits 0 with ok lines: default on `{0,25,1440,875}` is `{360,244,720,438}`; a saved frame on the second of two screens comes back unchanged as `restored`; a saved frame whose screen is gone is centred on main with its size kept as `moved`; a 3000×2000 saved frame is shrunk to the main screen; nil, garbage or tiny input gives `default`.
+  - [ ] **W2. Hammerspoon frame glue, reusable by B1.** `hammerspoon/window-frame.lua`: `new{log, frame, key, fraction}` → `snapshot(bundle)` (set of window ids); `adopt(bundle, before, timeout)` (check at once, then poll 0.02 s up to 2 s for a window not in `before`, focused first; on hit `apply` + `watch`, on timeout log `frame: session window not found`); `apply(win)` (if fullscreen, `setFullScreen(false)` and retry once after 0.6 s; `setFrame(f, 0)`; log `frame: default|restored|moved onto main screen …`); `watch(win)` (`win:newWatcher` on windowMoved, windowResized, elementDestroyed; debounce 0.5 s; flush on destroy; skip when fullscreen, unchanged, or centre on no screen; store `{x,y,w,h}` in `hs.settings` key `voice-vim.windowFrame`; log `frame: saved …`). Watching starts only after our frame is applied, so Ghostty's opening frame is never saved. Extend `tests/hs_stub.lua` (additions only): `hs.settings` in memory (`rec.settings`), `rec.screens` (with `rec.screen` as main), window `setFrame`/`isFullScreen`/`setFullScreen`/`newWatcher` (`rec:fireWatcher(win, event)`), `hs.uielement.watcher` constants. Files: `hammerspoon/window-frame.lua`, `tests/hs_stub.lua`, `tests/test-window-frame.sh`. Depends: W1. Verify: `bash tests/test-window-frame.sh` exits 0 with ok lines: new window gets the default and logs `frame: default`; a move is saved once after the debounce; equal frame, fullscreen and off-screen-parked windows are not saved; destroy flushes a pending save; saved frame on a gone screen gives `moved`; no new window logs `not found` and calls no `setFrame`. luajit loadfile of the new file and all existing tests pass.
+  - [ ] **W3. Wire into the session window and document.** `voice-vim.lua`: the Ghostty branch of `openTerminal` calls `snapshot` before the osascript and `adopt` after it succeeds; glue load errors are caught with `pcall` and logged, and the session still opens; iTerm2 is skipped with a log line. New config `rememberFrame = true`, `windowSize = 0.5`. `guide.md`: a "Window size and position" entry and the config keys. `AGENTS.md` "V0 shape" step 2: one line. Files: `hammerspoon/voice-vim.lua`, `tests/test-hammerspoon.sh`, `guide.md`, `AGENTS.md`. Depends: W2. Verify: `bash tests/test-hammerspoon.sh` prints `all ok` with new ok lines: `begin()` with nothing saved sets the new Ghostty window to the default; a watcher move saves to `voice-vim.windowFrame`; a second `begin()` window gets the saved frame; a failing osascript causes no `setFrame`; `terminal="iTerm2"` causes no `setFrame`. Every `tests/test-*.sh` exits 0.
 - **Log:**
   - 2026-10-11: created at Joe's request. Neither `~/.config/ghostty/config` nor `hammerspoon/voice-vim.lua` sets fullscreen or a size, so Ghostty chooses it; Hammerspoon will set the frame after the window opens.
+  - 2026-10-11: broken down into W1–W3. The unused `windowTitle` key means the new window is found by diffing Ghostty window ids before and after the AppleScript; cancel never calls Hammerspoon, so the frame is saved on move/resize through a per-window `hs.uielement` watcher. Possible brief jump from Ghostty's opening size; avoiding it would need Ghostty's global window size config (not planned).
 
 ## Notes and history browser
 
