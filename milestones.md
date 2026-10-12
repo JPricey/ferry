@@ -418,6 +418,7 @@ The orchestrator adds Joe checks to run, questions, and failed tasks here, newes
   - 2026-10-12: T2 incident: T2 first ran in the main checkout with a note API bump, so Joe's live server loaded the unverified `to:` header (Joe saw `to: app:com.mitchellh.ghostty#38449`). The implementer moved the work to worktree `t2-to-header` once AGENTS.md said the main checkout is live (32bf520), which rolled main back to API 2. Joe told to delete the `to:` line before sending until T2 lands.
   - 2026-10-12: T2 verify FAILED (1st): a note whose line 1 already is a `to:` header but has no `auto_spec` (exactly Joe's live draft after the roll-back) got a second header on the next show, and Submit pasted the first. Sent to a new implementer in the same worktree.
   - 2026-10-12: T2 done and verified on the 2nd attempt, including every live-upgrade state Joe's server could be in (API-2 draft, header typed under API 3 then rolled back, blank note after a send): one header, Submit sends only the body. Note API 3. Changes what Joe sees on his next show: line 1 `to: app:<bundle>#<window>`. Minor, accepted: a first body line identical to the header is dropped; an old draft starting `to: …` is read as a (bad) header, so Submit keeps the note open and copies the rest.
+  - 2026-10-12: T3 verify FAILED (1st): a clipboard copy that fails silently still finished and hid the note, leaving the text only in the history row with no alert (GT req 2). Sent to a new implementer in the same worktree.
 
 ## `$EDITOR` mode and open with a target
 
