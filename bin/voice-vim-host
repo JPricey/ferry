@@ -3,7 +3,7 @@
 # note in it. Every call goes through `nvim --server <sock> --remote-expr`;
 # the server side is lua/voice-vim/note.lua.
 #
-# Usage: voice-vim-host ensure|show|talk|release|draft|attach-cmd|status|stop
+# Usage: voice-vim-host ensure|show|talk|release|flow-state|draft|attach-cmd|status|stop
 #   ensure                          start the server unless one answers, and
 #                                   load the note module into it
 #   show [--talk] <target> <window> [seed]
@@ -16,8 +16,11 @@
 #                                   insert at the cursor (never in the to:
 #                                   header), Flow recording; prints
 #                                   `talk <path>` or `no note`
-#   release                         stop Flow and wait for its paste into the
+#   release [--force]               stop Flow and wait for its paste into the
 #                                   note; prints `released` or `idle`
+#                                   (--force: stop even when nvim knows of no
+#                                   recording, prints `forced`)
+#   flow-state                      print `recording`, `waiting` or `idle`
 #   draft                          write the note and set g:voicevim_draft;
 #                                   prints its path
 #   attach-cmd                      print the command a UI runs to attach
@@ -175,7 +178,9 @@ case ${1:-} in
   ensure)     ensure ;;
   show)       shift; show "$@" ;;
   talk)       need_server; call talk '{}' ;;
-  release)    need_server; call release '{}' ;;
+  release)    need_server
+              if [ "${2:-}" = --force ]; then call release "{'force': 1}"; else call release '{}'; fi ;;
+  flow-state) need_server; call flow_state '{}' ;;
   draft)      need_server; call draft '{}' ;;
   attach-cmd) printf '%q --server %q --remote-ui\n' "$nvim_bin" "$sock" ;;
   status)     status ;;

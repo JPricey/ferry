@@ -504,11 +504,26 @@ end
 -- Hold to talk, key up: stop Flow through flow's queue and wait for its
 -- paste into the note (flow.release). A Submit, Cancel or Hide right after
 -- takes that wait over. Returns "released", or "idle" when Flow is not
--- recording (nothing sent).
-function M.release()
+-- recording (nothing sent). opts.force: when idle, treat Flow as recording
+-- and stop it anyway (the key-up stop Hammerspoon sends only while the note
+-- is focused, so the paste lands here): returns "forced".
+function M.release(opts)
   local note = M.state.note
   local buf = note and note_buf(note) or vim.api.nvim_get_current_buf()
-  return flow.release(buf) and "released" or "idle"
+  if flow.release(buf) then return "released" end
+  if not (opts and on(opts.force)) then return "idle" end
+  flow.assume_recording()
+  flow.release(buf)
+  return "forced"
+end
+
+-- Flow as nvim sees it: "recording" (a stop is still due), "waiting" (a
+-- stop went out; a Submit, Cancel, Hide or release waits for the paste) or
+-- "idle". Hammerspoon's talk key up asks before giving up on a release.
+function M.flow_state()
+  if flow.recording() then return "recording" end
+  if flow.state.waiting then return "waiting" end
+  return "idle"
 end
 
 -- Returned (with the path) by draft() while Flow is recording.

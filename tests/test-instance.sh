@@ -686,6 +686,131 @@ do
   stop(sock)
 end
 
+-- Focused, but the start task still running at talkStopTimeout: a stop now
+-- could reach Flow before the late start, so none is sent; one alert.
+do
+  local t = setup({ talkStopTimeout = 0.3 })
+  local rec, c, sock = t.rec, t.c, t.sock
+  recordFlow(sock)
+  c.talkDown()  -- host.show focuses the host
+  c.talkUp()
+  rec:runTimers()
+  check("start task running at talkStopTimeout: no release, one alert", "0 1",
+    #execs(rec, "'release'") .. " " .. #rec.alerts)
+  check("start task running: withheld logged with the reason", true,
+    rec:hasLog("w", "the Flow start task is still running"))
+  check("start task running: server still recording, no URL (Ctrl-S stops Flow)", "true ",
+    recording(sock) .. " " .. urls(sock))
+  finishStart(rec)
+  rec:runTimers()
+  check("start task running: its late exit releases nothing", "0 1", #execs(rec, "'release'") .. " " .. #rec.alerts)
+  stop(sock)
+end
+
+-- The note clicked into focus while show --talk still waits for the
+-- pre-warm: no release until show --talk has told nvim, then one stop.
+do
+  local t = setup({ warm = false })
+  local rec, c, sock = t.rec, t.c, t.sock
+  c.talkDown()
+  rec.frontmost, rec.focusedWindow = rec.apps["com.example.host"], t.hostWin
+  finishStart(rec)
+  c.talkUp()
+  tick(rec); tick(rec)
+  check("focused before show --talk ran: no release yet", "0 0",
+    #execs(rec, "'release'") .. " " .. #execs(rec, "'show'"))
+  ensure(sock)
+  recordFlow(sock)
+  rec:finishTask(1, 0, "", "")  -- the pre-warm: show --talk runs now
+  check("after the pre-warm: show --talk ran, server recording", "1 true",
+    #execs(rec, "'show' '--talk'") .. " " .. recording(sock))
+  rec:runTimers()
+  local rel = execs(rec, "'release'")
+  check("then exactly one release, released, one stop, no alert", "1 released 1 0",
+    #rel .. " " .. (rel[1] and rel[1].out:gsub("%s+$", "") or "") .. " " .. stops(sock) .. " " .. #rec.alerts)
+  stop(sock)
+end
+
+-- Host focused but the server has no note and there is no target: nvim
+-- never took the recording; release --force still sends the one stop.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  recordFlow(sock)
+  rec.frontmost, rec.focusedWindow = rec.apps["com.example.host"], t.hostWin
+  c.talkDown()
+  check("no note, no target: talk printed no note, no show", "1 0",
+    #execs(rec, "'talk'") .. " " .. #execs(rec, "'show'"))
+  finishStart(rec)
+  c.talkUp()
+  local rel = execs(rec, "'release' '--force'")
+  check("no note: one release --force, forced, one stop, no alert", "1 forced 1 0",
+    #rel .. " " .. (rel[1] and rel[1].out:gsub("%s+$", "") or "") .. " " .. stops(sock) .. " " .. #rec.alerts)
+  check("no note: logged that nvim had no recording", true, rec:hasLog("w", "nvim had no recording"))
+  stop(sock)
+end
+
+-- A release that stops nothing (an older note module that ignores --force
+-- prints idle): one alert.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  recordFlow(sock)
+  c.toggle()
+  rec:runTimers()
+  luaRun(sock, "talkold.lua", 'require("voice-vim.note").release = function() return "idle" end return 1')
+  c.talkDown(); finishStart(rec); c.talkUp()
+  check("release prints idle: one release, no stop, one alert", "1 0 1",
+    #execs(rec, "'release'") .. " " .. stops(sock) .. " " .. #rec.alerts)
+  check("release prints idle: alert says Flow is still recording", true,
+    has(rec.alerts[1], "still recording") and has(rec.alerts[1], "Ctrl-S"))
+  stop(sock)
+end
+
+-- show --talk fails with the host not focused: one alert at key up (not
+-- one from show and one from key up), no release.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  recordFlow(sock)
+  luaRun(sock, "talkboom.lua", 'require("voice-vim.note").show = function() error("boom") end return 1')
+  c.talkDown()
+  check("show failed: no alert at key down", 0, #rec.alerts)
+  finishStart(rec)
+  c.talkUp()
+  check("show failed: one alert at key up, no release, withheld logged", "1 0 true",
+    #rec.alerts .. " " .. #execs(rec, "'release'") .. " " .. tostring(rec:hasLog("w", "the note did not open")))
+  rec:runTimers()
+  check("show failed: still one alert", 1, #rec.alerts)
+  stop(sock)
+end
+
+-- Ctrl-X in the note while key up still waits (start task running): the
+-- Submit takes over Flow's wait and the note hides; key up stops polling
+-- with no release and no alert.
+do
+  local t = setup()
+  local rec, c, sock = t.rec, t.c, t.sock
+  recordFlow(sock)
+  c.toggle()
+  rec:runTimers()
+  c.talkDown()
+  c.talkUp()
+  tick(rec)
+  check("Ctrl-X during key up: no release while the start task runs", 0, #execs(rec, "'release'"))
+  luaRun(sock, "talkx.lua", 'require("voice-vim.flow").finish_then(0, function() end) return 1')
+  rec.focusedWindow = nil  -- the Submit hid the note
+  tick(rec)
+  check("Ctrl-X during key up: polling stopped, logged, no release, no alert", "true true nil 0 0",
+    tostring(rec:hasLog("i", "talk: no release needed: nvim already stopped Flow (waiting)")) .. " "
+      .. tostring(c._talk == nil) .. " " .. tostring(c._talkTimer) .. " "
+      .. #execs(rec, "'release'") .. " " .. #rec.alerts)
+  finishStart(rec)
+  rec:runTimers()
+  check("Ctrl-X during key up: only the Submit's stop, still no alert", "1 0", stops(sock) .. " " .. #rec.alerts)
+  stop(sock)
+end
+
 -- Up without down, and a disabled controller: nothing.
 do
   local t = setup()

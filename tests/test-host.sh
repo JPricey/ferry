@@ -211,6 +211,16 @@ check "show --talk resuming a draft whose cursor was on the header: insert at th
 check "each of the three releases above sent one stop" 3 "$(opened | grep -c stop-hands-free)"
 ask "luaeval('require\"voice-vim.note\".forget()')" >/dev/null
 check "talk without a note prints no note, Flow untouched" "no note false " "$("$host" talk) $(rec) $(opened)"
+check "flow-state while idle prints idle; release --force prints forced, one stop, then waiting" \
+  "idle forced waiting|-g wispr-flow://stop-hands-free" \
+  "$("$host" flow-state) $("$host" release --force) $("$host" flow-state)|$(sleep 0.3; opened)"
+paste "forced"
+ask "luaeval('require\"voice-vim.flow\".assume_recording()')" >/dev/null
+check "flow-state while recording prints recording; release --force then prints released, one stop" \
+  "recording released|-g wispr-flow://stop-hands-free" \
+  "$("$host" flow-state) $("$host" release --force)|$(sleep 0.3; opened)"
+paste "x"
+check "after the paste: flow-state idle" idle "$("$host" flow-state)"
 
 # A server holding the API-3 note module (and a flow module from before
 # hold to talk) reloads both on talk, keeping the draft and its target.
