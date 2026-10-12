@@ -89,8 +89,13 @@ local store = require("ferry.store")
 M.api = 12
 
 -- history api 2: open() binds the note keys on the sidebar; <CR> and p
--- take the whole note as its body.
-local function history() return current("ferry.history", 2) end
+-- take the whole note as its body. A sidebar the old module opened keeps
+-- its keys bound to the old functions, so rebind them to the new ones.
+local function history()
+  return current("ferry.history", 2, function(_, new)
+    if new.is_open() then new.bind_keys(new.state.buf) end
+  end)
+end
 
 -- The current (unfinished) note: { id = uuid, path = file, buf = bufnr,
 -- created = Unix time its file name was stamped with (nil: a note from

@@ -384,6 +384,58 @@ check "upgrade from api 11: Submit sends the whole buffer to the captured target
   "com.example.app 4242 api 11 draft|second!" "$(ask 'get(g:, "ferry_sub", "")')"
 "$live/bin/ferry-host" stop
 
+# Live upgrade from 9ac5f89 with the history sidebar open (history api 1,
+# whose <CR> and p skip a to: line 1): the reload to history api 2 rebinds
+# the open sidebar's keys, so p and <CR> treat a typed to: first line as
+# note text.
+printf 'hist one\nhist two\n' >"$work/hist.txt"
+"$root/bin/ferry-db" start hist-row com.example.app "$work/hist.txt" >/dev/null
+"$root/bin/ferry-db" finish hist-row submitted "$work/hist.txt" >/dev/null
+# A function of a sidebar key: gives the note a typed to: first line,
+# cursor on it, presses the key on the hist one row, returns the note.
+cat >"$work/hkey.lua" <<'EOF'
+return function(key)
+  local h = require("ferry.history")
+  local main = h.state.main_win
+  vim.api.nvim_buf_set_lines(vim.api.nvim_win_get_buf(main), 0, -1, false, { "to: app:com.other#7", "" })
+  vim.api.nvim_win_set_cursor(main, { 1, 0 })
+  vim.api.nvim_set_current_win(h.state.win)
+  for ln, l in ipairs(vim.api.nvim_buf_get_lines(h.state.buf, 0, -1, false)) do
+    if l:find("hist one", 1, true) then vim.api.nvim_win_set_cursor(h.state.win, { ln, 0 }) end
+  end
+  vim.api.nvim_feedkeys(vim.keycode(key), "mx", false)
+  return table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(main), 0, -1, false), "|")
+end
+EOF
+# How many of the sidebar's own keys call the loaded history module.
+cat >"$work/hkeys.lua" <<'EOF'
+local h = require("ferry.history")
+local want = { ["<CR>"] = h.insert, p = h.paste_to_target, y = h.yank, K = h.preview, d = h.delete,
+  R = h.refresh, ["<Tab>"] = h.focus_main, q = h.close, ["<Esc>"] = h.close_preview }
+local n = 0
+for _, m in ipairs(vim.api.nvim_buf_get_keymap(h.state.buf, "n")) do
+  if want[m.lhs] and m.callback == want[m.lhs] then n = n + 1 end
+end
+return n
+EOF
+live=$work/live-hist; old_tree 9ac5f89 "$live"
+"$live/bin/ferry-host" ensure >/dev/null
+"$live/bin/ferry-host" show com.example.app 4242 >/dev/null
+check "9ac5f89 server: the sidebar is open under history api 1" "1 true" \
+  "$(lua 'require"ferry.history".api') $(lua 'require"ferry.history".is_open()')"
+upgrade "$live"
+"$live/bin/ferry-host" show com.example.app 4242 >/dev/null
+ask "nvim_input('<Esc>')" >/dev/null; sleep 0.2
+check "upgrade from history api 1: the open sidebar's 9 keys call history api 2" "2 9" \
+  "$(lua 'require"ferry.history".api') $(ask "luaeval('dofile(\"$work/hkeys.lua\")')")"
+check "upgrade from history api 1: <CR> treats a to: first line as text, inserts below the cursor" \
+  "to: app:com.other#7|hist one|hist two|" "$(ask "luaeval('dofile(\"$work/hkey.lua\")(\"<CR>\")')")"
+ask "luaeval('(function() require\"ferry.note\".host = { submit = function(p) vim.g.ferry_hsub = p.target .. \" \" .. p.window .. \" \" .. table.concat(vim.fn.readfile(p.file), \"|\") end, hide = function() end }; return 1 end)()')" >/dev/null
+ask "luaeval('dofile(\"$work/hkey.lua\")(\"p\")')" >/dev/null
+check "upgrade from history api 1: p replaces the whole note, to: first line too, and sends it" \
+  "com.example.app 4242 hist one|hist two" "$(ask 'get(g:, "ferry_hsub", "")')"
+"$live/bin/ferry-host" stop
+
 # --- overrides and a missing or hung ghostty ------------------------------------
 FERRY_GUI_FONT='Other Font:h15' FERRY_GUI_BG='#112233' "$host" ensure >/dev/null
 check "FERRY_GUI_FONT and FERRY_GUI_BG win over Ghostty" "{'bg': '#112233', 'font': 'Other Font:h15'}" "$(ask 'string(g:ferry_gui)')"

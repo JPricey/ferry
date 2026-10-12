@@ -14,7 +14,7 @@ local M = {}
 -- Bumped when the module changes in a way a running server must pick up:
 -- the note module reloads an older one (keeping M.state). 1: open() binds
 -- the note keys on the sidebar. 2: <CR> and p take the whole note as its
--- body (no `to:` header).
+-- body (no `to:` header); bind_keys rebinds an open sidebar's keys.
 M.api = 2
 
 M.width = 38
@@ -232,6 +232,24 @@ function M.toggle()
   if M.is_open() then M.close() else M.open() end
 end
 
+-- The sidebar's own keys on buf, bound to this module's functions. The note
+-- module reruns it when it reloads an older history module, so a sidebar
+-- that module opened stops calling the old functions.
+function M.bind_keys(buf)
+  local function map(lhs, fn, desc)
+    vim.keymap.set("n", lhs, fn, { buffer = buf, silent = true, nowait = true, desc = desc })
+  end
+  map("<CR>", M.insert, "insert into buffer")
+  map("p", M.paste_to_target, "paste to target and submit")
+  map("y", M.yank, "yank to clipboard")
+  map("K", M.preview, "preview")
+  map("d", M.delete, "delete from history")
+  map("R", M.refresh, "refresh")
+  map("<Tab>", M.focus_main, "back to buffer")
+  map("q", M.close, "close sidebar")
+  map("<Esc>", M.close_preview, "close preview")
+end
+
 -- Open the sidebar to the left of the current (dictation) window and return
 -- focus to that window.
 function M.open()
@@ -251,18 +269,7 @@ function M.open()
   wo.wrap, wo.cursorline, wo.winfixwidth, wo.spell, wo.list = false, true, true, false, false
   wo.statusline = " history "
 
-  local function map(lhs, fn, desc)
-    vim.keymap.set("n", lhs, fn, { buffer = st.buf, silent = true, nowait = true, desc = desc })
-  end
-  map("<CR>", M.insert, "insert into buffer")
-  map("p", M.paste_to_target, "paste to target and submit")
-  map("y", M.yank, "yank to clipboard")
-  map("K", M.preview, "preview")
-  map("d", M.delete, "delete from history")
-  map("R", M.refresh, "refresh")
-  map("<Tab>", M.focus_main, "back to buffer")
-  map("q", M.close, "close sidebar")
-  map("<Esc>", M.close_preview, "close preview")
+  M.bind_keys(st.buf)
   -- Send, cancel, hide and Flow keys act on the note, not on this buffer.
   pcall(function() require("ferry.note").bind_note_keys(st.buf) end)
 
