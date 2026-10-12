@@ -1,0 +1,616 @@
+#!/usr/bin/env python3
+"""voice-vim-notes: the search index over the notes folder.
+
+  voice-vim-notes index <file>...      (re)index these note files; a missing
+                                       file drops its row
+  voice-vim-notes sync                 reindex files whose mtime or size
+                                       changed, drop rows of gone files
+  voice-vim-notes rebuild              drop the index and index every file
+  voice-vim-notes list [--limit N] [--exclude ID] [--query Q]
+                                       JSON array: pinned first, then
+                                       updated newest first; --query
+                                       searches note bodies (FTS5)
+  voice-vim-notes get <id>             JSON object, with the body as "text"
+  voice-vim-notes pin <id> on|off      set or remove `pinned: true`
+  voice-vim-notes state <id> <state>   draft | sent | cancelled
+  voice-vim-notes delete <id>          move the file to <notes>/.trash/
+  voice-vim-notes path [<id>]          print the index path, or a note's path
+
+Notes: $VOICE_VIM_NOTES_DIR or ~/notes/scratchpads (top-level *.md files;
+dot files and .trash are skipped). The files are the source of truth
+(GROUND_TRUTHS decision 11); this index can always be rebuilt from them.
+Index: $VOICE_VIM_INDEX or ~/Library/Application Support/voice-vim/index.sqlite
+
+Frontmatter is parsed exactly as lua/voice-vim/store.lua parses it
+(tests/test-notes-index.sh compares the two on every fixture). pin and
+state edit only the frontmatter lines; the body bytes are never rewritten.
+"""
+import json
+import os
+import re
+import sqlite3
+import sys
+from contextlib import contextmanager
+from datetime import datetime, timedelta
+
+SCHEMA_VERSION = 1
+SCHEMA = """
+CREATE TABLE notes (
+  path     TEXT PRIMARY KEY,    -- absolute path in the notes folder
+  id       TEXT NOT NULL,       -- frontmatter id, else the file name stem
+  mtime_ns INTEGER NOT NULL,
+  size     INTEGER NOT NULL,
+  state    TEXT NOT NULL,       -- draft | sent | cancelled (as written)
+  target   TEXT NOT NULL,       -- target spec, '' when none
+  pinned   INTEGER NOT NULL,
+  created  TEXT, updated TEXT, sent TEXT,
+  ts       REAL NOT NULL,       -- sort time: updated, sent, created, mtime
+  preview  TEXT NOT NULL,
+  words    INTEGER NOT NULL,
+  body     TEXT NOT NULL
+);
+CREATE INDEX notes_id ON notes(id);
+CREATE VIRTUAL TABLE notes_fts USING fts5(path UNINDEXED, body);
+"""
+STATES = ("draft", "sent", "cancelled")
+
+
+def notes_dir():
+    return os.path.abspath(os.path.expanduser(
+        os.environ.get("VOICE_VIM_NOTES_DIR") or "~/notes/scratchpads"))
+
+
+def index_path():
+    return os.environ.get("VOICE_VIM_INDEX") or os.path.expanduser(
+        "~/Library/Application Support/voice-vim/index.sqlite")
+
+
+# ---------------------------------------------------------------------------
+# Frontmatter: a port of lua/voice-vim/store.lua's parse. Text is decoded
+# with surrogateescape so bytes that are not UTF-8 survive like in Lua.
+
+def split_lines(s):
+    if s == "":
+        return []
+    if not s.endswith("\n"):
+        s += "\n"
+    return s.split("\n")[:-1]
+
+
+SIMPLE_ESC = {"\\": "\\", '"': '"', "/": "/", "n": "\n", "t": "\t", "r": "\r",
+              "0": "\0", "a": "\a", "b": "\b", "e": "\x1b", "f": "\f",
+              "v": "\v", " ": " "}
+HEX_LEN = {"x": 2, "u": 4, "U": 8}
+HEX_RE = re.compile(r"[0-9A-Fa-f]+", re.A)
+
+
+def utf8bytes(cp):  # store.lua's utf8char, byte for byte
+    if cp < 0x80:
+        return bytes([cp])
+    if cp < 0x800:
+        return bytes([0xC0 + cp // 0x40, 0x80 + cp % 0x40])
+    if cp < 0x10000:
+        return bytes([0xE0 + cp // 0x1000, 0x80 + cp // 0x40 % 0x40, 0x80 + cp % 0x40])
+    if cp >= 0x400000:  # string.char would raise in Lua
+        return None
+    return bytes([0xF0 + cp // 0x40000, 0x80 + cp // 0x1000 % 0x40,
+                  0x80 + cp // 0x40 % 0x40, 0x80 + cp % 0x40])
+
+
+def rest_ok(rest):
+    return re.fullmatch(r"\s*", rest, re.A) is not None or re.match(r"\s+#", rest, re.A) is not None
+
+
+def parse_double(v):
+    out, i, n = [], 1, len(v)
+    while i < n:
+        c = v[i]
+        if c == '"':
+            return "".join(out) if rest_ok(v[i + 1:]) else None
+        if c == "\\":
+            e = v[i + 1:i + 2]
+            if e in SIMPLE_ESC:
+                out.append(SIMPLE_ESC[e]); i += 2
+            elif e in HEX_LEN:
+                hx = v[i + 2:i + 2 + HEX_LEN[e]]
+                if len(hx) != HEX_LEN[e] or not HEX_RE.fullmatch(hx):
+                    return None
+                cp = int(hx, 16)
+                b = bytes([cp]) if e == "x" else utf8bytes(cp)
+                if b is None:
+                    return None
+                out.append(b.decode("utf-8", "surrogateescape"))
+                i += 2 + HEX_LEN[e]
+            else:
+                return None
+        else:
+            out.append(c); i += 1
+    return None
+
+
+def parse_single(v):
+    out, i, n = [], 1, len(v)
+    while i < n:
+        c = v[i]
+        if c == "'":
+            if v[i + 1:i + 2] == "'":
+                out.append("'"); i += 2
+            else:
+                return "".join(out) if rest_ok(v[i + 1:]) else None
+        else:
+            out.append(c); i += 1
+    return None
+
+
+def parse_scalar(v):
+    v = re.sub(r"^\s+", "", v, flags=re.A)
+    c = v[:1]
+    if c == '"':
+        return parse_double(v)
+    if c == "'":
+        return parse_single(v)
+    if c != "" and c in "[{|>&*!%@`":
+        return None
+    v = re.sub(r"\s+#.*$", "", v, count=1, flags=re.A | re.S)
+    return re.sub(r"\s+$", "", v, flags=re.A)
+
+
+KEY_RE = re.compile(r"([A-Za-z0-9_][A-Za-z0-9_.\-]*):(.*)", re.S)
+
+
+def key_line(line):
+    m = KEY_RE.fullmatch(line)
+    if not m:
+        return None, None
+    rest = m.group(2)
+    if rest != "" and not re.match(r"\s", rest, re.A):
+        return None, None
+    return m.group(1), rest
+
+
+def is_continuation(line):
+    return (line == "" or re.match(r"\s", line, re.A) is not None
+            or re.match(r"-\s", line, re.A) is not None
+            or line == "-" or line.startswith("#"))
+
+
+def front_groups(lines):
+    """Groups of frontmatter lines [(key, rest, [lines])], or None."""
+    groups = []
+    for line in lines:
+        k, rest = key_line(line)
+        if k is not None:
+            groups.append((k, rest, [line]))
+        elif is_continuation(line) and groups:
+            groups[-1][2].append(line)
+        else:
+            return None
+    return groups
+
+
+def split_front(text):
+    """(frontmatter lines or None, body lines, closing line index)."""
+    lines = split_lines(text)
+    if lines and lines[0] == "---":
+        for i in range(1, len(lines)):
+            if lines[i] == "---":
+                if front_groups(lines[1:i]) is not None:
+                    return lines[1:i], lines[i + 1:], i
+                break
+    return None, lines, None
+
+
+def parse(text):
+    """Returns (keys, meta, body lines, has frontmatter), like store.parse.
+    meta values are strings, or {"raw": [lines]} for YAML store.lua keeps
+    verbatim. Defaults (state draft) are not in meta."""
+    front, body, _ = split_front(text)
+    keys, meta = [], {}
+    if front is None:
+        return keys, meta, body, False
+    for k, rest, raw in front_groups(front):
+        v = parse_scalar(rest) if len(raw) == 1 else None
+        if v is None:
+            v = {"raw": raw}
+        if k not in meta:
+            keys.append(k)
+        meta[k] = v
+    return keys, meta, body, True
+
+
+def read_text(path):
+    with open(path, "rb") as f:
+        return f.read().decode("utf-8", "surrogateescape")
+
+
+def clean(s):
+    """A string fit for JSON and SQLite (bad bytes become U+FFFD)."""
+    return s.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+
+
+def meta_str(meta, key, default=""):
+    v = meta.get(key)
+    return clean(v) if isinstance(v, str) else default
+
+
+# ---------------------------------------------------------------------------
+# Fields shown in the browser
+
+def short_app(target):
+    """Short app name for a target spec (grammar in lua/voice-vim/target.lua)."""
+    t = (target or "").strip()
+    if not t:
+        return ""
+    if t == "clipboard":
+        return "clipboard"
+    kind, sep, rest = t.partition(":")
+    if not sep:
+        if "." in t and not re.search(r"\s", t):  # legacy bare bundle id
+            return t.rsplit(".", 1)[-1]
+        return "?"
+    if kind == "app":
+        bundle = rest.split("#", 1)[0]
+        return bundle.rsplit(".", 1)[-1] or "?"
+    if kind in ("tmux", "fleet"):
+        return kind
+    return "?"
+
+
+def iso_ts(s):
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s.strip())
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.astimezone()  # naive means local time
+    return dt.timestamp()
+
+
+def is_pinned(v):
+    return isinstance(v, str) and v.strip().lower() in ("true", "yes", "on", "1")
+
+
+def date_label(dt_local, today):
+    d = dt_local.date()
+    if d == today:
+        return "Today"
+    if d == today - timedelta(days=1):
+        return "Yesterday"
+    if (today - d).days < 7:
+        return dt_local.strftime("%A")
+    return dt_local.strftime("%b %-d")
+
+
+# ---------------------------------------------------------------------------
+# Index
+
+@contextmanager
+def tx(con):
+    """One write transaction (BEGIN IMMEDIATE takes the write lock up front)."""
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        yield con
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    con.execute("COMMIT")
+
+
+def create(con):
+    """Drops and recreates the tables. Call inside tx()."""
+    con.execute("DROP TABLE IF EXISTS notes")
+    con.execute("DROP TABLE IF EXISTS notes_fts")
+    for stmt in SCHEMA.split(";"):
+        if stmt.strip():
+            con.execute(stmt)
+    con.execute("PRAGMA user_version=%d" % SCHEMA_VERSION)
+
+
+def connect():
+    path = index_path()
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    con = sqlite3.connect(path, timeout=10, isolation_level=None)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA journal_mode=WAL")
+    if con.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
+        # New or outdated index: it is only a cache of the files.
+        with tx(con):
+            if con.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
+                create(con)
+                sync(con)
+    return con
+
+
+def note_files(folder):
+    try:
+        names = os.listdir(folder)
+    except FileNotFoundError:
+        return []
+    return sorted(os.path.join(folder, n) for n in names
+                  if n.endswith(".md") and not n.startswith(".")
+                  and os.path.isfile(os.path.join(folder, n)))
+
+
+def remove_row(con, path):
+    con.execute("DELETE FROM notes WHERE path=?", (path,))
+    con.execute("DELETE FROM notes_fts WHERE path=?", (path,))
+
+
+def index_file(con, path):
+    """Index one note file. Returns False (and drops the row) when gone."""
+    try:
+        st = os.stat(path)
+        text = read_text(path)
+    except OSError:
+        remove_row(con, path)
+        return False
+    keys, meta, lines, _ = parse(text)
+    body = clean("\n".join(lines))
+    stem = os.path.basename(path)[:-3] if path.endswith(".md") else os.path.basename(path)
+    created, updated, sent = (meta_str(meta, k) or None for k in ("created", "updated", "sent"))
+    ts = next((t for t in (iso_ts(updated), iso_ts(sent), iso_ts(created)) if t is not None),
+              st.st_mtime)
+    preview = next((l.strip() for l in body.split("\n") if l.strip()), "")[:200]
+    remove_row(con, path)
+    con.execute(
+        "INSERT INTO notes(path, id, mtime_ns, size, state, target, pinned, created,"
+        " updated, sent, ts, preview, words, body) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (path, meta_str(meta, "id") or clean(stem), st.st_mtime_ns, st.st_size,
+         meta_str(meta, "state", "draft") or "draft", meta_str(meta, "target"),
+         1 if is_pinned(meta.get("pinned")) else 0, created, updated, sent, ts,
+         preview, len(body.split()), body))
+    con.execute("INSERT INTO notes_fts(path, body) VALUES (?,?)", (path, body))
+    return True
+
+
+def sync(con):
+    """Returns (indexed, dropped)."""
+    files = {p: os.stat(p) for p in note_files(notes_dir())}
+    known = {r["path"]: (r["mtime_ns"], r["size"])
+             for r in con.execute("SELECT path, mtime_ns, size FROM notes")}
+    indexed = dropped = 0
+    for path in known:
+        if path not in files:
+            remove_row(con, path)
+            dropped += 1
+    for path, st in files.items():
+        if known.get(path) != (st.st_mtime_ns, st.st_size):
+            if index_file(con, path):
+                indexed += 1
+    return indexed, dropped
+
+
+def in_notes_dir(path):
+    """The canonical indexed path for a file in the notes folder, or None."""
+    folder = notes_dir()
+    real = os.path.realpath(os.path.dirname(os.path.abspath(path)))
+    if real != os.path.realpath(folder):
+        return None
+    return os.path.join(folder, os.path.basename(path))
+
+
+def find(con, ident):
+    """Row for an id (or a unique id prefix of 4+ characters), else None."""
+    rows = con.execute("SELECT * FROM notes WHERE id=? ORDER BY ts DESC", (ident,)).fetchall()
+    if not rows and len(ident) >= 4:
+        like = ident.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        rows = con.execute("SELECT * FROM notes WHERE id LIKE ? ESCAPE '\\'", (like,)).fetchall()
+        if len({r["id"] for r in rows}) != 1:
+            rows = []
+    return rows[0] if rows else None
+
+
+def fts_query(q):
+    """Each word as a quoted FTS5 prefix term, all required."""
+    words = q.split()
+    return " ".join('"%s"*' % w.replace('"', '""') for w in words)
+
+
+def row_obj(row, full=False):
+    local = datetime.fromtimestamp(row["ts"])
+    obj = {
+        "id": row["id"],
+        "path": row["path"],
+        "state": row["state"],
+        "target": row["target"],
+        "app": short_app(row["target"]),
+        "pinned": bool(row["pinned"]),
+        "time": local.strftime("%H:%M"),
+        "date_label": date_label(local, datetime.now().date()),
+        "preview": row["preview"],
+        "words": row["words"],
+    }
+    if full:
+        obj.update(created=row["created"], updated=row["updated"], sent=row["sent"],
+                   text=row["body"])
+    return obj
+
+
+# ---------------------------------------------------------------------------
+# Frontmatter edits (pin, state): only the frontmatter lines change.
+
+def set_key(text, key, value):
+    """File text with `key: value` set (value None removes the key)."""
+    front, body, close = split_front(text)
+    new_line = None if value is None else "%s: %s" % (key, value)
+    if front is None:
+        if new_line is None:
+            return text
+        return "---\n%s\n---\n%s" % (new_line, text)
+    out, done = [], False
+    for k, _, raw in front_groups(front):
+        if k == key:
+            if new_line is not None and not done:
+                out.append(new_line)
+            done = True
+        else:
+            out.extend(raw)
+    if not done and new_line is not None:
+        out.append(new_line)
+    # The body is everything after the closing `---` line, byte for byte.
+    head_len = sum(len(l) + 1 for l in split_lines(text)[:close + 1])
+    return "---\n" + "".join(l + "\n" for l in out) + "---\n" + text[head_len:]
+
+
+def rewrite(path, text):
+    """Temp file next to path, then rename over it."""
+    d, base = os.path.split(path)
+    tmp = os.path.join(d, ".%s.%d.tmp" % (base, os.getpid()))
+    try:
+        with open(tmp, "wb") as f:
+            f.write(text.encode("utf-8", "surrogateescape"))
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def edit_key(con, ident, key, value):
+    with tx(con):
+        row = find(con, ident)
+        if row is None:
+            print("no note: " + ident, file=sys.stderr)
+            return 1
+        path = row["path"]
+        try:
+            text = read_text(path)
+        except OSError as e:
+            remove_row(con, path)
+            print("cannot read %s: %s" % (path, e), file=sys.stderr)
+            return 1
+        new = set_key(text, key, value)
+        if new != text:
+            rewrite(path, new)
+        index_file(con, path)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 0 if argv else 2
+    cmd, args = argv[0], argv[1:]
+
+    if cmd == "path" and not args:
+        print(index_path())
+        return 0
+
+    con = connect()
+
+    if cmd == "index":
+        status = 0
+        with tx(con):
+            for f in args:
+                path = in_notes_dir(f)
+                if path is None:
+                    print("not in %s: %s" % (notes_dir(), f), file=sys.stderr)
+                    status = 1
+                    continue
+                index_file(con, path)
+        return status
+
+    if cmd == "sync":
+        with tx(con):
+            indexed, dropped = sync(con)
+        total = con.execute("SELECT count(*) FROM notes").fetchone()[0]
+        print("indexed %d, dropped %d, notes %d" % (indexed, dropped, total))
+        return 0
+
+    if cmd == "rebuild":
+        with tx(con):
+            create(con)
+            indexed, _ = sync(con)
+        print("indexed %d" % indexed)
+        return 0
+
+    if cmd == "list":
+        limit, exclude, query = 500, None, ""
+        i = 0
+        while i < len(args):
+            if args[i] == "--limit" and i + 1 < len(args):
+                limit = int(args[i + 1]); i += 2
+            elif args[i] == "--exclude" and i + 1 < len(args):
+                exclude = args[i + 1]; i += 2
+            elif args[i] == "--query" and i + 1 < len(args):
+                query = args[i + 1]; i += 2
+            else:
+                print("bad argument: " + args[i], file=sys.stderr)
+                return 2
+        sql = "SELECT n.* FROM notes n WHERE (? IS NULL OR n.id != ?)"
+        params = [exclude, exclude]
+        match = fts_query(query)
+        if match:
+            sql += " AND n.path IN (SELECT path FROM notes_fts WHERE notes_fts MATCH ?)"
+            params.append(match)
+        sql += " ORDER BY n.pinned DESC, n.ts DESC, n.path DESC LIMIT ?"
+        params.append(limit)
+        rows = con.execute(sql, params).fetchall()
+        json.dump([row_obj(r) for r in rows], sys.stdout)
+        return 0
+
+    if cmd in ("get", "path"):
+        if len(args) != 1:
+            print("usage: %s <id>" % cmd, file=sys.stderr)
+            return 2
+        row = find(con, args[0])
+        if row is None:
+            return 1
+        if cmd == "path":
+            print(row["path"])
+            return 0
+        with tx(con):
+            found = index_file(con, row["path"])  # the file is the truth
+        if not found:
+            return 1
+        row = con.execute("SELECT * FROM notes WHERE path=?", (row["path"],)).fetchone()
+        json.dump(row_obj(row, full=True), sys.stdout)
+        return 0
+
+    if cmd == "pin":
+        if len(args) != 2 or args[1] not in ("on", "off"):
+            print("usage: pin <id> on|off", file=sys.stderr)
+            return 2
+        return edit_key(con, args[0], "pinned", "true" if args[1] == "on" else None)
+
+    if cmd == "state":
+        if len(args) != 2 or args[1] not in STATES:
+            print("usage: state <id> draft|sent|cancelled", file=sys.stderr)
+            return 2
+        return edit_key(con, args[0], "state", args[1])
+
+    if cmd == "delete":
+        if len(args) != 1:
+            print("usage: delete <id>", file=sys.stderr)
+            return 2
+        row = find(con, args[0])
+        if row is None:
+            print("no note: " + args[0], file=sys.stderr)
+            return 1
+        path = row["path"]
+        trash = os.path.join(notes_dir(), ".trash")
+        os.makedirs(trash, exist_ok=True)
+        base = os.path.basename(path)
+        dest, n = os.path.join(trash, base), 1
+        while os.path.exists(dest):
+            dest = os.path.join(trash, "%s-%d.md" % (base[:-3], n)); n += 1
+        if os.path.exists(path):
+            os.rename(path, dest)
+            print(dest)
+        with tx(con):
+            remove_row(con, path)
+        return 0
+
+    print("unknown command: " + cmd, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
