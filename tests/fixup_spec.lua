@@ -178,7 +178,7 @@ end
 vim.g.mapleader = "\\"
 local buf = vim.api.nvim_create_buf(true, false)
 vim.api.nvim_set_current_buf(buf)
-check("api 2", 2, F.api)
+check("api 3", 3, F.api)
 F.setup(buf)
 F.setup(buf) -- twice is fine
 local function set(lines)
@@ -206,21 +206,61 @@ vim.cmd("FixJoin")
 check("no '[: :FixJoin on the paragraph only",
   "a|b||c d (4)", get())
 
--- A recorded paste (b:ferry_paste, from flow.on_paste) wins over '[,'],
--- which a write sets to the whole buffer; one out of bounds: paragraph.
+-- A recorded paste (flow.on_paste's extmark) wins over '[,'], which a
+-- write sets to the whole buffer, and follows edits above it.
+local ns = vim.api.nvim_create_namespace(F.PASTE_NS)
+local function rec()
+  local s, e = F.paste_lines(buf)
+  return s and (s .. "," .. e) or tostring(s)
+end
+local function whole() -- '[,'] as a write leaves them
+  vim.api.nvim_buf_set_mark(buf, "[", 1, 0, {})
+  vim.api.nvim_buf_set_mark(buf, "]", vim.api.nvim_buf_line_count(buf), 0, {})
+end
 set({ "keep this", "line broken", "we should", "deploy it." })
-vim.b[buf].ferry_paste = { 3, 4 }
-vim.api.nvim_buf_set_mark(buf, "[", 1, 0, {})
-vim.api.nvim_buf_set_mark(buf, "]", 4, 0, {})
+F.mark_paste(buf, 3, 4)
+whole()
 vim.cmd("FixJoin")
-check("b:ferry_paste wins over '[,']: only the paste joined, the record follows",
-  "keep this|line broken|we should deploy it. (3) 3,3", get() .. " " .. table.concat(vim.b[buf].ferry_paste, ","))
-set({ "a", "b", "", "c", "d" })
-vim.b[buf].ferry_paste = { 4, 9 }
+check("the recorded paste wins over '[,']: only the paste joined, the record follows",
+  "keep this|line broken|we should deploy it. (3) 3,3", get() .. " " .. rec())
+-- Edits above the paste: dd on line 1, then lines put above it.
+set({ "keep this", "line broken", "we should", "deploy it." })
+F.mark_paste(buf, 3, 4)
+vim.api.nvim_win_set_cursor(0, { 1, 0 })
+vim.cmd("normal! dd")
+whole()
+vim.cmd("FixJoin")
+check("dd on line 1, then :FixJoin: only the pasted lines, now 2-3", "line broken|we should deploy it. (2) 2,2",
+  get() .. " " .. rec())
+set({ "uh one", "um so", "we, you know, ship", "it, um, today" })
+F.mark_paste(buf, 3, 4)
+vim.api.nvim_win_set_cursor(0, { 1, 0 })
+vim.cmd("normal! dd")
+whole()
+vim.cmd("FixFillers")
+check("dd on line 1, then :FixFillers: only the pasted lines", "um so|we ship|it today (3) 2,3", get() .. " " .. rec())
+set({ "um top", "we should", "deploy it." })
+F.mark_paste(buf, 2, 3)
+vim.api.nvim_win_set_cursor(0, { 1, 0 })
+vim.cmd("normal! Oline above\rand another")
+vim.api.nvim_buf_set_lines(buf, 0, 0, false, { "um set above" })
+whole()
+check("lines put above: the record moved down", "5,6", rec())
+vim.cmd("FixJoin")
+vim.cmd("FixFillers")
+check("then :FixJoin and :FixFillers act on the pasted lines only",
+  "um set above|line above|and another|um top|we should deploy it. (5) 5,5", get() .. " " .. rec())
+-- The pasted lines deleted: the paragraph at the cursor.
+set({ "a", "b", "", "c", "d", "", "we should", "deploy it." })
+F.mark_paste(buf, 7, 8)
+vim.api.nvim_win_set_cursor(0, { 7, 0 })
+vim.cmd("normal! 2dd")
 vim.api.nvim_win_set_cursor(0, { 4, 0 })
+whole()
+check("pasted lines deleted: the record is gone", "false", rec())
 vim.cmd("FixJoin")
-check("b:ferry_paste out of bounds: the paragraph", "a|b||c d (4)", get())
-vim.b[buf].ferry_paste = nil
+check("then :FixJoin on the paragraph at the cursor", "a|b||c d| (5)", get())
+vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
 
 -- Explicit range.
 set({ "x", "y", "z" })

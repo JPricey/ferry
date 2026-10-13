@@ -18,7 +18,7 @@
 --   <C-s> (n, i), :Dictate              Wispr Flow hands-free
 --   :FixJoin, :FixFillers, <leader>fj, ff, fw, :Corrections
 --                                       fix-ups and the corrections list,
---                                       as in a note (fixup api 2,
+--                                       as in a note (fixup api 3,
 --                                       corrections api 1)
 -- Submit, Cancel and Hide first wait for Flow's last paste when Flow is
 -- recording (flow.finish_then), so the last words land in the file and a
@@ -64,7 +64,8 @@ local M = {}
 -- api 5: fix-ups and :Corrections in the edit buffer.
 -- api 6: show reapplies the buffer's keys after a reload (b:ferry_edit_api);
 -- fix-ups act on the last paste (fixup api 2).
-M.api = 6
+-- api 7: the last paste follows edits above it (fixup api 3).
+M.api = 7
 
 -- The pending edit: { file, done, dir = notes folder or nil, started =
 -- Unix time, buf, tab = edit tab, prev_tab = the tab it came from,
@@ -266,7 +267,7 @@ local function apply_options(buf)
   cmd("Dictate", function() require("ferry.flow").start() end)
   -- Fix-ups and :Corrections, as in a note; a fix-up module that fails to
   -- load costs only its keys.
-  local fok, ferr = pcall(function() current("ferry.fixup", 2).setup(buf) end)
+  local fok, ferr = pcall(function() current("ferry.fixup", 3).setup(buf) end)
   if not fok then alert("ferry: fix-up keys unavailable: " .. tostring(ferr)) end
   vim.api.nvim_buf_create_user_command(buf, "Corrections", function()
     current("ferry.corrections", 1).open({ dir = (M.state.edit or {}).dir })

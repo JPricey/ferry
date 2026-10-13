@@ -833,44 +833,98 @@ os.remove(work .. "/corr.mode")
 
 -- --- fix-ups after the autosave act on the last paste only ----------------
 -- A write sets '[,'] to the whole buffer: the paste's lines are recorded
--- when it lands (flow.on_paste, b:ferry_paste), and the autosave writes
--- with lockmarks. Cmd+V (Neovide's <D-v>) is how Flow's paste arrives.
+-- when it lands (flow.on_paste, an extmark that follows edits above it),
+-- and the autosave writes with lockmarks. Cmd+V (Neovide's <D-v>) is how
+-- Flow's paste arrives.
+local fixup = require("ferry.fixup")
 local autosave_ms = note.autosave_ms
 note.autosave_ms = 50
 show()
 local pbuf = vim.api.nvim_get_current_buf()
 vim.cmd("stopinsert")
-set({ "keep this", "line broken", "" })
-vim.api.nvim_win_set_cursor(0, { 3, 0 })
-clip["+"] = { "we should", "deploy it." }
-vim.api.nvim_feedkeys(vim.keycode("a<D-v><Esc>"), "xt", false)
 local function body() return table.concat(vim.api.nvim_buf_get_lines(pbuf, 0, -1, false), "|") end
 local function marks() return vim.api.nvim_buf_get_mark(pbuf, "[")[1] .. "," .. vim.api.nvim_buf_get_mark(pbuf, "]")[1] end
+local function rec()
+  local a, b = fixup.paste_lines(pbuf)
+  return a and (a .. "," .. b) or tostring(a)
+end
+local function whole() -- '[,'] as a write without lockmarks leaves them
+  vim.api.nvim_buf_set_mark(pbuf, "[", 1, 0, {})
+  vim.api.nvim_buf_set_mark(pbuf, "]", vim.api.nvim_buf_line_count(pbuf), 0, {})
+end
+-- Paste lines at the end of the buffer with <D-v>, as Flow does.
+local function dv(lines)
+  vim.api.nvim_win_set_cursor(0, { vim.api.nvim_buf_line_count(pbuf), 0 })
+  clip["+"] = lines
+  vim.api.nvim_feedkeys(vim.keycode("a<D-v><Esc>"), "xt", false)
+end
+set({ "keep this", "line broken", "" })
+dv({ "we should", "deploy it." })
 check("<D-v> pastes into the note and records its lines", "keep this|line broken|we should|deploy it. 3,4",
-  body() .. " " .. table.concat(vim.b[pbuf].ferry_paste or {}, ","))
+  body() .. " " .. rec())
 vim.api.nvim_exec_autocmds("TextChanged", { buffer = pbuf })
 local npath2 = vim.api.nvim_buf_get_name(pbuf)
 vim.wait(2000, function() return not vim.bo[pbuf].modified and vim.fn.filereadable(npath2) == 1 end, 10)
 vim.wait(200)
 check("past the autosave: written, '[,'] still the paste (lockmarks)", "false we should|deploy it. 3,4",
   tostring(vim.bo[pbuf].modified) .. " " .. table.concat(select(2, store.read(npath2)) or {}, "|"):gsub("^keep this|line broken|", "") .. " " .. marks())
--- As a write without lockmarks leaves them: the record still wins.
-vim.api.nvim_buf_set_mark(pbuf, "[", 1, 0, {})
-vim.api.nvim_buf_set_mark(pbuf, "]", 4, 0, {})
+whole()
 vim.cmd("FixJoin")
 check(":FixJoin with no range after the autosave joins only the pasted lines, the record follows",
-  "keep this|line broken|we should deploy it. 3,3", body() .. " " .. table.concat(vim.b[pbuf].ferry_paste or {}, ","))
-set({ "a", "b", "", "c", "d" })
-vim.b[pbuf].ferry_paste = { 4, 9 }
-vim.api.nvim_win_set_cursor(0, { 4, 0 })
+  "keep this|line broken|we should deploy it. 3,3", body() .. " " .. rec())
+-- Edits above the paste move the record with it.
+set({ "um first", "line broken", "" })
+dv({ "we should", "deploy it, um, today" })
+vim.api.nvim_win_set_cursor(0, { 1, 0 })
+vim.cmd("normal! dd")
+whole()
+vim.cmd("FixFillers")
+check("dd on line 1, then :FixFillers: only the pasted lines", "line broken|we should|deploy it today 2,3",
+  body() .. " " .. rec())
 vim.cmd("FixJoin")
-check("a recorded paste out of bounds: :FixJoin on the paragraph at the cursor", "a|b||c d", body())
+check("then :FixJoin: only the pasted lines", "line broken|we should deploy it today 2,2", body() .. " " .. rec())
+set({ "um first", "line broken", "" })
+dv({ "we should", "deploy it." })
+vim.api.nvim_win_set_cursor(0, { 1, 0 })
+vim.cmd("normal! Oum above\rline broken too")
+whole()
+vim.cmd("FixJoin")
+vim.cmd("FixFillers")
+check("lines put above, then :FixJoin and :FixFillers: only the pasted lines",
+  "um above|line broken too|um first|line broken|we should deploy it. 5,5", body() .. " " .. rec())
+-- The pasted lines deleted: the paragraph at the cursor.
+set({ "a", "b", "", "c", "d", "" })
+dv({ "we should", "deploy it." })
+vim.api.nvim_win_set_cursor(0, { 6, 0 })
+vim.cmd("normal! 2dd")
+vim.api.nvim_win_set_cursor(0, { 4, 0 })
+whole()
+vim.cmd("FixJoin")
+check("pasted lines deleted: :FixJoin on the paragraph at the cursor", "false a|b||c d",
+  rec() .. " " .. body())
 -- A terminal's bracketed paste can arrive in chunks: the record spans them all.
 set({ "keep", "" })
 vim.api.nvim_win_set_cursor(0, { 2, 0 })
 vim.paste({ "one", "two" }, 1); vim.paste({ "", "three" }, 2); vim.paste({ "", "four" }, 3)
-check("a streamed paste records all its lines", "keep|one|two|three|four 2,5",
-  body() .. " " .. table.concat(vim.b[pbuf].ferry_paste or {}, ","))
+check("a streamed paste records all its lines", "keep|one|two|three|four 2,5", body() .. " " .. rec())
+-- A streamed paste into the command line leaves the record alone, even
+-- with '[ (stale, from an earlier change) above it.
+set({ "top", "x", "we should", "deploy it." })
+fixup.mark_paste(pbuf, 3, 4)
+vim.api.nvim_buf_set_mark(pbuf, "[", 1, 0, {})
+vim.api.nvim_buf_set_mark(pbuf, "]", 1, 0, {})
+-- (vim.paste feeds the text to the : line after the mapping; an
+-- incomplete command is dropped once the keys run out.)
+local cmdline = ""
+local cl = vim.api.nvim_create_autocmd("CmdlineChanged", { callback = function() cmdline = vim.fn.getcmdline() end })
+vim.keymap.set("c", "<F9>", function()
+  vim.paste({ "echo" }, 1); vim.paste({ "", "'a'" }, 2); vim.paste({ "", "" }, 3)
+end)
+vim.api.nvim_feedkeys(vim.keycode(":<F9>"), "xt", false)
+vim.keymap.del("c", "<F9>")
+vim.api.nvim_del_autocmd(cl)
+check("a streamed paste on the : line: into it, buffer and record unchanged", "echo top|x|we should|deploy it. 3,4",
+  cmdline .. " " .. body() .. " " .. rec())
 note.autosave_ms = autosave_ms
 
 say(fail == 0 and "note_spec: all ok" or "note_spec: FAILED")

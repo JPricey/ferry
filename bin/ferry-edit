@@ -152,7 +152,7 @@ rexpr() {
 # require("ferry.edit"), repo on the runtimepath (as in ferry-host); a
 # server holding an older module (api below edit_api) reloads it, keeping
 # its state.
-edit_api=6
+edit_api=7
 edit_mod="(function(want) local r = $(luastr "$root"); if not vim.tbl_contains(vim.opt.rtp:get(), r) then vim.opt.rtp:prepend(r) end; local e = require(\"ferry.edit\"); if (e.api or 0) >= want then return e end; package.loaded[\"ferry.edit\"] = nil; local ok, m = pcall(require, \"ferry.edit\"); if not ok then package.loaded[\"ferry.edit\"] = e; return e end; m.state = e.state; return m end)($edit_api)"
 call() { rexpr "luaeval('$edit_mod.$1(_A)', $2)"; } # fn dict -> $reply
 

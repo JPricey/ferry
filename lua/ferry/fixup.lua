@@ -34,19 +34,46 @@
 -- fillers. A missing or unreadable file means the built-ins, no error.
 --
 -- setup(buf) (needs nvim): buffer-local :FixJoin and :FixFillers.
--- With no range they act on the last paste: b:ferry_paste = { first,
--- last } (flow.on_paste records it when the paste lands, since a write,
--- such as the note's autosave, resets '[,'] to the whole buffer); with no
--- record, on '[,'] (the last change); else, or when the record no longer
--- fits the buffer, on the paragraph at the cursor. Maps <leader>fj, ff in
--- normal (default range) and visual (the selection) mode, and <leader>fw
--- cycles the word at the cursor (or the one-line selection) through its
--- group. The list is read on each use, so edits apply at once.
+-- With no range they act on the last paste: an extmark, id 1 in namespace
+-- "ferry_paste" (flow.on_paste sets it when the paste lands, since a write,
+-- such as the note's autosave, resets '[,'] to the whole buffer; it moves
+-- with lines added or deleted above); with no record, on '[,'] (the last
+-- change); else, or when the pasted text was deleted, on the paragraph at
+-- the cursor. Maps <leader>fj, ff in normal (default range) and visual
+-- (the selection) mode, and <leader>fw cycles the word at the cursor (or
+-- the one-line selection) through its group. The list is read on each
+-- use, so edits apply at once.
 local M = {}
 
 -- Bumped when a running server must reload this module. 1: first version.
 -- 2: the default range prefers the recorded paste (b:ferry_paste).
-M.api = 2
+-- 3: the record is flow's extmark (PASTE_NS), so it follows edits above.
+M.api = 3
+
+-- flow.lua's paste record: the extmark with id 1 in this namespace.
+M.PASTE_NS = "ferry_paste"
+
+local function paste_ns() return vim.api.nvim_create_namespace(M.PASTE_NS) end
+
+-- The recorded paste in buf: first, last (1-based lines), or nil with no
+-- record; false when the record is gone (its text deleted: the extmark
+-- collapsed or was invalidated).
+function M.paste_lines(buf)
+  local m = vim.api.nvim_buf_get_extmark_by_id(buf, paste_ns(), 1, { details = true })
+  if not m[1] then return nil end
+  local d = m[3] or {}
+  local er, ec = d.end_row or m[1], d.end_col or m[2]
+  local e = math.min(er + 1, vim.api.nvim_buf_line_count(buf))
+  if d.invalid or er < m[1] or (er == m[1] and ec <= m[2]) or e < m[1] + 1 then return false end
+  return m[1] + 1, e
+end
+
+-- Record lines first..last of buf as the last paste (as flow.on_paste does).
+function M.mark_paste(buf, first, last)
+  local line = vim.api.nvim_buf_get_lines(buf, last - 1, last, false)[1] or ""
+  vim.api.nvim_buf_set_extmark(buf, paste_ns(), first - 1, 0,
+    { id = 1, end_row = last - 1, end_col = #line, invalidate = true })
+end
 
 M.DEFAULT_GROUPS = {
   { "their", "there", "they're" },
@@ -454,8 +481,8 @@ end
 
 -- nvim side ---------------------------------------------------------------
 
--- The default range in buf, and whether it is the recorded paste:
--- b:ferry_paste when it fits the buffer (else the paragraph); with no
+-- The default range in buf, and whether it is the recorded paste: the
+-- record when its text is still there (else the paragraph); with no
 -- record, '[,'] when set and inside the buffer; else the paragraph at the
 -- cursor.
 function M.default_range(buf)
@@ -463,25 +490,22 @@ function M.default_range(buf)
   local function paragraph()
     local row = 1
     if vim.api.nvim_get_current_buf() == buf then row = vim.api.nvim_win_get_cursor(0)[1] end
-    return M.paragraph(vim.api.nvim_buf_get_lines(buf, 0, -1, false), row)
-  end
-  local p = vim.b[buf].ferry_paste
-  if type(p) == "table" then
-    local s, e = tonumber(p[1]), tonumber(p[2])
-    if s and e and s >= 1 and s <= e and e <= n then return s, e, true end
-    local ps, pe = paragraph()
+    local ps, pe = M.paragraph(vim.api.nvim_buf_get_lines(buf, 0, -1, false), row)
     return ps, pe, false
   end
+  local ps, pe = M.paste_lines(buf)
+  if ps then return ps, pe, true end
+  if ps == false then return paragraph() end
   local s = vim.api.nvim_buf_get_mark(buf, "[")[1]
   local e = vim.api.nvim_buf_get_mark(buf, "]")[1]
   if s >= 1 and s <= e and e <= n then return s, e, false end
-  local ps, pe = paragraph()
-  return ps, pe, false
+  return paragraph()
 end
 
 -- Run fn(lines, s, e) over lines s..e of buf (default range when s is nil)
 -- and write back what it returns, only if anything changed. A fix over
--- the recorded paste keeps the record on the lines it became.
+-- the recorded paste moves the record onto the lines it became (none
+-- left: the record goes).
 local function apply(buf, s, e, fn)
   local pasted = false
   if not s then s, e, pasted = M.default_range(buf) end
@@ -489,7 +513,9 @@ local function apply(buf, s, e, fn)
   local new = fn(old, s, e)
   if table.concat(new, "\n") == table.concat(old, "\n") and #new == #old then return false end
   vim.api.nvim_buf_set_lines(buf, s - 1, e, false, new)
-  if pasted then vim.b[buf].ferry_paste = #new > 0 and { s, s + #new - 1 } or nil end
+  if pasted then
+    if #new > 0 then M.mark_paste(buf, s, s + #new - 1) else vim.api.nvim_buf_del_extmark(buf, paste_ns(), 1) end
+  end
   return true
 end
 
