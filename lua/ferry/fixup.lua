@@ -63,7 +63,10 @@ function M.paste_lines(buf)
   if not m[1] then return nil end
   local d = m[3] or {}
   local er, ec = d.end_row or m[1], d.end_col or m[2]
-  local e = math.min(er + 1, vim.api.nvim_buf_line_count(buf))
+  -- An end at col 0 of a later row means the paste's last line was deleted
+  -- and the end slid onto the next line, which is not part of the paste.
+  local e = (ec == 0 and er > m[1]) and er or er + 1
+  e = math.min(e, vim.api.nvim_buf_line_count(buf))
   if d.invalid or er < m[1] or (er == m[1] and ec <= m[2]) or e < m[1] + 1 then return false end
   return m[1] + 1, e
 end

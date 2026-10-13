@@ -250,6 +250,17 @@ vim.cmd("FixJoin")
 vim.cmd("FixFillers")
 check("then :FixJoin and :FixFillers act on the pasted lines only",
   "um set above|line above|and another|um top|we should deploy it. (5) 5,5", get() .. " " .. rec())
+-- The paste's last line deleted with text right below it: that text is not
+-- pulled into the record.
+set({ "intro", "p one", "p two", "p three", "my typed line" })
+F.mark_paste(buf, 2, 4)
+vim.api.nvim_win_set_cursor(0, { 4, 0 })
+vim.cmd("normal! dd")
+whole()
+check("last pasted line deleted: the record ends at the line above", "2,3", rec())
+vim.cmd("FixJoin")
+check("then :FixJoin leaves the typed line below alone",
+  "intro|p one p two|my typed line (3)", get())
 -- The pasted lines deleted: the paragraph at the cursor.
 set({ "a", "b", "", "c", "d", "", "we should", "deploy it." })
 F.mark_paste(buf, 7, 8)
