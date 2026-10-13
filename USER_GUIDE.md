@@ -94,7 +94,16 @@ the wait.
 
 ## Fix-ups
 
-TODO (V4): the fix-up keys and `:Corrections`.
+In a note and in a Ctrl-G edit, normal and visual mode only. With no range or selection they act on the last thing pasted (Flow's text or Cmd+V), else on the paragraph at the cursor.
+
+| Key | What it does |
+| --- | --- |
+| `<leader>fj` (`:FixJoin`) | Join lines Flow broke mid-sentence. |
+| `<leader>ff` (`:FixFillers`) | Strip fillers (um, uh, you know). Shadows Telescope's `<leader>ff` in ferry buffers only. |
+| `<leader>fw` | Cycle the word under the cursor through its homophones (their/there/they're). |
+| `:Corrections` | Split listing words you keep fixing after Flow (`3× cube control → kubectl`). In it: `y` copies the right-hand word, `o` opens Wispr Flow to add it to its Dictionary, `q` closes. ferry never writes Flow's data. |
+
+Word lists: `~/.config/ferry/fixups.txt` (or `$FERRY_FIXUPS`): one homophone group per line, `filler: …` lines for fillers; group lines replace the built-in groups, `filler:` lines the built-in fillers.
 
 ## Commands
 
