@@ -41,14 +41,16 @@
 -- change); else, or when the pasted text was deleted, on the paragraph at
 -- the cursor. Maps <leader>fj, ff in normal (default range) and visual
 -- (the selection) mode, and <leader>fw cycles the word at the cursor (or
--- the one-line selection) through its group. The list is read on each
+-- the one-line selection) through its group. <leader>fc runs the buffer's
+-- :Corrections (defined by note.lua and edit.lua). The list is read on each
 -- use, so edits apply at once.
 local M = {}
 
 -- Bumped when a running server must reload this module. 1: first version.
 -- 2: the default range prefers the recorded paste (b:ferry_paste).
 -- 3: the record is flow's extmark (PASTE_NS), so it follows edits above.
-M.api = 3
+-- 4: <leader>fc runs :Corrections.
+M.api = 4
 
 -- flow.lua's paste record: the extmark with id 1 in this namespace.
 M.PASTE_NS = "ferry_paste"
@@ -587,6 +589,8 @@ function M.setup(buf)
     { buffer = buf, silent = true, desc = "ferry cycle homophone" })
   vim.keymap.set("x", "<leader>fw", function() cycle_visual(buf) end,
     { buffer = buf, silent = true, desc = "ferry cycle homophone" })
+  vim.keymap.set("n", "<leader>fc", "<Cmd>Corrections<CR>",
+    { buffer = buf, silent = true, desc = "ferry corrections" })
   return buf
 end
 

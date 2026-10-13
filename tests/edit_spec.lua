@@ -255,8 +255,8 @@ edit.api = 2
 local shown = note.show({ target = "com.other", window = "7", seed = "" })
 local edit3 = package.loaded["ferry.edit"]
 check("show with an api-2 edit module and an edit pending: reloaded, edit kept and shown",
-  file .. " 7 true hot", shown .. " " .. tostring(edit3.api) .. " " .. tostring(edit3.pending()) .. " " .. lines())
-check("that show gives the pending edit the keys the new module adds", "<Cmd>FixJoin<CR> 2 7",
+  file .. " 8 true hot", shown .. " " .. tostring(edit3.api) .. " " .. tostring(edit3.pending()) .. " " .. lines())
+check("that show gives the pending edit the keys the new module adds", "<Cmd>FixJoin<CR> 2 8",
   vim.fn.maparg("<leader>fj", "n") .. " " .. vim.fn.exists(":FixJoin") .. " " .. tostring(vim.b[hbuf].ferry_edit_api))
 check("release --force with Flow idle in the edit: forced, waiting on the edit buffer",
   "forced true", note.release({ force = "1" }) .. " " .. tostring(flow.state.waiting

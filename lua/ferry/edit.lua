@@ -65,7 +65,8 @@ local M = {}
 -- api 6: show reapplies the buffer's keys after a reload (b:ferry_edit_api);
 -- fix-ups act on the last paste (fixup api 2).
 -- api 7: the last paste follows edits above it (fixup api 3).
-M.api = 7
+-- api 8: <leader>fc runs :Corrections (fixup api 4).
+M.api = 8
 
 -- The pending edit: { file, done, dir = notes folder or nil, started =
 -- Unix time, buf, tab = edit tab, prev_tab = the tab it came from,
@@ -267,7 +268,7 @@ local function apply_options(buf)
   cmd("Dictate", function() require("ferry.flow").start() end)
   -- Fix-ups and :Corrections, as in a note; a fix-up module that fails to
   -- load costs only its keys.
-  local fok, ferr = pcall(function() current("ferry.fixup", 3).setup(buf) end)
+  local fok, ferr = pcall(function() current("ferry.fixup", 4).setup(buf) end)
   if not fok then alert("ferry: fix-up keys unavailable: " .. tostring(ferr)) end
   vim.api.nvim_buf_create_user_command(buf, "Corrections", function()
     current("ferry.corrections", 1).open({ dir = (M.state.edit or {}).dir })

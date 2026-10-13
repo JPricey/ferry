@@ -107,7 +107,8 @@ local function say(msg, level) require("ferry.notice").notify(msg, level) end
 -- api 2); the autosave write keeps '[,'] (lockmarks).
 -- 21: the paste record follows edits above it (flow api 8, fixup api 3,
 -- edit api 7).
-M.api = 21
+-- 22: <leader>fc runs :Corrections (fixup api 4, edit api 8).
+M.api = 22
 
 -- history api 4: the browser on the notes index (open, send, pin, ...,
 -- / search; opening syncs); 5: one-line notices; 6: the open note listed,
@@ -646,7 +647,7 @@ M.host = M.default_host
 -- next show (apply_options runs on every show). A module that fails to
 -- load costs its keys, never the show: one notice.
 local function fix_keys(buf)
-  local ok, err = pcall(function() current("ferry.fixup", 3).setup(buf) end)
+  local ok, err = pcall(function() current("ferry.fixup", 4).setup(buf) end)
   if not ok and not M.state.fixup_failed then
     M.state.fixup_failed = true
     say("ferry: fix-up keys unavailable: " .. tostring(err), vim.log.levels.WARN)
@@ -878,7 +879,7 @@ local function on(v) return v ~= nil and v ~= "" and v ~= "0" and v ~= false and
 -- already pending the keys it lacks (fix-ups, fixup api 3).
 local function pending_edit()
   if not package.loaded["ferry.edit"] then return nil end
-  local e = current("ferry.edit", 7)
+  local e = current("ferry.edit", 8)
   if (e.api or 0) >= 3 and e.pending() then return e end
   return nil
 end

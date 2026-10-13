@@ -178,7 +178,7 @@ end
 vim.g.mapleader = "\\"
 local buf = vim.api.nvim_create_buf(true, false)
 vim.api.nvim_set_current_buf(buf)
-check("api 3", 3, F.api)
+check("api 4", 4, F.api)
 F.setup(buf)
 F.setup(buf) -- twice is fine
 local function set(lines)
